@@ -1,20 +1,19 @@
 <template>
   <UDrawer
-    :active-snap-point="drawerActiveSnapPoint"
+    :active-snap-point="drawerRequestedSnapPoint"
     :direction="drawerDirection"
-    :handle="isMobileDrawer"
+    :handle="false"
     :handle-only="isMobileDrawer"
     :snap-points="drawerSnapPoints"
     :modal="false"
     :overlay="false"
     :dismissible="isMobileDrawer"
+    :content="drawerContentProps"
     :open="props.open"
     :ui="{
       content: drawerContentClass,
     }"
-    @drag="handleDrawerDrag"
-    @release="handleDrawerRelease"
-    @update:open="handleDrawerOpenUpdate"
+    @update:open="emit('update:open', $event)"
     @update:active-snap-point="drawerRequestedSnapPoint = $event"
   >
     <template #content>
@@ -23,8 +22,24 @@
         :class="['relative flex min-h-0 w-full flex-col', drawerPanelClass]"
         :style="drawerPanelStyle"
       >
-        <div class="grid min-h-14 items-center p-4 pe-14">
-          <div>
+        <!-- Custom handle that spans header to make dragging more reliable -->
+        <div
+          :class="[
+            'relative grid min-h-14 items-center p-4 pe-14',
+            isMobileDrawer ? 'cursor-grab touch-none select-none active:cursor-grabbing' : '',
+          ]"
+        >
+          <DrawerHandle
+            v-if="isMobileDrawer"
+            class="absolute inset-0 z-10 !m-0 !h-auto !w-auto !rounded-none !bg-transparent !opacity-100 !touch-none"
+            prevent-cycle
+          />
+          <div
+            v-if="isMobileDrawer"
+            class="pointer-events-none absolute left-1/2 top-2 z-20 h-1.5 w-10 -translate-x-1/2 rounded-full bg-neutral-300 dark:bg-neutral-600"
+          />
+
+          <div :class="['relative z-20', isMobileDrawer ? 'pointer-events-none' : '']">
             <h1 class="truncate font-semibold">{{ title }}</h1>
           </div>
           <div>
@@ -79,8 +94,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
+import { DrawerHandle } from 'vaul-vue'
 import type { GeoJSONFeature, Map as MapLibreMap } from 'maplibre-gl'
 import type { Trip } from 'valhalla_client'
 import type {
@@ -114,8 +130,8 @@ const emit = defineEmits<{
   'focus-trip': [value: Trip]
 }>()
 
-const MOBILE_DRAWER_INITIAL_SNAP = 0.35
-const MOBILE_DRAWER_SNAP_POINTS = [MOBILE_DRAWER_INITIAL_SNAP, 0.7]
+const MOBILE_DRAWER_INITIAL_SNAP = 0.4
+const MOBILE_DRAWER_SNAP_POINTS = [MOBILE_DRAWER_INITIAL_SNAP, 0.9]
 
 const drawerContent = ref<HTMLElement | null>(null)
 const isMobileDrawer = useMediaQuery(
@@ -126,10 +142,7 @@ const drawerSnapPoints = computed(() =>
   isMobileDrawer.value ? MOBILE_DRAWER_SNAP_POINTS : undefined,
 )
 const drawerRequestedSnapPoint = ref<number | string>(MOBILE_DRAWER_INITIAL_SNAP)
-const drawerWasDragged = ref(false)
-const drawerActiveSnapPoint = computed(() =>
-  isMobileDrawer.value ? drawerRequestedSnapPoint.value : undefined,
-)
+
 const drawerContentClass = computed(() =>
   isMobileDrawer.value ? 'max-h-[100dvh]' : '!left-0 w-125 max-w-[100vw]',
 )
@@ -142,6 +155,20 @@ const drawerPanelStyle = computed(() =>
     : undefined,
 )
 
+// prevent outside clicks from dismissing drawer, while allow dismissins drawer on
+// downwards drag
+const drawerContentProps = {
+  onEscapeKeyDown: (event: Event) => {
+    event.preventDefault()
+  },
+  onInteractOutside: (event: Event) => {
+    event.preventDefault()
+  },
+  onPointerDownOutside: (event: Event) => {
+    event.preventDefault()
+  },
+}
+
 const title = computed(() => {
   switch (props.active) {
     case 'details':
@@ -151,21 +178,6 @@ const title = computed(() => {
     case 'directions':
     default:
       return 'Directions'
-  }
-})
-
-watch(
-  () => props.open,
-  (open) => {
-    if (open && isMobileDrawer.value) {
-      drawerRequestedSnapPoint.value = MOBILE_DRAWER_INITIAL_SNAP
-    }
-  },
-)
-
-watch(isMobileDrawer, (mobile) => {
-  if (mobile) {
-    drawerRequestedSnapPoint.value = MOBILE_DRAWER_INITIAL_SNAP
   }
 })
 
@@ -182,29 +194,6 @@ const getSnapPointViewportHeight = (snapPoint: number | string) => {
     0,
     Math.min(100, snapPointText.endsWith('%') ? parsedSnapPoint : parsedSnapPoint * 100),
   )
-}
-
-const handleDrawerDrag = () => {
-  if (isMobileDrawer.value) {
-    drawerWasDragged.value = true
-  }
-}
-
-const handleDrawerRelease = () => {
-  window.setTimeout(() => {
-    drawerWasDragged.value = false
-  })
-}
-
-const handleDrawerOpenUpdate = (open: boolean) => {
-  if (open) {
-    emit('update:open', true)
-    return
-  }
-
-  if (isMobileDrawer.value && drawerWasDragged.value) {
-    emit('update:open', false)
-  }
 }
 
 const getCoveredWidth = () => {
