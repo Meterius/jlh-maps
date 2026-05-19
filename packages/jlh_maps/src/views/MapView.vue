@@ -125,7 +125,14 @@
 import { MglMap } from '@indoorequal/vue-maplibre-gl'
 import { computed, onWatcherCleanup, ref, shallowRef, watch, watchEffect } from 'vue'
 import { onLongPress } from '@vueuse/core'
-import { GeolocateControl, GlobeControl, NavigationControl, type MapMouseEvent } from 'maplibre-gl'
+import {
+  GeolocateControl,
+  GlobeControl,
+  NavigationControl,
+  type DragPanOptions,
+  type Map as MapLibreMap,
+  type MapMouseEvent,
+} from 'maplibre-gl'
 import { center } from '@turf/turf'
 import type { FeatureCollection } from 'geojson'
 import {
@@ -421,6 +428,69 @@ const useRaster = false
 
 const enableTrees = false
 
+const DESKTOP_DRAG_PAN_OPTIONS: DragPanOptions = {
+  linearity: 0.35,
+  maxSpeed: 3200,
+  deceleration: 6000,
+  easing: lateBrakeDragPanEasing,
+}
+
+const MOBILE_DRAG_PAN_OPTIONS: DragPanOptions = {
+  linearity: 0.7,
+  maxSpeed: 4800,
+  deceleration: 2000,
+  easing: gradualFadeDragPanEasing,
+}
+
+function lateBrakeDragPanEasing(t: number) {
+  const x = clampUnit(t)
+
+  return (4 * x - x ** 4) / 3
+}
+
+function gradualFadeDragPanEasing(t: number) {
+  const x = clampUnit(t)
+
+  return 1 - (1 - x) ** 2
+}
+
+function clampUnit(value: number) {
+  return Math.max(0, Math.min(1, value))
+}
+
+function registerDragPanInertiaProfiles(map: MapLibreMap) {
+  const canvasContainer = map.getCanvasContainer()
+  const useDesktopProfile = () => map.dragPan.enable(DESKTOP_DRAG_PAN_OPTIONS)
+  const useMobileProfile = () => map.dragPan.enable(MOBILE_DRAG_PAN_OPTIONS)
+  const usePointerProfile = (event: PointerEvent) => {
+    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+      useMobileProfile()
+      return
+    }
+
+    useDesktopProfile()
+  }
+
+  if (window.matchMedia('(pointer: coarse)').matches) {
+    useMobileProfile()
+  } else {
+    useDesktopProfile()
+  }
+
+  canvasContainer.addEventListener('pointerdown', usePointerProfile, { capture: true })
+  canvasContainer.addEventListener('mousedown', useDesktopProfile, { capture: true })
+  canvasContainer.addEventListener('touchstart', useMobileProfile, {
+    capture: true,
+    passive: true,
+  })
+
+  return () => {
+    canvasContainer.removeEventListener('pointerdown', usePointerProfile, { capture: true })
+    canvasContainer.removeEventListener('mousedown', useDesktopProfile, { capture: true })
+    canvasContainer.removeEventListener('touchstart', useMobileProfile, { capture: true })
+  }
+}
+
 // Controls
 
 watchDefinedOnce(
@@ -444,6 +514,7 @@ watchDefinedOnce(
   },
   ({ map }) => {
     const onCleanupCallbacks: (() => void)[] = []
+    onCleanupCallbacks.push(registerDragPanInertiaProfiles(map))
     onCleanupCallbacks.push(registerTouchContextMenu(map))
 
     if (useRaster) {
