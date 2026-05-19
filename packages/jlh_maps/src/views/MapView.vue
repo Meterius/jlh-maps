@@ -229,6 +229,12 @@ const onMapContextMenu = ({ event }: MglMapMouseEvent) => {
 const setDirectionStop = (idx: number) => {
   if (!contextMenuLocation.value) return
 
+  if (slideoverOpen.value !== SlideoverTab.Directions) {
+    directionStops.value = idx === 0 ? [contextMenuLocation.value, null] : [null, contextMenuLocation.value]
+    slideoverOpen.value = SlideoverTab.Directions
+    return
+  }
+
   const stops = [...directionStops.value]
   stops[idx] = contextMenuLocation.value
 

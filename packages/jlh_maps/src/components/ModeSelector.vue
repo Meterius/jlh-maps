@@ -27,7 +27,7 @@
       </UButton>
     </UCard>
 
-    <div class="relative z-0 -mt-px flex">
+    <div class="relative z-0 -mt-px flex h-6 overflow-hidden">
       <div
         v-for="option in props.options"
         :key="'badge-' + option.value"
