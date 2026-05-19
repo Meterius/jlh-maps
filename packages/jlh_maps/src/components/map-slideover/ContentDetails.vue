@@ -1,11 +1,7 @@
 <template>
-  <div class="grid overflow-auto overflow-x-hidden w-full">
-    <div class="row p-4">
-      <h1 class="font-semibold">{{ title }}</h1>
-    </div>
+  <div class="grid grid-rows-[auto_1fr] w-full overflow-auto overflow-x-hidden">
     <div v-if="props.osm_id" class="row">
-      <USeparator />
-      <div class="row p-4">
+      <div class="p-4">
         <h5 class="pb-2">OSM Tags</h5>
         <UTable
           sticky
@@ -17,13 +13,13 @@
             base: 'overflow-clip',
             tbody: 'isolate',
           }"
-          class="flex-1 border border-default rounded-md w-100 max-h-[400px]"
+          class="max-h-[400px] w-full min-w-0 flex-1 rounded-md border border-default"
         ></UTable>
       </div>
-    </div>
-    <div class="row">
       <USeparator />
-      <div class="row p-4">
+    </div>
+    <div>
+      <div class="p-4">
         <h5 class="pb-2">Feature Properties</h5>
         <UTable
           sticky
@@ -34,7 +30,7 @@
             base: 'overflow-clip',
             tbody: 'isolate',
           }"
-          class="flex-1 border border-default rounded-md w-100 max-h-[400px]"
+          class="max-h-[400px] w-full min-w-0 flex-1 rounded-md border border-default"
         ></UTable>
       </div>
     </div>
@@ -52,10 +48,6 @@ const props = defineProps<{
   osm_id?: OsmId
   feature?: GeoJSONFeature
 }>()
-
-const title = computed(() => {
-  return props.feature?.properties?.name ?? 'Location Details'
-})
 
 const loadingOsmData = ref(false)
 
@@ -77,5 +69,3 @@ const tagTableData = computed(() => {
   return Object.entries(osmData.value?.tags ?? {}).map(([key, value]) => ({ key, value }))
 })
 </script>
-
-<style scoped></style>

@@ -1,10 +1,6 @@
 <template>
-  <div class="grid overflow-auto overflow-x-hidden w-full">
-    <div class="row p-4">
-      <h1 class="font-semibold">Map Settings</h1>
-    </div>
+  <div class="grid w-full overflow-auto overflow-x-hidden">
     <div class="row">
-      <USeparator />
       <div class="row p-4">
         <h5 class="pb-2">Debug</h5>
         <div class="grid gap-2">
@@ -84,8 +80,8 @@
           :nested="false"
           :unmount-on-hide="false"
           :items="layerItems"
+          class="max-h-[400px] w-full min-w-0 overflow-auto rounded-md border border-default"
           @select="$event.preventDefault()"
-          class="border border-default rounded-md w-100 max-h-[400px] overflow-auto"
         />
       </div>
     </div>

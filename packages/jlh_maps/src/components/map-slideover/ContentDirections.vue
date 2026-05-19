@@ -1,10 +1,6 @@
 <template>
-  <div class="grid overflow-auto overflow-x-hidden w-full">
-    <div class="p-4">
-      <h1 class="font-semibold">Directions</h1>
-    </div>
+  <div class="grid w-full overflow-auto overflow-x-hidden">
     <div class="grid min-h-0">
-      <USeparator />
       <div class="grid content-start gap-3 p-4">
         <ModeSelector
           v-model="routeMode"

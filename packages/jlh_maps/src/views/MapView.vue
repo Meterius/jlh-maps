@@ -98,63 +98,33 @@
       ></div>
     </UContextMenu>
 
-    <USlideover
-      side="left"
-      :modal="false"
-      :overlay="false"
-      :dismissible="false"
+    <MapSlideover
+      ref="mapSlideover"
       :open="slideoverOpen !== null"
+      :active="slideoverOpen"
+      :direction-stops="directionStops"
+      :details-osm-id="selection[0]?.osm_id"
+      :details-feature="selection[0]?.feature"
+      :map="mapInstance.map"
+      :bevy-settings="mapViewSettings"
+      :bevy-camera-settings="mapViewCameraSettings"
+      @update:direction-stops="directionStops = $event"
+      @update:trip-primary="directionsTripPrimary = $event"
+      @update:trip-alternates="directionsTripAlternates = $event"
+      @focus-trip="focusTrip"
       @update:open="
         (value: boolean) => {
           if (!value) onSlideoverClose()
         }
       "
-    >
-      <template #content>
-        <div ref="slideoverContent" class="relative h-full">
-          <UButton
-            class="absolute right-3 top-3 z-10 rounded-full cursor-pointer"
-            icon="material-symbols:close-rounded"
-            title="Close"
-            aria-label="Close"
-            variant="ghost"
-            color="neutral"
-            size="md"
-            square
-            :ui="{ leadingIcon: 'size-6' }"
-            @click="onSlideoverClose"
-          />
-
-          <map-directions
-            v-show="slideoverOpen === SlideoverTab.Directions"
-            v-model:stops="directionStops"
-            @update:trip-primary="directionsTripPrimary = $event"
-            @update:trip-alternates="directionsTripAlternates = $event"
-            @focus-trip="focusTrip"
-          />
-
-          <map-details
-            v-show="slideoverOpen === SlideoverTab.Details"
-            :osm_id="selection[0]?.osm_id"
-            :feature="selection[0]?.feature"
-          />
-
-          <map-settings
-            v-if="mapInstance.map"
-            v-show="slideoverOpen === SlideoverTab.Settings"
-            :map="mapInstance.map"
-            :bevy-settings="mapViewSettings"
-            :bevy-camera-settings="mapViewCameraSettings"
-          />
-        </div>
-      </template>
-    </USlideover>
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { MglMap } from '@indoorequal/vue-maplibre-gl'
 import { computed, onWatcherCleanup, ref, shallowRef, watch, watchEffect } from 'vue'
+import { onLongPress } from '@vueuse/core'
 import { GeolocateControl, GlobeControl, NavigationControl, type MapMouseEvent } from 'maplibre-gl'
 import { center } from '@turf/turf'
 import type { FeatureCollection } from 'geojson'
@@ -162,15 +132,13 @@ import {
   TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL,
   TILESERVER_RASTER_SEN2_TILEJSON_URL,
 } from '@/external/endpoints.ts'
-import MapDetails from '@/components/MapDetails.vue'
-import MapSettings from '@/components/MapSettings.vue'
 import { TreeMeshLayer } from '../maplibre-layers/tree-mesh-layer.ts'
 import { makeUniqueMapKey, useMapExtended, useMapSelection } from '@/composables/maplibre.ts'
 import { watchDefinedOnce } from '@/composables/helper.ts'
 import { useMaplibreGlJsIntegration } from '@/composables/bevy-maplibre-integration.ts'
 import { useBevy } from '@/composables/bevy.ts'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
-import MapDirections from '@/components/MapDirections.vue'
+import MapSlideover, { type MapSlideoverTab } from '@/components/map-slideover/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
 import type { ContextMenuItem } from '@nuxt/ui'
 import type { Trip } from 'valhalla_client'
@@ -210,15 +178,22 @@ type MglMapMouseEvent = {
   event: MapMouseEvent
 }
 
-const onMapContextMenu = ({ event }: MglMapMouseEvent) => {
-  event.preventDefault()
-  event.originalEvent.preventDefault()
-
+const openContextMenu = ({
+  lat,
+  lng,
+  clientX,
+  clientY,
+}: {
+  lat: number
+  lng: number
+  clientX: number
+  clientY: number
+}) => {
   contextMenuLocation.value = {
     type: GeoLocationType.Coords,
     coords: {
-      lat: event.lngLat.lat,
-      lng: event.lngLat.lng,
+      lat,
+      lng,
     },
   }
 
@@ -226,10 +201,22 @@ const onMapContextMenu = ({ event }: MglMapMouseEvent) => {
     new MouseEvent('contextmenu', {
       bubbles: true,
       cancelable: true,
-      clientX: event.originalEvent.clientX,
-      clientY: event.originalEvent.clientY,
+      clientX,
+      clientY,
     }),
   )
+}
+
+const onMapContextMenu = ({ event }: MglMapMouseEvent) => {
+  event.preventDefault()
+  event.originalEvent.preventDefault()
+
+  openContextMenu({
+    lat: event.lngLat.lat,
+    lng: event.lngLat.lng,
+    clientX: event.originalEvent.clientX,
+    clientY: event.originalEvent.clientY,
+  })
 }
 
 const setDirectionStop = (idx: number) => {
@@ -278,16 +265,78 @@ const contextMenuItems = computed((): ContextMenuItem[] => [
   },
 ])
 
-// Slideover
+const registerTouchContextMenu = (map: NonNullable<typeof mapInstance.map>) => {
+  const canvas = map.getCanvas()
 
-enum SlideoverTab {
-  Details,
-  Settings,
-  Directions,
+  const cleanupLongPress = onLongPress(
+    canvas,
+    (event) => {
+      if (event.pointerType !== 'touch' || !event.isPrimary) return
+
+      event.preventDefault()
+
+      // prevent pointer release after long press from immediately closing the context menu,
+      // which must handle both the touch and pointer events fired on release,
+      // note: not great, works fine for now, but has unhandled edge cases which for pointerup is fine
+      // as it only relates to the original pointerId but the touch events cannot be properly identified and may
+      // subsequently incorrectly block input (with a fallback solution of a 5s timer to automatically release the listeners)
+
+      const pointerId = event.pointerId
+      const onPointerUp = (event: PointerEvent) => {
+        if (event.pointerId === pointerId) {
+          event.preventDefault()
+          document.removeEventListener('pointerup', onPointerUp, true)
+        }
+      }
+
+      const onTouchEnd = (event: TouchEvent) => {
+        event.preventDefault()
+        document.removeEventListener('touchend', onTouchEnd, true)
+      }
+
+      document.addEventListener('pointerup', onPointerUp, true)
+      document.addEventListener('touchend', onTouchEnd, true)
+      setTimeout(() => {
+        document.removeEventListener('pointerup', onPointerUp, true)
+        document.removeEventListener('touchend', onTouchEnd, true)
+      }, 5000)
+
+      //
+
+      const canvasBounds = canvas.getBoundingClientRect()
+      const lngLat = map.unproject([
+        event.clientX - canvasBounds.left,
+        event.clientY - canvasBounds.top,
+      ])
+
+      openContextMenu({
+        lat: lngLat.lat,
+        lng: lngLat.lng,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      })
+    },
+    {
+      delay: 700,
+      distanceThreshold: 12,
+    },
+  )
+
+  return () => {
+    cleanupLongPress()
+  }
 }
 
-const slideoverOpen = ref<SlideoverTab | null>(null)
-const slideoverContent = ref<HTMLElement | null>(null)
+// Slideover
+
+const SlideoverTab = {
+  Details: 'details',
+  Settings: 'settings',
+  Directions: 'directions',
+} as const satisfies Record<string, MapSlideoverTab>
+
+const slideoverOpen = ref<MapSlideoverTab | null>(null)
+const mapSlideover = ref<InstanceType<typeof MapSlideover> | null>(null)
 
 const onSlideoverClose = () => {
   switch (slideoverOpen.value) {
@@ -312,25 +361,6 @@ const directionsLayers = useDirectionsLayers({
   visible: computed(() => slideoverOpen.value === SlideoverTab.Directions),
 })
 
-const getSlideoverCoveredWidth = () => {
-  if (slideoverOpen.value !== SlideoverTab.Directions) return 0
-
-  const rect = slideoverContent.value?.getBoundingClientRect()
-  return rect ? Math.max(0, rect.right) : 0
-}
-
-const getRouteFitPadding = () => {
-  const basePadding = 80
-  const slideoverPadding = getSlideoverCoveredWidth()
-
-  return {
-    top: basePadding,
-    right: basePadding,
-    bottom: basePadding,
-    left: slideoverPadding > 0 ? Math.ceil(slideoverPadding + 32) : basePadding,
-  }
-}
-
 const focusTrip = (trip: Trip) => {
   const map = mapInstance.map
   if (!map) return
@@ -339,7 +369,7 @@ const focusTrip = (trip: Trip) => {
   if (!bounds) return
 
   map.fitBounds(bounds, {
-    padding: getRouteFitPadding(),
+    padding: mapSlideover.value?.getRouteFitPadding() ?? 80,
     maxZoom: 17,
     duration: 700,
   })
@@ -414,6 +444,7 @@ watchDefinedOnce(
   },
   ({ map }) => {
     const onCleanupCallbacks: (() => void)[] = []
+    onCleanupCallbacks.push(registerTouchContextMenu(map))
 
     if (useRaster) {
       map.addSource('raster-sen2', {
