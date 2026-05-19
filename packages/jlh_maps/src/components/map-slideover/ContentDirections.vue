@@ -5,6 +5,7 @@
         <ModeSelector
           v-model="routeMode"
           :options="routeModeOptions"
+          enable-sub-labels
           aria-label="Travel mode"
           class="pb-2"
         />

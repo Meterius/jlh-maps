@@ -94,8 +94,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useMediaQuery } from '@vueuse/core'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { DrawerHandle } from 'vaul-vue'
 import type { GeoJSONFeature, Map as MapLibreMap } from 'maplibre-gl'
 import type { Trip } from 'valhalla_client'
@@ -127,6 +127,8 @@ const emit = defineEmits<{
   'update:direction-stops': [value: (GeoLocation | null)[]]
   'update:trip-primary': [value: Trip | null]
   'update:trip-alternates': [value: Trip[]]
+  'update:drawer-size': [value: { width: number; height: number }]
+  'update:drawer-direction': [value: 'left' | 'right' | 'top' | 'bottom']
   'focus-trip': [value: Trip]
 }>()
 
@@ -134,18 +136,25 @@ const MOBILE_DRAWER_INITIAL_SNAP = 0.4
 const MOBILE_DRAWER_SNAP_POINTS = [MOBILE_DRAWER_INITIAL_SNAP, 0.9]
 
 const drawerContent = ref<HTMLElement | null>(null)
+
 const isMobileDrawer = useMediaQuery(
   '(max-width: 767px), (pointer: coarse) and (max-height: 600px)',
 )
+
 const drawerDirection = computed(() => (isMobileDrawer.value ? 'bottom' : 'left'))
+
+watch(drawerDirection, (value) => emit('update:drawer-direction', value), { immediate: true })
+
 const drawerSnapPoints = computed(() =>
   isMobileDrawer.value ? MOBILE_DRAWER_SNAP_POINTS : undefined,
 )
+
 const drawerRequestedSnapPoint = ref<number | string>(MOBILE_DRAWER_INITIAL_SNAP)
 
 const drawerContentClass = computed(() =>
   isMobileDrawer.value ? 'max-h-[100dvh]' : '!left-0 w-125 max-w-[100vw]',
 )
+
 const drawerPanelClass = computed(() => (isMobileDrawer.value ? '' : 'h-full'))
 const drawerPanelStyle = computed(() =>
   isMobileDrawer.value
@@ -181,6 +190,8 @@ const title = computed(() => {
   }
 })
 
+//
+
 const getSnapPointViewportHeight = (snapPoint: number | string) => {
   if (typeof snapPoint === 'number' && Number.isFinite(snapPoint)) {
     return Math.max(0, Math.min(100, snapPoint * 100))
@@ -196,11 +207,17 @@ const getSnapPointViewportHeight = (snapPoint: number | string) => {
   )
 }
 
+const getDrawerRootRect = () => {
+  if (!props.open) return undefined
+
+  return drawerContent.value?.getBoundingClientRect()
+}
+
 const getCoveredWidth = () => {
   if (drawerDirection.value !== 'left') return 0
   if (props.active !== 'directions') return 0
 
-  const rect = drawerContent.value?.getBoundingClientRect()
+  const rect = getDrawerRootRect()
   return rect ? Math.max(0, rect.right) : 0
 }
 
@@ -208,9 +225,28 @@ const getCoveredHeight = () => {
   if (drawerDirection.value !== 'bottom') return 0
   if (props.active !== 'directions') return 0
 
-  const rect = drawerContent.value?.getBoundingClientRect()
+  const rect = getDrawerRootRect()
   return rect ? Math.max(0, window.innerHeight - rect.top) : 0
 }
+
+const emitSlideoverSize = () => {
+  const rect = getDrawerRootRect()
+
+  emit('update:drawer-size', {
+    width: rect?.width ?? 0,
+    height: rect?.height ?? 0,
+  })
+}
+
+useResizeObserver(drawerContent, emitSlideoverSize)
+
+watch(
+  [() => props.open, drawerDirection, drawerRequestedSnapPoint],
+  () => {
+    nextTick(emitSlideoverSize)
+  },
+  { immediate: true },
+)
 
 const getRouteFitPadding = () => {
   const basePadding = 80

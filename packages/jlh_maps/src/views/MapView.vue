@@ -47,23 +47,6 @@
           <button
             class="map-custom-control"
             type="button"
-            title="Toggle terrain"
-            aria-label="Toggle terrain"
-            :aria-pressed="terrainEnabled"
-            @click="terrainEnabled = !terrainEnabled"
-          >
-            <UIcon
-              name="material-symbols:elevation-outline-rounded"
-              :class="['size-6', ...[terrainEnabled ? ['text-secondary'] : []]]"
-              style="margin: auto"
-            />
-          </button>
-        </mgl-custom-control>
-
-        <mgl-custom-control position="top-right">
-          <button
-            class="map-custom-control"
-            type="button"
             title="Show bevy"
             aria-label="Show bevy"
             :aria-pressed="showBevyCanvas"
@@ -77,6 +60,46 @@
           </button>
         </mgl-custom-control>
       </mgl-map>
+
+      <div
+        class="pointer-events-none absolute z-10 p-2 transition-[bottom,left] duration-200 ease-out"
+        :style="layersControlStyle"
+      >
+        <UPopover modal>
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="lg"
+            class="pointer-events-auto cursor-pointer"
+            icon="lucide:layers"
+            title="Layers"
+            aria-label="Layers"
+          />
+
+          <template #content>
+            <UCard :ui="{ body: '!p-2 grid min-w-70' }">
+              <UButton
+                label="Terrain"
+                :color="terrainEnabled ? 'primary' : 'neutral'"
+                variant="outline"
+                size="sm"
+                class="cursor-pointer"
+                icon="lucide:mountain"
+                @click="terrainEnabled = !terrainEnabled"
+              />
+
+              <USeparator class="pt-2" />
+
+              <ModeSelector
+                :options="mapBaseModeOptions"
+                :ui="{ button: 'py-1.5' }"
+                class="pt-2"
+                v-model="mapBaseMode"
+              />
+            </UCard>
+          </template>
+        </UPopover>
+      </div>
     </div>
 
     <div
@@ -111,6 +134,8 @@
       @update:direction-stops="directionStops = $event"
       @update:trip-primary="directionsTripPrimary = $event"
       @update:trip-alternates="directionsTripAlternates = $event"
+      @update:drawer-direction="slideoverDirection = $event"
+      @update:drawer-size="slideoverSize = $event"
       @focus-trip="focusTrip"
       @update:open="
         (value: boolean) => {
@@ -145,7 +170,9 @@ import { watchDefinedOnce } from '@/composables/helper.ts'
 import { useMaplibreGlJsIntegration } from '@/composables/bevy-maplibre-integration.ts'
 import { useBevy } from '@/composables/bevy.ts'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
-import MapSlideover, { type MapSlideoverTab } from '@/components/map-slideover/MapSlideover.vue'
+import MapSlideover, {
+  type MapSlideoverTab,
+} from '@/components/map-slideover/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
 import type { ContextMenuItem } from '@nuxt/ui'
 import type { Trip } from 'valhalla_client'
@@ -155,6 +182,7 @@ import {
 } from '@/maplibre-layers/directions-layers.ts'
 import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
 import { getTripBounds } from '@/utils/valhalla.ts'
+import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
 
 const mapKey = makeUniqueMapKey()
 
@@ -174,6 +202,26 @@ const { syncOnRender } = useMaplibreGlJsIntegration(() => instanceId, mapKey, {
 
 const tilejsonUrl = TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString()
 console.debug('Using TileJson URL: ', tilejsonUrl)
+
+// Modes
+
+enum MapBaseMode {
+  Normal = 'normal',
+  Satellite = 'satellite',
+}
+
+const mapBaseModeOptions: ModeSelectorOption<MapBaseMode>[] = [
+  {
+    label: 'Normal',
+    value: MapBaseMode.Normal,
+  },
+  {
+    label: 'Satellite',
+    value: MapBaseMode.Satellite,
+  },
+]
+
+const mapBaseMode = shallowRef(MapBaseMode.Normal)
 
 // Context Menu
 
@@ -230,7 +278,8 @@ const setDirectionStop = (idx: number) => {
   if (!contextMenuLocation.value) return
 
   if (slideoverOpen.value !== SlideoverTab.Directions) {
-    directionStops.value = idx === 0 ? [contextMenuLocation.value, null] : [null, contextMenuLocation.value]
+    directionStops.value =
+      idx === 0 ? [contextMenuLocation.value, null] : [null, contextMenuLocation.value]
     slideoverOpen.value = SlideoverTab.Directions
     return
   }
@@ -350,6 +399,14 @@ const SlideoverTab = {
 
 const slideoverOpen = ref<MapSlideoverTab | null>(null)
 const mapSlideover = ref<InstanceType<typeof MapSlideover> | null>(null)
+
+const slideoverSize = shallowRef({ width: 0, height: 0 })
+const slideoverDirection = shallowRef<'left' | 'right' | 'top' | 'bottom'>('left')
+
+const layersControlStyle = computed(() => ({
+  bottom: '0px',
+  left: slideoverDirection.value === 'left' ? `${slideoverSize.value.width}px` : '0px',
+}))
 
 const onSlideoverClose = () => {
   switch (slideoverOpen.value) {
