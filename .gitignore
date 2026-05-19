@@ -2,6 +2,8 @@
 /pkg
 /secrets
 .env
+.local.env
+.prod.mono.env
 .cursor
 .codex
 /crates/utilities/test-data/

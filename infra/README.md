@@ -1,11 +1,23 @@
 # Infrastructure
 
-Docker Compose stack for the local map data services used by `jlh_maps`.
-Run commands in this directory unless noted otherwise.
+Docker Compose stack for the map data services used by `jlh_maps`.
+The base `compose.yaml` contains shared service definitions. Environment-specific
+overlays provide routing, published ports, and data volumes.
+
+Run commands from this `infra` directory unless otherwise noted.
 
 ## Services
 
-### `compose.yaml`
+### Compose Files
+
+| File | Purpose |
+| --- | --- |
+| `compose.yaml` | Shared service definitions and common named volumes. Deployment-specific data mounts are intentionally omitted here. |
+| `compose.local.yaml` | Local Docker Desktop override with `.localhost` Traefik routing, local host ports, and host bind-mounted data paths. |
+| `compose.prod.mono.yaml` | Single-server production override with HTTPS Traefik routing and local Docker volumes for service data. |
+| `compose.jobs.yaml` | One-shot import jobs, such as loading OSM data into PostGIS. |
+
+### Services
 
 | Service | Purpose | Local endpoint | Data/setup dependency                                                                                                                                                                         |
 | --- | --- | --- |-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -26,26 +38,48 @@ Run the import job with the main stack file included so the `postgres_osm`
 dependency is available:
 
 ```powershell
-docker compose -f compose.yaml -f compose.jobs.yaml run --rm osm2pgsql_osm_import
+docker compose --env-file .env -f compose.yaml -f compose.jobs.yaml run --rm osm2pgsql_osm_import
 ```
 
 ## External Data And Setup
 
 ### Environment
 
-Review `.env` before starting the stack:
+The environment files are split by scope:
+
+| File | Used by | Purpose |
+| --- | --- | --- |
+| `.env` | All Compose commands | Shared database defaults used by the base stack and jobs. |
+| `.local.env` | `compose.local.yaml` | Local host paths for OpenMapTiles, raster tiles, and Valhalla files. |
+| `.prod.mono.env` | `compose.prod.mono.yaml` only | Production domains, TLS email, production database credentials, and external Docker volume names. |
+
+Review `.env` and the target overlay env file before starting a stack.
+These files are intentionally gitignored because they can contain local paths
+and production secrets.
+
+Shared `.env`:
 
 ```dotenv
 POSTGRES_OSM_USER=...
 POSTGRES_OSM_PASSWORD=...
 POSTGRES_OSM_DB=...
-
-OPENMAPTILES_DIR=...
-SAT_RASTER_TILE_JSON_DIR=...
 ```
 
-`OPENMAPTILES_DIR` and `SAT_RASTER_TILE_JSON_DIR` point to data prepared
-outside this repository. They must be paths that Docker Desktop can mount.
+Local `.local.env`:
+
+```dotenv
+OPENMAPTILES_DIR=...
+SAT_RASTER_TILE_JSON_DIR=...
+VALHALLA_CUSTOM_FILES_DIR=...
+```
+
+`OPENMAPTILES_DIR`, `SAT_RASTER_TILE_JSON_DIR`, and
+`VALHALLA_CUSTOM_FILES_DIR` point to data prepared outside this repository.
+For local Docker Desktop use, they must be paths Docker can mount.
+
+Production `.prod.mono.env` is only loaded by the prod mono recipe and should
+be edited on the target server. It includes the public hostnames and the names
+of pre-provisioned Docker volumes.
 
 ### OpenMapTiles Vector Tiles
 
@@ -65,10 +99,20 @@ ${OPENMAPTILES_DIR}/
 `style/config.json` must reference the MBTiles and style assets available in
 the mounted `data`, `style`, and `build` directories.
 
+For `compose.prod.mono.yaml`, the same three directories are supplied by these
+external Docker volumes:
+
+- `${PROD_MONO_OPENMAPTILES_DATA_VOLUME}` mounted at `/data`
+- `${PROD_MONO_OPENMAPTILES_STYLE_VOLUME}` mounted at `/style`
+- `${PROD_MONO_OPENMAPTILES_BUILD_VOLUME}` mounted at `/build`
+
 ### Sentinel-2 Raster TileJSON
 
 `raster_tile_json_server` only serves files. Generate the raster tiles before
 starting the service. See `crates/sat_ingest` for an example of converting satellite imagery to the expected raster tile format.
+
+For `compose.prod.mono.yaml`, `${PROD_MONO_SAT_RASTER_TILE_JSON_VOLUME}` must
+contain `tilejson.json` and the generated `{z}/{x}/{y}.png` tree.
 
 ### OSM Data For PostGIS
 
@@ -97,10 +141,48 @@ Generate these artifacts with Valhalla tooling for the same OSM extract you
 want to route over, then place them under `infra/geo/valhalla/custom_files`
 before starting the `valhalla` service.
 
+For `compose.prod.mono.yaml`, `${PROD_MONO_VALHALLA_CUSTOM_FILES_VOLUME}` must
+contain these files at the volume root.
+
+## Production Mono Volumes
+
+`compose.prod.mono.yaml` assumes one server running the Docker stack. These
+external local Docker volumes must already exist and be populated before
+starting the prod mono stack:
+
+```powershell
+docker volume create jlh_maps_openmaptiles_data
+docker volume create jlh_maps_openmaptiles_style
+docker volume create jlh_maps_openmaptiles_build
+docker volume create jlh_maps_sat_raster_tile_json
+docker volume create jlh_maps_valhalla_custom_files
+```
+
+The names above match the defaults in `.prod.mono.env`. Change either the env
+file or the created volume names if a different naming convention is used.
+
 ## Running The Stack
 
 After external data is in place:
 
 ```powershell
-docker compose up -d --build
+just run local
+```
+
+Equivalent Docker Compose command:
+
+```powershell
+docker compose --env-file .env --env-file .local.env -f compose.yaml -f compose.local.yaml up
+```
+
+For a single-server production stack:
+
+```powershell
+just run prod-mono
+```
+
+Equivalent Docker Compose command:
+
+```powershell
+docker compose --env-file .env --env-file .prod.mono.env -f compose.yaml -f compose.prod.mono.yaml up -d --build
 ```

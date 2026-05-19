@@ -1,0 +1,63 @@
+services:
+  traefik:
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    ports:
+      - "80:80"
+      - "8081:8080"
+
+  postgres_osm:
+    ports:
+      - "5433:5432"
+
+  omt_tileserver_gl:
+    volumes:
+      - ${OPENMAPTILES_DIR}/data:/data
+      - ${OPENMAPTILES_DIR}/style:/style
+      - ${OPENMAPTILES_DIR}/build:/build
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.omt_tileserver_gl.rule=Host(`tiles.jlh_maps.localhost`)"
+      - "traefik.http.routers.omt_tileserver_gl.entrypoints=web"
+      - "traefik.http.services.omt_tileserver_gl.loadbalancer.server.port=8080"
+
+  raster_tile_json_server:
+    volumes:
+      - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.raster_tile_json_server.rule=Host(`raster.jlh_maps.localhost`)"
+      - "traefik.http.routers.raster_tile_json_server.entrypoints=web"
+      - "traefik.http.services.raster_tile_json_server.loadbalancer.server.port=80"
+
+  core_service:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.core_service.rule=Host(`api.jlh_maps.localhost`)"
+      - "traefik.http.routers.core_service.entrypoints=web"
+      - "traefik.http.services.core_service.loadbalancer.server.port=8080"
+
+  valhalla:
+    volumes:
+      - ${VALHALLA_CUSTOM_FILES_DIR}:/custom_files
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.valhalla.rule=Host(`valhalla.jlh_maps.localhost`)"
+      - "traefik.http.routers.valhalla.entrypoints=web"
+      - "traefik.http.routers.valhalla.middlewares=valhalla_cors"
+      - "traefik.http.services.valhalla.loadbalancer.server.port=8002"
+      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolallowmethods=GET,POST,OPTIONS"
+      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolallowheaders=Origin,Accept,Content-Type,X-Client-Id"
+      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolalloworiginlistregex=^https?://.+"
+      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolmaxage=86400"
+      - "traefik.http.middlewares.valhalla_cors.headers.addvaryheader=true"

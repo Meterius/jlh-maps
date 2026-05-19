@@ -1,0 +1,88 @@
+services:
+  traefik:
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+  omt_tileserver_gl:
+    volumes:
+      - openmaptiles_data:/data:ro
+      - openmaptiles_style:/style:ro
+      - openmaptiles_build:/build:ro
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.omt_tileserver_gl.rule=Host(`${PROD_MONO_TILES_HOST}`)"
+      - "traefik.http.routers.omt_tileserver_gl.entrypoints=websecure"
+      - "traefik.http.routers.omt_tileserver_gl.tls.certresolver=letsencrypt"
+      - "traefik.http.services.omt_tileserver_gl.loadbalancer.server.port=8080"
+
+  raster_tile_json_server:
+    volumes:
+      - sat_raster_tile_json:/usr/share/nginx/html/raster/sen2:ro
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.raster_tile_json_server.rule=Host(`${PROD_MONO_RASTER_HOST}`)"
+      - "traefik.http.routers.raster_tile_json_server.entrypoints=websecure"
+      - "traefik.http.routers.raster_tile_json_server.tls.certresolver=letsencrypt"
+      - "traefik.http.services.raster_tile_json_server.loadbalancer.server.port=80"
+
+  core_service:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.core_service.rule=Host(`${PROD_MONO_API_HOST}`)"
+      - "traefik.http.routers.core_service.entrypoints=websecure"
+      - "traefik.http.routers.core_service.tls.certresolver=letsencrypt"
+      - "traefik.http.services.core_service.loadbalancer.server.port=8080"
+
+  valhalla:
+    volumes:
+      - valhalla_custom_files:/custom_files:ro
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.valhalla.rule=Host(`${PROD_MONO_VALHALLA_HOST}`)"
+      - "traefik.http.routers.valhalla.entrypoints=websecure"
+      - "traefik.http.routers.valhalla.middlewares=valhalla_cors"
+      - "traefik.http.routers.valhalla.tls.certresolver=letsencrypt"
+      - "traefik.http.services.valhalla.loadbalancer.server.port=8002"
+      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolallowmethods=GET,POST,OPTIONS"
+      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolallowheaders=Origin,Accept,Content-Type,X-Client-Id"
+      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolalloworiginlistregex=${PROD_MONO_CORS_ORIGIN_REGEX}"
+      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolmaxage=86400"
+      - "traefik.http.middlewares.valhalla_cors.headers.addvaryheader=true"
+
+volumes:
+  traefik_letsencrypt:
+  openmaptiles_data:
+    external: true
+    name: ${PROD_MONO_OPENMAPTILES_DATA_VOLUME}
+  openmaptiles_style:
+    external: true
+    name: ${PROD_MONO_OPENMAPTILES_STYLE_VOLUME}
+  openmaptiles_build:
+    external: true
+    name: ${PROD_MONO_OPENMAPTILES_BUILD_VOLUME}
+  sat_raster_tile_json:
+    external: true
+    name: ${PROD_MONO_SAT_RASTER_TILE_JSON_VOLUME}
+  valhalla_custom_files:
+    external: true
+    name: ${PROD_MONO_VALHALLA_CUSTOM_FILES_VOLUME}
