@@ -13,14 +13,15 @@ Run commands from this `infra` directory unless otherwise noted.
 | File | Purpose |
 | --- | --- |
 | `compose.yaml` | Shared service definitions and common named volumes. Deployment-specific data mounts are intentionally omitted here. |
-| `compose.local.yaml` | Local Docker Desktop override with `.localhost` Traefik routing, local host ports, and host bind-mounted data paths. |
-| `compose.prod.mono.yaml` | Single-server production override with HTTPS Traefik routing and local Docker volumes for service data. |
+| `compose.local.yaml` | Local Docker Desktop override with `.localhost` and `ROOT_DOMAIN` Traefik routing, local DNS, local host ports, and host bind-mounted data paths. |
+| `compose.prod.mono.yaml` | Single-server production override with HTTPS Traefik routing under fixed service subdomains and local Docker volumes for service data. |
 | `compose.jobs.yaml` | One-shot import jobs, such as loading OSM data into PostGIS. |
 
 ### Services
 
 | Service | Purpose | Local endpoint | Data/setup dependency                                                                                                                                                                         |
 | --- | --- | --- |-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `dnsmasq` | Local DNS forwarder. Resolves `${ROOT_DOMAIN}` and its subdomains to `${LOCAL_SERVER_IP}` for LAN testing. | DNS on `${LOCAL_SERVER_IP}:53` | Requires devices under test to use `${LOCAL_SERVER_IP}` as their DNS server.                                                                                                                  |
 | `traefik` | Reverse proxy for the HTTP services in this stack. | `http://localhost:80`; dashboard on `http://localhost:8081` |                                                                                                                                                                                               |
 | `postgres_osm` | PostGIS PostgreSQL database. Stores OSM data imported by the `osm2pgsql_osm_import` job. | PostgreSQL on `localhost:5433` | Automatically initialized from `postgres_osm/init/init.sql`; persisted in the `postgres_osm_data` Docker volume.                                                                              |
 | `omt_tileserver_gl` | Serves OpenMapTiles vector tiles and styles through TileServer GL. | `http://tiles.jlh_maps.localhost` | Requires `${OPENMAPTILES_DIR}/data`, `${OPENMAPTILES_DIR}/style`, and `${OPENMAPTILES_DIR}/build`; Populated by output of https://github.com/Meterius/jlh-sys-design-playground-openmaptiles. |
@@ -50,8 +51,8 @@ The environment files are split by scope:
 | File | Used by | Purpose |
 | --- | --- | --- |
 | `.env` | All Compose commands | Shared database defaults used by the base stack and jobs. |
-| `.local.env` | `compose.local.yaml` | Local host paths for OpenMapTiles, raster tiles, and Valhalla files. |
-| `.prod.mono.env` | `compose.prod.mono.yaml` only | Production domains, TLS email, production database credentials, and external Docker volume names. |
+| `.local.env` | `compose.local.yaml` | Local host paths, local root domain, and Docker host LAN IP. |
+| `.prod.mono.env` | `compose.prod.mono.yaml` only | Root domain, TLS email, production database credentials, and external Docker volume names. |
 
 Review `.env` and the target overlay env file before starting a stack.
 These files are intentionally gitignored because they can contain local paths
@@ -71,15 +72,68 @@ Local `.local.env`:
 OPENMAPTILES_DIR=...
 SAT_RASTER_TILE_JSON_DIR=...
 VALHALLA_CUSTOM_FILES_DIR=...
+ROOT_DOMAIN=...
+LOCAL_SERVER_IP=...
 ```
 
 `OPENMAPTILES_DIR`, `SAT_RASTER_TILE_JSON_DIR`, and
 `VALHALLA_CUSTOM_FILES_DIR` point to data prepared outside this repository.
 For local Docker Desktop use, they must be paths Docker can mount.
 
+`ROOT_DOMAIN` is the local domain suffix to test through Traefik, for example
+`jlh-maps.test`. `LOCAL_SERVER_IP` must be the LAN IP of the machine running
+Docker, for example `192.168.1.50`; do not use `127.0.0.1` for phones or other
+devices on the network.
+
+`compose.local.yaml` starts `dnsmasq` on TCP/UDP port 53. It answers
+`${ROOT_DOMAIN}` and all subdomains with `${LOCAL_SERVER_IP}` and forwards all
+other DNS requests upstream. By default the upstream resolvers are `1.1.1.1`
+and `9.9.9.9`; override them with `LOCAL_DNS_UPSTREAM` and
+`LOCAL_DNS_UPSTREAM_SECONDARY` if needed.
+
+With `ROOT_DOMAIN=jlh-maps.test`, local Traefik accepts both the existing
+`.localhost` names and these LAN-test names:
+
+| Host | Service |
+| --- | --- |
+| `tiles.jlh-maps.test` | `omt_tileserver_gl` |
+| `raster.jlh-maps.test` | `raster_tile_json_server` |
+| `api.jlh-maps.test` | `core_service` |
+| `valhalla.jlh-maps.test` | `valhalla` |
+
+Point a device's DNS server at `${LOCAL_SERVER_IP}` to use those names from the
+LAN. If port 53 is already occupied on the Docker host, stop the conflicting DNS
+service or move this stack to a host where DNS port 53 can be published.
+
 Production `.prod.mono.env` is only loaded by the prod mono recipe and should
-be edited on the target server. It includes the public hostnames and the names
-of pre-provisioned Docker volumes.
+be edited on the target server. It includes `ROOT_DOMAIN`, TLS email, and the
+names of pre-provisioned Docker volumes.
+
+Example production domain settings:
+
+```dotenv
+ROOT_DOMAIN=example.com
+TRAEFIK_ACME_EMAIL=ops@example.com
+```
+
+With `ROOT_DOMAIN=example.com`, `compose.prod.mono.yaml` routes these fixed
+service subdomains through Traefik:
+
+| Host | Service |
+| --- | --- |
+| `tiles.example.com` | `omt_tileserver_gl` |
+| `raster.example.com` | `raster_tile_json_server` |
+| `api.example.com` | `core_service` |
+| `valhalla.example.com` | `valhalla` |
+
+Create explicit `A`/`AAAA` records for those hosts, or a wildcard record such
+as `*.example.com`, pointing at the production server. Traefik then selects the
+target service from the request `Host` header; no nginx routing layer is needed
+for this subdomain layout.
+
+Valhalla CORS is configured for `https://${ROOT_DOMAIN}` and
+`https://maps.${ROOT_DOMAIN}`. If the frontend is hosted somewhere else, adjust
+the `valhalla_cors` labels in `compose.prod.mono.yaml`.
 
 ### OpenMapTiles Vector Tiles
 
