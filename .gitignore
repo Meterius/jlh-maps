@@ -4,6 +4,7 @@
 .env
 .local.env
 .prod.mono.env
+.env.dev
 .cursor
 .codex
 /crates/utilities/test-data/

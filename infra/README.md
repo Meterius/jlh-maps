@@ -26,6 +26,7 @@ Run commands from this `infra` directory unless otherwise noted.
 | `postgres_osm` | PostGIS PostgreSQL database. Stores OSM data imported by the `osm2pgsql_osm_import` job. | PostgreSQL on `localhost:5433` | Automatically initialized from `postgres_osm/init/init.sql`; persisted in the `postgres_osm_data` Docker volume.                                                                              |
 | `omt_tileserver_gl` | Serves OpenMapTiles vector tiles and styles through TileServer GL. | `http://tiles.jlh_maps.localhost` | Requires `${OPENMAPTILES_DIR}/data`, `${OPENMAPTILES_DIR}/style`, and `${OPENMAPTILES_DIR}/build`; Populated by output of https://github.com/Meterius/jlh-sys-design-playground-openmaptiles. |
 | `raster_tile_json_server` | Static nginx server for Sentinel-2 raster TileJSON and XYZ PNG tiles. | `http://raster.jlh_maps.localhost/raster/sen2/tilejson.json` | Requires `${SAT_RASTER_TILE_JSON_DIR}` to contain `tilejson.json` plus the generated `{z}/{x}/{y}.png` tile tree. See `crates/sat_ingest` for populating raster tiles from satellite imagery. |
+| `frontend` | Static nginx server for the built Vite frontend. | `http://localhost` or `http://${ROOT_DOMAIN}` | Requires `${JLH_MAPS_DIST_DIR}` to point at the built `packages/jlh_maps/dist` directory. |
 | `core_service` | Rust API for looking up imported OSM element metadata from `postgres_osm`. | `http://api.jlh_maps.localhost` | Requires the `unitable` table produced by the OSM import job of `postgres_osm`.                                                                                                               |
 | `valhalla` | Valhalla routing service backed by a prebuilt routing graph. | `http://valhalla.jlh_maps.localhost` | Requires generated Valhalla files under `valhalla/custom_files`.                                                                                                                              |
 
@@ -72,13 +73,15 @@ Local `.local.env`:
 OPENMAPTILES_DIR=...
 SAT_RASTER_TILE_JSON_DIR=...
 VALHALLA_CUSTOM_FILES_DIR=...
+JLH_MAPS_DIST_DIR=...
 ROOT_DOMAIN=...
 LOCAL_SERVER_IP=...
 ```
 
 `OPENMAPTILES_DIR`, `SAT_RASTER_TILE_JSON_DIR`, and
 `VALHALLA_CUSTOM_FILES_DIR` point to data prepared outside this repository.
-For local Docker Desktop use, they must be paths Docker can mount.
+`JLH_MAPS_DIST_DIR` points to the built Vite app output. For local Docker
+Desktop use, they must be paths Docker can mount.
 
 `ROOT_DOMAIN` is the local domain suffix to test through Traefik, for example
 `jlh-maps.test`. `LOCAL_SERVER_IP` must be the LAN IP of the machine running
@@ -96,6 +99,7 @@ With `ROOT_DOMAIN=jlh-maps.test`, local Traefik accepts both the existing
 
 | Host | Service |
 | --- | --- |
+| `jlh-maps.test` | `frontend` |
 | `tiles.jlh-maps.test` | `omt_tileserver_gl` |
 | `raster.jlh-maps.test` | `raster_tile_json_server` |
 | `api.jlh-maps.test` | `core_service` |
@@ -121,13 +125,15 @@ service subdomains through Traefik:
 
 | Host | Service |
 | --- | --- |
+| `example.com` | `frontend` |
 | `tiles.example.com` | `omt_tileserver_gl` |
 | `raster.example.com` | `raster_tile_json_server` |
 | `api.example.com` | `core_service` |
 | `valhalla.example.com` | `valhalla` |
 
-Create explicit `A`/`AAAA` records for those hosts, or a wildcard record such
-as `*.example.com`, pointing at the production server. Traefik then selects the
+Create an `A`/`AAAA` record for the apex domain and explicit records for the
+service subdomains, or use an apex record plus a wildcard record such as
+`*.example.com`, pointing at the production server. Traefik then selects the
 target service from the request `Host` header; no nginx routing layer is needed
 for this subdomain layout.
 
@@ -159,6 +165,21 @@ external Docker volumes:
 - `${PROD_MONO_OPENMAPTILES_DATA_VOLUME}` mounted at `/data`
 - `${PROD_MONO_OPENMAPTILES_STYLE_VOLUME}` mounted at `/style`
 - `${PROD_MONO_OPENMAPTILES_BUILD_VOLUME}` mounted at `/build`
+
+### Vite Frontend
+
+`frontend` serves the static output of the Vite application. Build it before
+starting the local stack if `${JLH_MAPS_DIST_DIR}` points at the default
+`../packages/jlh_maps/dist` directory:
+
+```powershell
+Push-Location ..\packages\jlh_maps
+npm run build
+Pop-Location
+```
+
+For `compose.prod.mono.yaml`, `${PROD_MONO_JLH_MAPS_DIST_VOLUME}` must contain
+the contents of `packages/jlh_maps/dist` at the volume root.
 
 ### Sentinel-2 Raster TileJSON
 
@@ -209,6 +230,7 @@ docker volume create jlh_maps_openmaptiles_data
 docker volume create jlh_maps_openmaptiles_style
 docker volume create jlh_maps_openmaptiles_build
 docker volume create jlh_maps_sat_raster_tile_json
+docker volume create jlh_maps_dist
 docker volume create jlh_maps_valhalla_custom_files
 ```
 

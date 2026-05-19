@@ -13,6 +13,15 @@ npm run test:e2e
 npm run lint
 ```
 
+## Environment
+
+Vite loads `.env` for every command and `.env.[mode]` for the active mode.
+`npm run dev` runs `vite --mode dev`, so dev-server overrides live in
+`.env.dev`. Production/static builds use the root-domain defaults from `.env`
+unless a build command passes a different `--mode`.
+
+The `VITE_*` values are embedded in the frontend bundle at build time.
+
 ## Structure
 
 ```text

@@ -59,6 +59,16 @@ services:
       - "traefik.http.routers.raster_tile_json_server.entrypoints=web"
       - "traefik.http.services.raster_tile_json_server.loadbalancer.server.port=80"
 
+  frontend:
+    volumes:
+      - ${JLH_MAPS_DIST_DIR}:/usr/share/nginx/html:ro
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`localhost`) || Host(`${ROOT_DOMAIN}`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
   core_service:
     labels:
       - "traefik.enable=true"
