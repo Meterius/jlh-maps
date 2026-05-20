@@ -22,44 +22,60 @@
         :class="['relative flex min-h-0 w-full flex-col', drawerPanelClass]"
         :style="drawerPanelStyle"
       >
-        <!-- Custom handle that spans header to make dragging more reliable -->
-        <div
-          :class="[
-            'relative grid min-h-14 items-center p-4 pe-14',
-            isMobileDrawer ? 'cursor-grab touch-none select-none active:cursor-grabbing' : '',
-          ]"
-        >
-          <DrawerHandle
-            v-if="isMobileDrawer"
-            class="absolute inset-0 z-10 !m-0 !h-auto !w-auto !rounded-none !bg-transparent !opacity-100 !touch-none"
-            prevent-cycle
-          />
+        <div class="relative z-20">
+          <!-- Custom handle that spans header to make dragging more reliable -->
           <div
-            v-if="isMobileDrawer"
-            class="pointer-events-none absolute left-1/2 top-2 z-20 h-1.5 w-10 -translate-x-1/2 rounded-full bg-neutral-300 dark:bg-neutral-600"
-          />
-
-          <div :class="['relative z-20', isMobileDrawer ? 'pointer-events-none' : '']">
-            <h1 class="truncate font-semibold">{{ title }}</h1>
-          </div>
-          <div>
-            <UButton
-              v-if="!isMobileDrawer"
-              class="absolute right-3 top-3 z-30 rounded-full cursor-pointer"
-              icon="material-symbols:close-rounded"
-              title="Close"
-              aria-label="Close"
-              variant="ghost"
-              color="neutral"
-              size="md"
-              square
-              :ui="{ leadingIcon: 'size-6' }"
-              @click="emit('update:open', false)"
+            :class="[
+              'relative grid min-h-14 min-w-0 items-center p-4',
+              isMobileDrawer ? 'cursor-grab touch-none select-none active:cursor-grabbing' : '',
+            ]"
+          >
+            <DrawerHandle
+              v-if="isMobileDrawer"
+              class="!absolute inset-0 z-10 !m-0 !h-auto !w-auto !rounded-none !bg-transparent !opacity-100 !touch-none"
+              prevent-cycle
             />
-          </div>
-        </div>
+            <div
+              v-if="isMobileDrawer"
+              class="pointer-events-none absolute left-1/2 top-2 z-20 h-1.5 w-10 -translate-x-1/2 rounded-full bg-neutral-300 dark:bg-neutral-600"
+            />
 
-        <USeparator class="absolute inset-x-0 top-14 z-20" />
+            <div
+              :class="[
+                'relative z-20 grid min-w-0 items-center gap-2',
+                headerGridClass,
+                isMobileDrawer ? 'pointer-events-none pt-2' : '',
+              ]"
+            >
+              <h1 class="truncate font-semibold">{{ title }}</h1>
+
+              <UBadge
+                v-if="headerBadge"
+                class="min-w-0 max-w-full justify-self-end"
+                :icon="headerBadge.icon"
+                color="info"
+                variant="outline"
+                :label="headerBadge.label"
+              />
+
+              <UButton
+                v-if="!isMobileDrawer"
+                class="z-30 rounded-full cursor-pointer justify-self-end"
+                icon="material-symbols:close-rounded"
+                title="Close"
+                aria-label="Close"
+                variant="ghost"
+                color="neutral"
+                size="md"
+                square
+                :ui="{ leadingIcon: 'size-6' }"
+                @click="emit('update:open', false)"
+              />
+            </div>
+          </div>
+
+          <USeparator />
+        </div>
 
         <div
           class="grid min-h-0 min-w-0 w-full max-w-full flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
@@ -79,6 +95,7 @@
             class="h-full"
             :osm_id="props.detailsOsmId"
             :feature="props.detailsFeature"
+            @update:badge="detailsBadge = $event"
           />
 
           <ContentSettings
@@ -107,6 +124,7 @@ import type {
 } from 'jlh_maps_app'
 import type { GeoLocation } from '@/components/types.ts'
 import type { OsmId } from '@/utils/osm.ts'
+import type { PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
 import ContentDetails from '@/components/map-slideover/ContentDetails.vue'
 import ContentDirections from '@/components/map-slideover/ContentDirections.vue'
 import ContentSettings from '@/components/map-slideover/ContentSettings.vue'
@@ -138,6 +156,7 @@ const MOBILE_DRAWER_INITIAL_SNAP = 0.4
 const MOBILE_DRAWER_SNAP_POINTS = [MOBILE_DRAWER_INITIAL_SNAP, 0.9]
 
 const drawerContent = ref<HTMLElement | null>(null)
+const detailsBadge = ref<PoiDisplayMetadata | null>(null)
 
 const isMobileDrawer = useMediaQuery(
   '(max-width: 767px), (pointer: coarse) and (max-height: 600px)',
@@ -190,6 +209,19 @@ const title = computed(() => {
     default:
       return 'Directions'
   }
+})
+
+const headerBadge = computed(() => (props.active === 'details' ? detailsBadge.value : null))
+const headerGridClass = computed(() => {
+  if (isMobileDrawer.value) {
+    return headerBadge.value
+      ? 'grid-cols-[minmax(0,1fr)_auto]'
+      : 'grid-cols-[minmax(0,1fr)]'
+  }
+
+  return headerBadge.value
+    ? 'grid-cols-[minmax(0,1fr)_auto_auto]'
+    : 'grid-cols-[minmax(0,1fr)_auto]'
 })
 
 //

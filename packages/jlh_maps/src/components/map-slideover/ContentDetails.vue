@@ -2,10 +2,6 @@
   <div
     class="grid w-full auto-rows-max content-start overflow-y-auto overflow-x-hidden"
   >
-    <div v-if="badge" class="px-2 pt-2">
-      <UBadge :icon="badge.icon" color="info" variant="outline" :label="badge.label" />
-    </div>
-
     <InterpretedFeatureProperties
       :feature="props.feature"
       :osm-data="osmData"
@@ -33,7 +29,7 @@
                 :data="tagTableData"
                 :loading="loadingOsmData"
                 :ui="tableUi"
-                  class="max-h-[400px] w-full rounded-md border border-default"
+                class="max-h-[400px] w-full rounded-md border border-default"
               ></UTable>
             </div>
           </template>
@@ -72,18 +68,26 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { GeoJSONFeature } from 'maplibre-gl'
 import { computedAsync } from '@vueuse/core'
 import { getOsmData } from '@/external/endpoints.ts'
 import type { OsmId } from '@/utils/osm.js'
 import InterpretedFeatureProperties from '@/components/map-slideover/details/InterpretedFeatureProperties.vue'
-import { isOsmAmenityValue, OSM_AMENITY_METADATA } from '@/constants/osm-mapping.ts'
+import {
+  isOsmAmenityValue,
+  OSM_AMENITY_METADATA,
+  type PoiDisplayMetadata,
+} from '@/constants/osm-mapping.ts'
 import { isOmtPoiSubclass, OMT_POI_SUBCLASS_METADATA } from '@/constants/omt-mapping.ts'
 
 const props = defineProps<{
   osm_id?: OsmId
   feature?: GeoJSONFeature
+}>()
+
+const emit = defineEmits<{
+  'update:badge': [value: PoiDisplayMetadata | null]
 }>()
 
 const loadingOsmData = ref(false)
@@ -126,4 +130,6 @@ const badge = computed(() => {
 
   return null
 })
+
+watch(badge, (value) => emit('update:badge', value), { immediate: true })
 </script>
