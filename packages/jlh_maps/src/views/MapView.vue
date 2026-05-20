@@ -62,7 +62,7 @@
       </mgl-map>
 
       <div
-        class="pointer-events-none absolute z-10 p-2 transition-[bottom,left] duration-200 ease-out"
+        class="pointer-events-none absolute z-10 flex gap-2 p-2 transition-[bottom,left] duration-200 ease-out"
         :style="layersControlStyle"
       >
         <UPopover modal>
@@ -108,6 +108,16 @@
                   icon="lucide:mountain"
                   @click="terrainEnabled = !terrainEnabled"
                 />
+
+                <UButton
+                  label="Dark Theme"
+                  :color="darkThemeEnabled ? 'primary' : 'neutral'"
+                  variant="outline"
+                  size="md"
+                  class="cursor-pointer"
+                  :icon="darkThemeEnabled ? 'lucide:moon' : 'lucide:sun'"
+                  @click="toggleDarkTheme"
+                />
               </div>
 
               <USeparator />
@@ -117,6 +127,48 @@
                 :ui="{ button: 'py-2' }"
                 v-model="mapBaseMode"
               />
+            </UCard>
+          </template>
+        </UPopover>
+
+        <UPopover modal>
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="xl"
+            class="pointer-events-auto cursor-pointer"
+            icon="lucide:sun"
+            title="Sun"
+            aria-label="Sun"
+          />
+
+          <template #content>
+            <UCard :ui="{ body: '!p-3 grid min-w-72 gap-3' }">
+              <label class="sun-control-field">
+                <span class="sun-control-label">
+                  <span>Azimuth</span>
+                  <output>{{ sunAzimuthLabel }}</output>
+                </span>
+                <USlider
+                  v-model.number="mapViewSettings.sun_azimuth_degrees"
+                  :min="0"
+                  :max="360"
+                  :step="1"
+                />
+              </label>
+
+              <label class="sun-control-field">
+                <span class="sun-control-label">
+                  <span>Elevation</span>
+                  <output>{{ sunElevationLabel }}</output>
+                </span>
+                <USlider
+                  v-model.number="mapViewSettings.sun_elevation_degrees"
+                  :min="0"
+                  :max="85"
+                  :step="1"
+                />
+              </label>
             </UCard>
           </template>
         </UPopover>
@@ -170,7 +222,7 @@
 <script setup lang="ts">
 import { MglMap } from '@indoorequal/vue-maplibre-gl'
 import { computed, onWatcherCleanup, ref, shallowRef, watch, watchEffect } from 'vue'
-import { onLongPress } from '@vueuse/core'
+import { onLongPress, useDark } from '@vueuse/core'
 import {
   GeolocateControl,
   GlobeControl,
@@ -241,6 +293,11 @@ const mapBaseModeOptions: ModeSelectorOption<MapBaseMode>[] = [
 ]
 
 const mapBaseMode = shallowRef(MapBaseMode.Normal)
+const darkThemeEnabled = useDark()
+
+const toggleDarkTheme = () => {
+  darkThemeEnabled.value = !darkThemeEnabled.value
+}
 
 // Context Menu
 
@@ -426,6 +483,9 @@ const layersControlStyle = computed(() => ({
   bottom: '0px',
   left: slideoverDirection.value === 'left' ? `${slideoverSize.value.width}px` : '0px',
 }))
+
+const sunAzimuthLabel = computed(() => `${Math.round(mapViewSettings.sun_azimuth_degrees)} deg`)
+const sunElevationLabel = computed(() => `${Math.round(mapViewSettings.sun_elevation_degrees)} deg`)
 
 const onSlideoverClose = () => {
   switch (slideoverOpen.value) {
@@ -872,4 +932,22 @@ watchDefinedOnce(
   height: 17px;
   display: block;
 }
+
+.sun-control-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.sun-control-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.875rem;
+}
+
+.sun-control-label output {
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
 </style>

@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use crate::app::instance_management::commands::enqueue_instance_command;
 use crate::app::maplibre_gl_js::integration::{
     MaplibreMapIntegration, NEXT_INTEGRATION_ID, find_map_integration, with_map_data_mut,
@@ -14,7 +13,6 @@ use bevy::prelude::{Name, default};
 use geojson::Geometry;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use tracing::info;
 use wasm_bindgen::prelude::{JsValue, wasm_bindgen};
 
 #[derive(Deserialize)]

@@ -19,6 +19,8 @@ const SHADOW_MAX_DISTANCE_METERS: f64 = 10_000.0;
 const SHADOW_MIN_DISTANCE_METERS: f64 = 1.0;
 const SHADOW_DEPTH_BIAS: f32 = 0.01;
 const SHADOW_NORMAL_BIAS: f32 = 1.8;
+const DEFAULT_SUN_AZIMUTH_DEGREES: f32 = 11.31;
+const DEFAULT_SUN_ELEVATION_DEGREES: f32 = 32.52;
 pub const MAP_VIEW_COLOR_RENDER_LAYER: usize = 0;
 pub const MAP_VIEW_DEPTH_RENDER_LAYER: usize = 1;
 
@@ -26,14 +28,9 @@ pub(super) struct CorePlugin;
 
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MapViewSettings {
-            enable_window_cameras: false,
-            enable_waters: true,
-            enable_buildings: true,
-            enable_shadows: true,
-        });
+        app.insert_resource(MapViewSettings::default());
 
-        app.add_systems(PreUpdate, (sync_window_cameras, sync_map_shadows));
+        app.add_systems(PreUpdate, (sync_window_cameras, sync_map_sun));
     }
 }
 
@@ -44,6 +41,21 @@ pub struct MapViewSettings {
     pub enable_buildings: bool,
     pub enable_waters: bool,
     pub enable_shadows: bool,
+    pub sun_azimuth_degrees: f32,
+    pub sun_elevation_degrees: f32,
+}
+
+impl Default for MapViewSettings {
+    fn default() -> Self {
+        Self {
+            enable_window_cameras: false,
+            enable_buildings: true,
+            enable_waters: true,
+            enable_shadows: true,
+            sun_azimuth_degrees: DEFAULT_SUN_AZIMUTH_DEGREES,
+            sun_elevation_degrees: DEFAULT_SUN_ELEVATION_DEGREES,
+        }
+    }
 }
 
 #[derive(Debug, Reflect, Component)]
@@ -58,13 +70,29 @@ fn sync_window_cameras(
     }
 }
 
-fn sync_map_shadows(
+fn sync_map_sun(
     mv_settings: Res<MapViewSettings>,
-    mut lights: Query<&mut DirectionalLight, With<MapViewShadowLight>>,
+    mut lights: Query<(&mut DirectionalLight, &mut Transform), With<MapViewShadowLight>>,
 ) {
-    for mut light in lights.iter_mut() {
+    let direction = map_sun_direction(&mv_settings);
+
+    for (mut light, mut transform) in lights.iter_mut() {
         light.shadows_enabled = mv_settings.enable_shadows;
+        *transform = Transform::default().looking_to(direction, Vec3::Z);
     }
+}
+
+fn map_sun_direction(settings: &MapViewSettings) -> Vec3 {
+    let azimuth = settings.sun_azimuth_degrees.to_radians();
+    let elevation = settings.sun_elevation_degrees.clamp(0.0, 89.0).to_radians();
+    let horizontal = elevation.cos();
+
+    Vec3::new(
+        horizontal * azimuth.cos(),
+        horizontal * azimuth.sin(),
+        -elevation.sin(),
+    )
+    .normalize_or_zero()
 }
 
 #[derive(Debug, Reflect, Component)]
@@ -124,7 +152,7 @@ pub fn spawn_map_view(
             ..default()
         }
         .build(),
-        Transform::default().looking_to(Vec3::new(1.0, 0.2, -0.65), Vec3::Z),
+        Transform::default().looking_to(map_sun_direction(&MapViewSettings::default()), Vec3::Z),
         CellCoord::default(),
         MapViewShadowLight,
     ));

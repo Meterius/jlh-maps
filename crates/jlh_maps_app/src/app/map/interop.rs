@@ -9,6 +9,8 @@ pub struct MapViewSettings {
     pub enable_buildings: bool,
     pub enable_waters: bool,
     pub enable_shadows: bool,
+    pub sun_azimuth_degrees: f32,
+    pub sun_elevation_degrees: f32,
 }
 
 #[wasm_bindgen]
@@ -19,12 +21,16 @@ impl MapViewSettings {
         enable_buildings: bool,
         enable_waters: bool,
         enable_shadows: bool,
+        sun_azimuth_degrees: f32,
+        sun_elevation_degrees: f32,
     ) -> Self {
         Self {
             enable_window_cameras,
             enable_buildings,
             enable_waters,
             enable_shadows,
+            sun_azimuth_degrees,
+            sun_elevation_degrees,
         }
     }
 }
@@ -36,6 +42,8 @@ impl From<MapViewSettings> for MapViewSettingsBevy {
             enable_waters: val.enable_waters,
             enable_window_cameras: val.enable_window_cameras,
             enable_shadows: val.enable_shadows,
+            sun_azimuth_degrees: val.sun_azimuth_degrees,
+            sun_elevation_degrees: val.sun_elevation_degrees,
         }
     }
 }

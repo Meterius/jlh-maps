@@ -17,6 +17,9 @@ import {
   unmount,
 } from 'jlh_maps_app'
 
+const DEFAULT_SUN_AZIMUTH_DEGREES = 11.31
+const DEFAULT_SUN_ELEVATION_DEGREES = 32.52
+
 export function useBevy(debugCanvasSelector: string, textureCanvasSelector: string) {
   const instanceId = debugCanvasSelector
 
@@ -27,7 +30,16 @@ export function useBevy(debugCanvasSelector: string, textureCanvasSelector: stri
 
   const onBeforeUnmountCallbacks: (() => void)[] = []
 
-  const mapViewSettings = reactive(new MapViewSettingsBevy(false, true, true, true))
+  const mapViewSettings = reactive(
+    new MapViewSettingsBevy(
+      false,
+      true,
+      true,
+      true,
+      DEFAULT_SUN_AZIMUTH_DEGREES,
+      DEFAULT_SUN_ELEVATION_DEGREES,
+    ),
+  )
   const mapViewCameraSettings = reactive(
     new MapViewCameraSettingsBevy(true, false, true, false, false),
   )
@@ -71,6 +83,8 @@ export function useBevy(debugCanvasSelector: string, textureCanvasSelector: stri
               settings.enable_buildings,
               settings.enable_waters,
               settings.enable_shadows,
+              settings.sun_azimuth_degrees,
+              settings.sun_elevation_degrees,
             ),
           )
         },
