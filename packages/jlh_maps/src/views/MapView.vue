@@ -77,8 +77,8 @@
           />
 
           <template #content>
-            <UCard :ui="{ body: '!p-2 grid min-w-70 gap-2' }">
-              <div class="grid gap-1 grid-cols-2">
+            <UCard :ui="{ body: '!p-2 grid w-72 max-w-[calc(100vw-1rem)] gap-2' }">
+              <div class="grid grid-cols-2 gap-1">
                 <UButton
                   label="Shadows"
                   :color="mapViewSettings.enable_shadows ? 'primary' : 'neutral'"
@@ -122,9 +122,42 @@
 
               <USeparator />
 
+              <div class="grid min-w-0 gap-1">
+                <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
+                  <UButton
+                    label="Rainfall"
+                    :color="rainfallEnabled ? 'primary' : 'neutral'"
+                    variant="outline"
+                    size="md"
+                    class="min-w-0 cursor-pointer justify-start"
+                    icon="lucide:cloud-rain"
+                    @click="rainfallEnabled = !rainfallEnabled"
+                  />
+
+                  <UButton
+                    :disabled="!rainfallEnabled"
+                    color="neutral"
+                    variant="outline"
+                    size="md"
+                    class="shrink-0 cursor-pointer"
+                    icon="lucide:refresh-cw"
+                    title="Refresh rainfall data"
+                    aria-label="Refresh rainfall data"
+                    :loading="rainfallRasterLoading"
+                    @click.stop="refreshRainfallRasterData"
+                  />
+                </div>
+
+                <p v-if="rainfallEnabled" class="min-w-0 truncate px-1 text-xs text-muted">
+                  {{ rainfallRasterDataTimeLabel }}
+                </p>
+              </div>
+
+              <USeparator />
+
               <ModeSelector
                 :options="mapBaseModeOptions"
-                :ui="{ button: 'py-2' }"
+                :ui="{ root: 'min-w-0', button: 'py-2' }"
                 v-model="mapBaseMode"
               />
             </UCard>
@@ -252,6 +285,7 @@ import {
   useDirectionsLayers,
 } from '@/maplibre-layers/directions-layers.ts'
 import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
+import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { getTripBounds } from '@/utils/valhalla.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
 
@@ -564,6 +598,45 @@ watch(
 )
 
 const terrainEnabled = ref(false)
+const rainfallEnabled = ref(false)
+
+const rainfallLayer = useRainfallRasterLayer({
+  visible: rainfallEnabled,
+  onLoadError: (error) => {
+    console.warn('Failed to load RainViewer rainfall layer', error)
+    rainfallEnabled.value = false
+  },
+})
+
+const rainfallRasterDataTime = rainfallLayer.rasterDataTime
+const rainfallRasterLoading = rainfallLayer.loading
+
+const rainfallRasterDataTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+const rainfallRasterDataTimeLabel = computed(() => {
+  const dataTime = rainfallRasterDataTime.value
+
+  if (!dataTime) return 'Radar frame not loaded'
+
+  return `At ${rainfallRasterDataTimeFormatter.format(dataTime)}`
+})
+
+const refreshRainfallRasterData = () => {
+  rainfallLayer.refreshData().catch(() => {
+    // The layer composable reports load failures through onLoadError.
+  })
+}
+
+watch(rainfallEnabled, (value) => {
+  if (value) {
+    refreshRainfallRasterData()
+  }
+})
 
 const useRasterOnly = false
 const useRaster = false
@@ -658,6 +731,8 @@ watchDefinedOnce(
     const onCleanupCallbacks: (() => void)[] = []
     onCleanupCallbacks.push(registerDragPanInertiaProfiles(map))
     onCleanupCallbacks.push(registerTouchContextMenu(map))
+    rainfallLayer.register(map, 'Water labels')
+    onCleanupCallbacks.push(rainfallLayer.unregister)
 
     if (useRaster) {
       map.addSource('raster-sen2', {
@@ -949,5 +1024,4 @@ watchDefinedOnce(
   color: #64748b;
   font-variant-numeric: tabular-nums;
 }
-
 </style>
