@@ -28,11 +28,7 @@
     </UCard>
 
     <div v-if="enableSubLabels" :class="ui.subLabelRow">
-      <div
-        v-for="option in props.options"
-        :key="'badge-' + option.value"
-        :class="ui.subLabelCell"
-      >
+      <div v-for="option in props.options" :key="'badge-' + option.value" :class="ui.subLabelCell">
         <Transition
           enter-active-class="transition duration-150 ease-out"
           enter-from-class="-translate-y-1 opacity-0"

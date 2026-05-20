@@ -1,7 +1,5 @@
 <template>
-  <div
-    class="grid w-full auto-rows-max content-start overflow-y-auto overflow-x-hidden"
-  >
+  <div class="grid w-full auto-rows-max content-start overflow-y-auto overflow-x-hidden">
     <InterpretedFeatureProperties
       :feature="props.feature"
       :osm-data="osmData"

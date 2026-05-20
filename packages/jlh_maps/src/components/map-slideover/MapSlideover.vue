@@ -214,9 +214,7 @@ const title = computed(() => {
 const headerBadge = computed(() => (props.active === 'details' ? detailsBadge.value : null))
 const headerGridClass = computed(() => {
   if (isMobileDrawer.value) {
-    return headerBadge.value
-      ? 'grid-cols-[minmax(0,1fr)_auto]'
-      : 'grid-cols-[minmax(0,1fr)]'
+    return headerBadge.value ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-[minmax(0,1fr)]'
   }
 
   return headerBadge.value

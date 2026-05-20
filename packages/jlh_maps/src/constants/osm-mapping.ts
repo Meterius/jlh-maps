@@ -308,4 +308,3 @@ export const OSM_AMENITY_METADATA: Record<OsmAmenityValue, PoiDisplayMetadata> =
 
 export const isOsmAmenityValue = (value: string): value is OsmAmenityValue =>
   Object.values(OsmAmenityValue).includes(value as OsmAmenityValue)
-

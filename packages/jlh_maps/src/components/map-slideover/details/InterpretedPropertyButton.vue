@@ -1,9 +1,3 @@
-<script setup lang="ts">
-defineOptions({
-  inheritAttrs: false,
-})
-</script>
-
 <template>
   <UButton
     v-bind="$attrs"
@@ -22,3 +16,9 @@ defineOptions({
     </template>
   </UButton>
 </template>
+
+<script setup lang="ts">
+defineOptions({
+  inheritAttrs: false,
+})
+</script>

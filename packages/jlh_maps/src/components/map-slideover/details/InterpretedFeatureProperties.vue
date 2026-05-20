@@ -1,7 +1,11 @@
 <template>
   <div class="min-w-0 max-w-full p-4">
     <div v-if="loading" class="grid min-w-0 gap-1">
-      <div v-for="idx in 3" :key="idx" class="grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-3 p-2">
+      <div
+        v-for="idx in 3"
+        :key="idx"
+        class="grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-3 p-2"
+      >
         <USkeleton class="size-5 rounded-full" />
         <USkeleton class="h-4 w-full max-w-56" />
       </div>
@@ -9,11 +13,7 @@
 
     <div v-else class="grid min-w-0 gap-1">
       <template v-for="item in interpretedItems" :key="item.key">
-        <UCollapsible
-          v-if="item.openingHours"
-          v-model:open="openingHoursOpen"
-          class="min-w-0"
-        >
+        <UCollapsible v-if="item.openingHours" v-model:open="openingHoursOpen" class="min-w-0">
           <InterpretedPropertyButton
             :class="openingHoursOpen ? 'rounded-b-none' : undefined"
             :icon="item.icon"
@@ -110,8 +110,8 @@ type OpeningHoursWeekDay = {
 }
 
 const normalizedTags = computed<Record<string, unknown>>(() => ({
-  ...(props.feature?.properties ?? {}),
-  ...(props.osmData?.tags ?? {}),
+  ...props.feature?.properties,
+  ...props.osmData?.tags,
 }))
 
 const interpretedItems = computed<InterpretedItem[]>(() => {
@@ -201,7 +201,9 @@ const interpretOpeningHours = (value: string | undefined, date: Date) => {
       return {
         statusLabel: 'Hours unknown',
         statusClass: 'text-warning',
-        nextLabel: nextChange ? `Next update ${formatRelativeDateTime(nextChange, date)}` : undefined,
+        nextLabel: nextChange
+          ? `Next update ${formatRelativeDateTime(nextChange, date)}`
+          : undefined,
         weekDays,
       }
     }
@@ -326,7 +328,12 @@ const getWebsiteLabel = (website: string) => {
   try {
     return new URL(website).hostname.replace(/^www\./i, '')
   } catch {
-    return website.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] ?? website
+    return (
+      website
+        .replace(/^https?:\/\//i, '')
+        .replace(/^www\./i, '')
+        .split('/')[0] ?? website
+    )
   }
 }
 

@@ -2,39 +2,39 @@
 @import '@nuxt/ui';
 
 @theme static {
-    --color-slatish-50: var(--color-slate-50);
-    --color-slatish-100: var(--color-slate-100);
-    --color-slatish-200: oklch(from var(--color-slate-200) l calc(c * 1.0) h);
-    --color-slatish-300: oklch(from var(--color-slate-300) l calc(c * 0.98) h);
-    --color-slatish-400: oklch(from var(--color-slate-400) l calc(c * 0.96) h);
-    --color-slatish-500: oklch(from var(--color-slate-500) l calc(c * 0.92) h);
-    --color-slatish-600: oklch(from var(--color-slate-600) l calc(c * 0.88) h);
-    --color-slatish-700: oklch(from var(--color-slate-700) l calc(c * 0.84) h);
-    --color-slatish-800: oklch(from var(--color-slate-800) l calc(c * 0.80) h);
-    --color-slatish-900: oklch(from var(--color-slate-900) l calc(c * 0.76) h);
-    --color-slatish-950: oklch(from var(--color-slate-950) l calc(c * 0.72) h);
+  --color-slatish-50: var(--color-slate-50);
+  --color-slatish-100: var(--color-slate-100);
+  --color-slatish-200: oklch(from var(--color-slate-200) l calc(c * 1) h);
+  --color-slatish-300: oklch(from var(--color-slate-300) l calc(c * 0.98) h);
+  --color-slatish-400: oklch(from var(--color-slate-400) l calc(c * 0.96) h);
+  --color-slatish-500: oklch(from var(--color-slate-500) l calc(c * 0.92) h);
+  --color-slatish-600: oklch(from var(--color-slate-600) l calc(c * 0.88) h);
+  --color-slatish-700: oklch(from var(--color-slate-700) l calc(c * 0.84) h);
+  --color-slatish-800: oklch(from var(--color-slate-800) l calc(c * 0.8) h);
+  --color-slatish-900: oklch(from var(--color-slate-900) l calc(c * 0.76) h);
+  --color-slatish-950: oklch(from var(--color-slate-950) l calc(c * 0.72) h);
 }
 
 @layer theme {
-    :root:root,
-    :host:host,
-    .light.light {
-        --ui-primary: var(--ui-color-primary-700);
-        --ui-secondary: var(--ui-color-secondary-500);
-        --ui-success: var(--ui-color-success-500);
-        --ui-info: var(--ui-color-info-500);
-        --ui-warning: var(--ui-color-warning-500);
-        --ui-error: var(--ui-color-error-600);
-        --ui-bg: var(--ui-color-neutral-50);
-    }
+  :root:root,
+  :host:host,
+  .light.light {
+    --ui-primary: var(--ui-color-primary-700);
+    --ui-secondary: var(--ui-color-secondary-500);
+    --ui-success: var(--ui-color-success-500);
+    --ui-info: var(--ui-color-info-500);
+    --ui-warning: var(--ui-color-warning-500);
+    --ui-error: var(--ui-color-error-600);
+    --ui-bg: var(--ui-color-neutral-50);
+  }
 
-    .dark.dark {
-        --ui-primary: var(--ui-color-primary-600);
-        --ui-secondary: var(--ui-color-secondary-400);
-        --ui-success: var(--ui-color-success-400);
-        --ui-info: var(--ui-color-info-400);
-        --ui-warning: var(--ui-color-warning-400);
-        --ui-error: var(--ui-color-error-400);
-        --ui-bg: var(--ui-color-neutral-900);
-    }
+  .dark.dark {
+    --ui-primary: var(--ui-color-primary-600);
+    --ui-secondary: var(--ui-color-secondary-400);
+    --ui-success: var(--ui-color-success-400);
+    --ui-info: var(--ui-color-info-400);
+    --ui-warning: var(--ui-color-warning-400);
+    --ui-error: var(--ui-color-error-400);
+    --ui-bg: var(--ui-color-neutral-900);
+  }
 }
