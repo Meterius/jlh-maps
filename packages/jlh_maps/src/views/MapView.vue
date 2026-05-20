@@ -69,7 +69,7 @@
           <UButton
             color="neutral"
             variant="outline"
-            size="lg"
+            size="xl"
             class="pointer-events-auto cursor-pointer"
             icon="lucide:layers"
             title="Layers"
@@ -77,23 +77,44 @@
           />
 
           <template #content>
-            <UCard :ui="{ body: '!p-2 grid min-w-70' }">
-              <UButton
-                label="Terrain"
-                :color="terrainEnabled ? 'primary' : 'neutral'"
-                variant="outline"
-                size="sm"
-                class="cursor-pointer"
-                icon="lucide:mountain"
-                @click="terrainEnabled = !terrainEnabled"
-              />
+            <UCard :ui="{ body: '!p-2 grid min-w-70 gap-2' }">
+              <div class="grid gap-1 grid-cols-2">
+                <UButton
+                  label="Shadows"
+                  :color="mapViewSettings.enable_shadows ? 'primary' : 'neutral'"
+                  variant="outline"
+                  size="md"
+                  class="cursor-pointer"
+                  icon="lucide:sunset"
+                  @click="mapViewSettings.enable_shadows = !mapViewSettings.enable_shadows"
+                />
 
-              <USeparator class="pt-2" />
+                <UButton
+                  label="3D Buildings"
+                  :color="mapViewSettings.enable_buildings ? 'primary' : 'neutral'"
+                  variant="outline"
+                  size="md"
+                  class="cursor-pointer"
+                  icon="lucide:building"
+                  @click="mapViewSettings.enable_buildings = !mapViewSettings.enable_buildings"
+                />
+
+                <UButton
+                  label="Terrain"
+                  :color="terrainEnabled ? 'primary' : 'neutral'"
+                  variant="outline"
+                  size="md"
+                  class="cursor-pointer"
+                  icon="lucide:mountain"
+                  @click="terrainEnabled = !terrainEnabled"
+                />
+              </div>
+
+              <USeparator />
 
               <ModeSelector
                 :options="mapBaseModeOptions"
-                :ui="{ button: 'py-1.5' }"
-                class="pt-2"
+                :ui="{ button: 'py-2' }"
                 v-model="mapBaseMode"
               />
             </UCard>
@@ -170,9 +191,7 @@ import { watchDefinedOnce } from '@/composables/helper.ts'
 import { useMaplibreGlJsIntegration } from '@/composables/bevy-maplibre-integration.ts'
 import { useBevy } from '@/composables/bevy.ts'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
-import MapSlideover, {
-  type MapSlideoverTab,
-} from '@/components/map-slideover/MapSlideover.vue'
+import MapSlideover, { type MapSlideoverTab } from '@/components/map-slideover/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
 import type { ContextMenuItem } from '@nuxt/ui'
 import type { Trip } from 'valhalla_client'
