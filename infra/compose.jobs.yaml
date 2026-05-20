@@ -19,4 +19,4 @@ services:
       - -P 5432
       - -O flex
       - -S /data/style.lua
-      - https://download.geofabrik.de/europe/germany/berlin-latest.osm.pbf
+      - https://download.geofabrik.de/europe/germany-latest.osm.pbf

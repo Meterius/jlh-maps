@@ -61,7 +61,9 @@
 
         <USeparator class="absolute inset-x-0 top-14 z-20" />
 
-        <div class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden">
+        <div
+          class="grid min-h-0 min-w-0 w-full max-w-full flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
+        >
           <ContentDirections
             v-show="props.active === 'directions'"
             class="h-full"
