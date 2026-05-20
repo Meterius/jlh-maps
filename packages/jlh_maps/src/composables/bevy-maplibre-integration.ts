@@ -10,7 +10,6 @@ import {
 } from 'jlh_maps_app'
 import type { Geometry } from 'geojson'
 import {
-  OverscaledTileID,
   type GeoJSONFeature,
   type Map as MapLibreMap,
   type MapSourceDataEvent,
@@ -27,6 +26,8 @@ import type {
   Terrain,
   Tile as InternalTile,
 } from '@/types/maplibre-gl-internals'
+// @ts-expect-error Class not properly exported by dist
+import { OverscaledTileID } from 'maplibre-gl/src/tile/tile_id'
 
 type TileKey = string
 type SourceLayerTileKey = string
@@ -408,6 +409,7 @@ class MaplibreGlJsIntegration {
     if (!this.terrain) return
 
     for (const tileCoord of tileCoords) {
+      // @ts-expect-error No clue of what is going on here
       const tileId = new OverscaledTileID(tileCoord.z, 0, tileCoord.z, tileCoord.x, tileCoord.y)
       this.syncTerrainDataForTileId(this.getTileCoordKey(tileCoord), tileId)
     }

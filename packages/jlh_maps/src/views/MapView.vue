@@ -906,23 +906,25 @@ const makeBasicStyle = (useRaster: boolean): BaseStyle => ({
 
     // Bevy
 
-    map.addLayer(
-      new BevyLayer(mapTextureOffscreenCanvas, {
-        id: 'bevy-texture',
-        tick: () => {
-          syncOnRender()
-          tick()
-        },
-      }),
-      'Water labels',
-    )
-    ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
-      const layer = map.getStyle().layers.find((l) => l.id === layerId)
-      if (!layer) return
+    if (!useRaster) {
+      map.addLayer(
+        new BevyLayer(mapTextureOffscreenCanvas, {
+          id: 'bevy-texture',
+          tick: () => {
+            syncOnRender()
+            tick()
+          },
+        }),
+        'Water labels',
+      )
+      ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
+        const layer = map.getStyle().layers.find((l) => l.id === layerId)
+        if (!layer) return
 
-      map.removeLayer(layerId)
-      map.addLayer(layer, 'bevy-texture')
-    })
+        map.removeLayer(layerId)
+        map.addLayer(layer, 'bevy-texture')
+      })
+    }
 
     // Highlight
 
