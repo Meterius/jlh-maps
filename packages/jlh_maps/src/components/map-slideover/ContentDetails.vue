@@ -77,7 +77,7 @@ import type { GeoJSONFeature } from 'maplibre-gl'
 import { computedAsync } from '@vueuse/core'
 import { getOsmData } from '@/external/endpoints.ts'
 import type { OsmId } from '@/utils/osm.js'
-import InterpretedFeatureProperties from '@/components/map-slideover/InterpretedFeatureProperties.vue'
+import InterpretedFeatureProperties from '@/components/map-slideover/details/InterpretedFeatureProperties.vue'
 import { isOsmAmenityValue, OSM_AMENITY_METADATA } from '@/constants/osm-mapping.ts'
 import { isOmtPoiSubclass, OMT_POI_SUBCLASS_METADATA } from '@/constants/omt-mapping.ts'
 
