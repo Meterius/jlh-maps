@@ -5,7 +5,6 @@
     >
       <mgl-map
         :map-key="mapKey"
-        :map-style="tilejsonUrl"
         :center="[13.35203105083487, 52.499757263332086]"
         :zoom="14"
         :canvas-context-attributes="{ antialias: true }"
@@ -156,9 +155,9 @@
               <USeparator />
 
               <ModeSelector
-                :options="mapBaseModeOptions"
+                :options="baseStyleTypeOptions"
                 :ui="{ root: 'min-w-0', button: 'py-2' }"
-                v-model="mapBaseMode"
+                v-model="baseStyleType"
               />
             </UCard>
           </template>
@@ -263,6 +262,8 @@ import {
   type DragPanOptions,
   type Map as MapLibreMap,
   type MapMouseEvent,
+  type StyleSwapOptions,
+  type StyleOptions,
 } from 'maplibre-gl'
 import { center } from '@turf/turf'
 import type { FeatureCollection } from 'geojson'
@@ -270,7 +271,6 @@ import {
   TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL,
   TILESERVER_RASTER_SEN2_TILEJSON_URL,
 } from '@/external/endpoints.ts'
-import { TreeMeshLayer } from '../maplibre-layers/tree-mesh-layer.ts'
 import { makeUniqueMapKey, useMapExtended, useMapSelection } from '@/composables/maplibre.ts'
 import { watchDefinedOnce } from '@/composables/helper.ts'
 import { useMaplibreGlJsIntegration } from '@/composables/bevy-maplibre-integration.ts'
@@ -308,25 +308,28 @@ const { syncOnRender } = useMaplibreGlJsIntegration(() => instanceId, mapKey, {
 const tilejsonUrl = TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString()
 console.debug('Using TileJson URL: ', tilejsonUrl)
 
-// Modes
+// Base Style
 
-enum MapBaseMode {
+enum BaseStyleDefinitionType {
   Normal = 'normal',
   Satellite = 'satellite',
 }
 
-const mapBaseModeOptions: ModeSelectorOption<MapBaseMode>[] = [
+const baseStyleTypeOptions: ModeSelectorOption<BaseStyleDefinitionType>[] = [
   {
     label: 'Normal',
-    value: MapBaseMode.Normal,
+    value: BaseStyleDefinitionType.Normal,
   },
   {
     label: 'Satellite',
-    value: MapBaseMode.Satellite,
+    value: BaseStyleDefinitionType.Satellite,
   },
 ]
 
-const mapBaseMode = shallowRef(MapBaseMode.Normal)
+const baseStyleType = shallowRef(BaseStyleDefinitionType.Normal)
+
+//
+
 const darkThemeEnabled = useDark()
 
 const toggleDarkTheme = () => {
@@ -638,11 +641,6 @@ watch(rainfallEnabled, (value) => {
   }
 })
 
-const useRasterOnly = false
-const useRaster = false
-
-const enableTrees = false
-
 const DESKTOP_DRAG_PAN_OPTIONS: DragPanOptions = {
   linearity: 0.35,
   maxSpeed: 3200,
@@ -709,7 +707,7 @@ function registerDragPanInertiaProfiles(map: MapLibreMap) {
 // Controls
 
 watchDefinedOnce(
-  () => mapInstance.map,
+  () => (loaded.value ? mapInstance.map : undefined),
   (map) => {
     map.addControl(new GlobeControl())
     map.addControl(new NavigationControl())
@@ -719,20 +717,26 @@ watchDefinedOnce(
   },
 )
 
-// Maplibre Setup
+// Base Styles
 
-watchDefinedOnce(
-  () => {
-    if (!loaded.value) return undefined
+type BaseStyle = {
+  source: string
+  options?: StyleSwapOptions & StyleOptions
+  onLoaded: (map: MapLibreMap) => {
+    onCleanup: (() => void)[]
+  }
+}
 
-    return mapInstance.map !== undefined ? { map: mapInstance.map } : undefined
-  },
-  ({ map }) => {
-    const onCleanupCallbacks: (() => void)[] = []
-    onCleanupCallbacks.push(registerDragPanInertiaProfiles(map))
-    onCleanupCallbacks.push(registerTouchContextMenu(map))
+const makeBasicStyle = (useRaster: boolean): BaseStyle => ({
+  source: TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString(),
+  options: { diff: false },
+  onLoaded: (map) => {
+    const onCleanup: (() => void)[] = []
+
+    onCleanup.push(registerDragPanInertiaProfiles(map))
+    onCleanup.push(registerTouchContextMenu(map))
     rainfallLayer.register(map, 'Water labels')
-    onCleanupCallbacks.push(rainfallLayer.unregister)
+    onCleanup.push(rainfallLayer.unregister)
 
     if (useRaster) {
       map.addSource('raster-sen2', {
@@ -757,11 +761,6 @@ watchDefinedOnce(
         if (layerId === 'raster-sen2-layer') return
 
         const layer = map.getLayer(layerId)!
-
-        if (useRasterOnly) {
-          layer.setLayoutProperty('visibility', 'none')
-          return
-        }
 
         switch (layer.type) {
           case 'symbol':
@@ -838,7 +837,7 @@ watchDefinedOnce(
       'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 0.45, 7, 0.25, 10, 0],
     })
 
-    onCleanupCallbacks.push(
+    onCleanup.push(
       watch(
         zoom,
         (value) => {
@@ -860,7 +859,7 @@ watchDefinedOnce(
       ).stop,
     )
 
-    onCleanupCallbacks.push(
+    onCleanup.push(
       watch(
         terrainEnabled,
         (enabled) => {
@@ -891,7 +890,7 @@ watchDefinedOnce(
       },
     })
 
-    onCleanupCallbacks.push(
+    onCleanup.push(
       watch(
         terrainEnabled,
         (enabled) => {
@@ -918,29 +917,12 @@ watchDefinedOnce(
       'Water labels',
     )
     ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
-      const layer = map.getStyle().layers.find((l) => l.id === layerId)!
+      const layer = map.getStyle().layers.find((l) => l.id === layerId)
+      if (!layer) return
+
       map.removeLayer(layerId)
       map.addLayer(layer, 'bevy-texture')
     })
-
-    // Tree Mesh Layer
-
-    if (enableTrees) {
-      const forestLayer = map.getLayer('Wood')!
-      const treeMeshLayer = new TreeMeshLayer(forestLayer)
-      map.addLayer(treeMeshLayer, 'Water labels')
-
-      onCleanupCallbacks.push(
-        watch(
-          zoom,
-          (value) => {
-            const visible = value >= 14 && !useRaster
-            map.setLayoutProperty(treeMeshLayer.id, 'visibility', visible ? 'visible' : 'none')
-          },
-          { immediate: true },
-        ).stop,
-      )
-    }
 
     // Highlight
 
@@ -960,8 +942,54 @@ watchDefinedOnce(
 
     // Clean-Up
 
+    return { onCleanup }
+  },
+})
+
+const baseStyleDefinitions = {
+  [BaseStyleDefinitionType.Normal]: makeBasicStyle(false),
+  [BaseStyleDefinitionType.Satellite]: makeBasicStyle(true),
+}
+
+const baseStyle = computed(() => baseStyleDefinitions[baseStyleType.value])
+
+watchDefinedOnce(
+  () => mapInstance.map,
+  (map) => {
+    const onWatcherCleanupCallbacks: (() => void)[] = []
+    let styleRequestId = 0
+    let onStyleCleanupCallbacks: (() => void)[] = []
+
+    const cleanupStyle = () => {
+      onStyleCleanupCallbacks.splice(0).forEach((callback) => callback())
+      selectableLayers.value = []
+    }
+
+    onWatcherCleanupCallbacks.push(
+      watch(
+        baseStyle,
+        async (selectedBaseStyle) => {
+          const currentStyleRequestId = ++styleRequestId
+
+          cleanupStyle()
+
+          const styleLoaded = map.once('style.load') as Promise<unknown>
+          map.setStyle(selectedBaseStyle.source, selectedBaseStyle.options)
+
+          await styleLoaded
+
+          if (currentStyleRequestId !== styleRequestId) return
+
+          onStyleCleanupCallbacks = selectedBaseStyle.onLoaded(map).onCleanup
+        },
+        { immediate: true },
+      ).stop,
+    )
+
     onWatcherCleanup(() => {
-      onCleanupCallbacks.forEach((cleanup) => cleanup())
+      styleRequestId++
+      cleanupStyle()
+      onWatcherCleanupCallbacks.forEach((callback) => callback())
     })
   },
 )
