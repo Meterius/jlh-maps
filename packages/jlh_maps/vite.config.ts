@@ -14,7 +14,25 @@ export default defineConfig({
       allow: ['./', '../../crates/jlh_maps_frontend/pkg', '../../crates/jlh_maps_app/pkg'],
     },
   },
-  plugins: [wasm(), vue(), ui(), vueJsx(), vueDevTools()],
+  plugins: [
+    wasm(),
+    vue(),
+    ui({
+      ui: {
+        colors: {
+          primary: 'fuchsia',
+          secondary: 'sky',
+          success: 'green',
+          info: 'blue',
+          warning: 'yellow',
+          error: 'red',
+          neutral: 'slatish',
+        },
+      },
+    }),
+    vueJsx(),
+    vueDevTools(),
+  ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

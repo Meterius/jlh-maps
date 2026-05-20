@@ -45,17 +45,16 @@
           <ValhallaTripLegCardSkeleton />
         </div>
 
-        <div
+        <UAlert
           v-else-if="routeErrorMessage"
           role="alert"
-          class="grid grid-cols-[2rem_minmax(0,1fr)] gap-3 rounded-md border border-red-200 bg-red-50 p-3 text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200"
-        >
-          <UIcon name="lucide:triangle-alert" class="mt-0.5 size-5" />
-          <div class="grid min-w-0 gap-1">
-            <h2 class="text-sm font-semibold">Unable to calculate route</h2>
-            <p class="text-sm wrap-break-word">{{ routeErrorMessage }}</p>
-          </div>
-        </div>
+          color="error"
+          variant="soft"
+          icon="lucide:triangle-alert"
+          title="Unable to calculate route"
+          :description="routeErrorMessage"
+          :ui="{ description: 'wrap-break-word' }"
+        />
 
         <div v-else-if="route" class="grid gap-3">
           <ValhallaTripLegCard
