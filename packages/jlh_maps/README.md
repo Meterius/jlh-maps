@@ -17,8 +17,11 @@ npm run lint
 
 Vite loads `.env` for every command and `.env.[mode]` for the active mode.
 `npm run dev` runs `vite --mode dev`, so dev-server overrides live in
-`.env.dev`. Production/static builds use the root-domain defaults from `.env`
-unless a build command passes a different `--mode`.
+`.env.dev`. `npm run build` and `npm run build:prod` use the production-domain
+defaults from `.env`. `npm run build:local` uses Vite mode `local-docker` and
+`.env.local-docker` for the static bundle served by `infra/compose.local.yaml`.
+Vite reserves `local` as the `.env.local` machine-override suffix, so it cannot
+be used directly as a mode name.
 
 The `VITE_*` values are embedded in the frontend bundle at build time.
 

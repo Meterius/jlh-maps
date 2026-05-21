@@ -1,0 +1,138 @@
+http:
+  routers:
+    frontend:
+      rule: Host(`{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - websecure
+      service: frontend
+      middlewares:
+        - public_security_headers
+      tls:
+        certResolver: letsencrypt
+
+    core_service:
+      rule: Host(`api.{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - websecure
+      service: core_service
+      middlewares:
+        - public_security_headers
+        - public_rate_limit
+        - public_inflight_limit
+      tls:
+        certResolver: letsencrypt
+
+    omt_tileserver_gl:
+      rule: Host(`tiles.{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - websecure
+      service: omt_tileserver_gl
+      middlewares:
+        - public_security_headers
+        - public_rate_limit
+        - public_inflight_limit
+      tls:
+        certResolver: letsencrypt
+
+    raster_tile_json_server:
+      rule: Host(`raster.{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - websecure
+      service: raster_tile_json_server
+      middlewares:
+        - public_security_headers
+        - raster_cors
+        - public_rate_limit
+        - public_inflight_limit
+      tls:
+        certResolver: letsencrypt
+
+    valhalla:
+      rule: Host(`valhalla.{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - websecure
+      service: valhalla
+      middlewares:
+        - public_security_headers
+        - valhalla_cors
+        - public_rate_limit
+        - public_inflight_limit
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    frontend:
+      loadBalancer:
+        servers:
+          - url: http://frontend:8080
+
+    core_service:
+      loadBalancer:
+        servers:
+          - url: http://core_service:8080
+
+    omt_tileserver_gl:
+      loadBalancer:
+        servers:
+          - url: http://omt_tileserver_gl:8080
+
+    raster_tile_json_server:
+      loadBalancer:
+        servers:
+          - url: http://raster_tile_json_server:8080
+
+    valhalla:
+      loadBalancer:
+        servers:
+          - url: http://valhalla:8002
+
+  middlewares:
+    public_security_headers:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: no-referrer
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+
+    public_rate_limit:
+      rateLimit:
+        average: 120
+        burst: 240
+
+    public_inflight_limit:
+      inFlightReq:
+        amount: 64
+
+    raster_cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - HEAD
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Origin
+          - Accept
+          - Content-Type
+        accessControlAllowOriginList:
+          - https://{{ env "ROOT_DOMAIN" }}
+        accessControlMaxAge: 86400
+        addVaryHeader: true
+
+    valhalla_cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Origin
+          - Accept
+          - Content-Type
+          - X-Client-Id
+        accessControlAllowOriginList:
+          - https://{{ env "ROOT_DOMAIN" }}
+          - https://maps.{{ env "ROOT_DOMAIN" }}
+        accessControlMaxAge: 86400
+        addVaryHeader: true

@@ -14,7 +14,7 @@ Run commands from this `infra` directory unless otherwise noted.
 | --- | --- |
 | `compose.yaml` | Shared service definitions and common named volumes. Deployment-specific data mounts are intentionally omitted here. |
 | `compose.local.yaml` | Local Docker Desktop override with `.localhost` and `ROOT_DOMAIN` Traefik routing, local DNS, local host ports, and host bind-mounted data paths. |
-| `compose.prod.mono.yaml` | Single-server production override with HTTPS Traefik routing under fixed service subdomains and local Docker volumes for service data. |
+| `compose.prod.mono.yaml` | Single-server production override with HTTPS Traefik routing under fixed service subdomains and host bind-mounted data paths. |
 | `compose.jobs.yaml` | One-shot import jobs, such as loading OSM data into PostGIS. |
 
 ### Services
@@ -53,7 +53,7 @@ The environment files are split by scope:
 | --- | --- | --- |
 | `.env` | All Compose commands | Shared database defaults used by the base stack and jobs. |
 | `.local.env` | `compose.local.yaml` | Local host paths, local root domain, and Docker host LAN IP. |
-| `.prod.mono.env` | `compose.prod.mono.yaml` only | Root domain, TLS email, production database credentials, and external Docker volume names. |
+| `.prod.mono.env` | `compose.prod.mono.yaml` only | Root domain, TLS email, production database credentials, and host data paths. |
 
 Review `.env` and the target overlay env file before starting a stack.
 These files are intentionally gitignored because they can contain local paths
@@ -110,12 +110,17 @@ LAN. If port 53 is already occupied on the Docker host, stop the conflicting DNS
 service or move this stack to a host where DNS port 53 can be published.
 
 Production `.prod.mono.env` is only loaded by the prod mono recipe and should
-be edited on the target server. It includes `ROOT_DOMAIN`, TLS email, and the
-names of pre-provisioned Docker volumes.
+be edited on the target server. For local prod-mono testing, it can use the same
+data path variables as `.local.env`; Traefik ACME state remains in a dedicated
+Compose-managed volume.
 
 Example production domain settings:
 
 ```dotenv
+OPENMAPTILES_DIR=...
+SAT_RASTER_TILE_JSON_DIR=...
+VALHALLA_CUSTOM_FILES_DIR=...
+JLH_MAPS_DIST_DIR=...
 ROOT_DOMAIN=example.com
 TRAEFIK_ACME_EMAIL=ops@example.com
 ```
@@ -159,12 +164,12 @@ ${OPENMAPTILES_DIR}/
 `style/config.json` must reference the MBTiles and style assets available in
 the mounted `data`, `style`, and `build` directories.
 
-For `compose.prod.mono.yaml`, the same three directories are supplied by these
-external Docker volumes:
+For `compose.prod.mono.yaml`, the same three directories are supplied by the
+same `OPENMAPTILES_DIR` host path used by the local overlay:
 
-- `${PROD_MONO_OPENMAPTILES_DATA_VOLUME}` mounted at `/data`
-- `${PROD_MONO_OPENMAPTILES_STYLE_VOLUME}` mounted at `/style`
-- `${PROD_MONO_OPENMAPTILES_BUILD_VOLUME}` mounted at `/build`
+- `${OPENMAPTILES_DIR}/data` mounted at `/data`
+- `${OPENMAPTILES_DIR}/style` mounted at `/style`
+- `${OPENMAPTILES_DIR}/build` mounted at `/build`
 
 ### Vite Frontend
 
@@ -174,20 +179,26 @@ starting the local stack if `${JLH_MAPS_DIST_DIR}` points at the default
 
 ```powershell
 Push-Location ..\packages\jlh_maps
-npm run build
+npm run build:local
 Pop-Location
 ```
 
-For `compose.prod.mono.yaml`, `${PROD_MONO_JLH_MAPS_DIST_VOLUME}` must contain
-the contents of `packages/jlh_maps/dist` at the volume root.
+For `compose.prod.mono.yaml`, `${JLH_MAPS_DIST_DIR}` must contain the contents
+of `packages/jlh_maps/dist` at the directory root. Build that bundle with:
+
+```powershell
+Push-Location ..\packages\jlh_maps
+npm run build:prod
+Pop-Location
+```
 
 ### Sentinel-2 Raster TileJSON
 
 `raster_tile_json_server` only serves files. Generate the raster tiles before
 starting the service. See `crates/sat_ingest` for an example of converting satellite imagery to the expected raster tile format.
 
-For `compose.prod.mono.yaml`, `${PROD_MONO_SAT_RASTER_TILE_JSON_VOLUME}` must
-contain `tilejson.json` and the generated `{z}/{x}/{y}.png` tree.
+For `compose.prod.mono.yaml`, `${SAT_RASTER_TILE_JSON_DIR}` must contain
+`tilejson.json` and the generated `{z}/{x}/{y}.png` tree.
 
 ### OSM Data For PostGIS
 
@@ -216,26 +227,26 @@ Generate these artifacts with Valhalla tooling for the same OSM extract you
 want to route over, then place them under `infra/geo/valhalla/custom_files`
 before starting the `valhalla` service.
 
-For `compose.prod.mono.yaml`, `${PROD_MONO_VALHALLA_CUSTOM_FILES_VOLUME}` must
-contain these files at the volume root.
+For `compose.prod.mono.yaml`, `${VALHALLA_CUSTOM_FILES_DIR}` must contain
+these files at the directory root.
 
-## Production Mono Volumes
+The prod mono overlay runs `valhalla_service` directly against the prebuilt
+`${VALHALLA_CUSTOM_FILES_DIR}/valhalla.json` instead of using the scripted image
+entrypoint. The scripted entrypoint is useful for preparing or updating data,
+but it rewrites files in `/custom_files` during startup, so it is incompatible
+with the prod read-only mount used for request serving.
 
-`compose.prod.mono.yaml` assumes one server running the Docker stack. These
-external local Docker volumes must already exist and be populated before
-starting the prod mono stack:
+## Production Mono Paths
 
-```powershell
-docker volume create jlh_maps_openmaptiles_data
-docker volume create jlh_maps_openmaptiles_style
-docker volume create jlh_maps_openmaptiles_build
-docker volume create jlh_maps_sat_raster_tile_json
-docker volume create jlh_maps_dist
-docker volume create jlh_maps_valhalla_custom_files
-```
+`compose.prod.mono.yaml` assumes one server running the Docker stack. The data
+paths in `.prod.mono.env` must already exist and be populated before starting
+the prod mono stack. When testing prod mono locally, these can intentionally be
+the same paths used by `.local.env`.
 
-The names above match the defaults in `.prod.mono.env`. Change either the env
-file or the created volume names if a different naming convention is used.
+Traefik certificate state is the exception: it is stored in the
+`traefik_letsencrypt` Compose-managed volume so ACME state survives container
+recreation without requiring a host path.
+
 
 ## Running The Stack
 

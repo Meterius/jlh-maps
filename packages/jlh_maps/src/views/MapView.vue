@@ -269,7 +269,7 @@ import { center } from '@turf/turf'
 import type { FeatureCollection } from 'geojson'
 import {
   TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL,
-  TILESERVER_RASTER_SEN2_TILEJSON_URL,
+  TILESERVER_RASTER_SEN2_TILE_URL_PATTERN,
 } from '@/external/endpoints.ts'
 import { makeUniqueMapKey, useMapExtended, useMapSelection } from '@/composables/maplibre.ts'
 import { watchDefinedOnce } from '@/composables/helper.ts'
@@ -741,7 +741,12 @@ const makeBasicStyle = (useRaster: boolean): BaseStyle => ({
     if (useRaster) {
       map.addSource('raster-sen2', {
         type: 'raster',
-        url: TILESERVER_RASTER_SEN2_TILEJSON_URL.toString(),
+        tiles: [TILESERVER_RASTER_SEN2_TILE_URL_PATTERN],
+        bounds: [-180.0, -81.06141849964385, 180.0, 83.74834535283912],
+        scheme: 'xyz',
+        minzoom: 0,
+        maxzoom: 10,
+        tileSize: 2048,
       })
 
       map.addLayer(

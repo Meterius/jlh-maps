@@ -57,7 +57,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.raster_tile_json_server.rule=Host(`raster.jlh_maps.localhost`) || Host(`raster.${ROOT_DOMAIN}`)"
       - "traefik.http.routers.raster_tile_json_server.entrypoints=web"
-      - "traefik.http.services.raster_tile_json_server.loadbalancer.server.port=80"
+      - "traefik.http.services.raster_tile_json_server.loadbalancer.server.port=8080"
 
   frontend:
     volumes:
@@ -67,7 +67,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`localhost`) || Host(`${ROOT_DOMAIN}`)"
       - "traefik.http.routers.frontend.entrypoints=web"
-      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      - "traefik.http.services.frontend.loadbalancer.server.port=8080"
 
   core_service:
     labels:

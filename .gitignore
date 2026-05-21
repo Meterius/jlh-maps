@@ -5,6 +5,7 @@
 .local.env
 .prod.mono.env
 .env.dev
+.env.local-docker
 .cursor
 .codex
 /crates/utilities/test-data/

@@ -4,8 +4,7 @@ services:
   # - raster_tile_json_server: /usr/share/nginx/html/raster/sen2
   # - frontend: /usr/share/nginx/html
   # - valhalla: /custom_files
-  # compose.local.yaml uses host bind mounts. compose.prod.mono.yaml uses
-  # pre-provisioned local Docker volumes on a single production server.
+  # compose.local.yaml and compose.prod.mono.yaml use host bind mounts.
   traefik:
     image: traefik:v3.6
 

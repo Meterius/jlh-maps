@@ -15,6 +15,8 @@ export const TILESERVER_RASTER_SEN2_TILEJSON_URL = new URL(
   RASTER_TILESERVER_URL,
 )
 
+export const TILESERVER_RASTER_SEN2_TILE_URL_PATTERN = `${RASTER_TILESERVER_URL.toString().replace(/\/$/, '')}/raster/sen2/{z}/{x}/{y}.png`
+
 export interface OsmData {
   tags: Record<string, string>
   attrs: Record<string, string | number>

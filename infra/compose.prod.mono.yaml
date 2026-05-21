@@ -1,102 +1,202 @@
+x-prod-service-defaults: &prod-service-defaults
+  # Run tini as PID 1 so orphaned child processes are reaped instead of
+  # accumulating inside long-lived containers.
+  init: true
+  # Prevent a process that is compromised inside the container from gaining
+  # extra privileges through setuid binaries or similar mechanisms.
+  security_opt:
+    - no-new-privileges:true
+  # Bound fork/process exhaustion if a public service is abused.
+  pids_limit: 512
+
+x-prod-locked-down-service: &prod-locked-down-service
+  <<: *prod-service-defaults
+  # Drop Linux capabilities by default. Services that need a capability should
+  # opt back into only that specific capability.
+  cap_drop:
+    - ALL
+  # Keep the container root filesystem immutable so a service compromise cannot
+  # persist changes outside of explicitly mounted volumes or tmpfs paths.
+  read_only: true
+  # Provide scratch space without writing to the image filesystem.
+  tmpfs:
+    - /tmp
+
+x-prod-nginx-service: &prod-nginx-service
+  <<: *prod-locked-down-service
+  # The nginx image's nginx user is uid/gid 101. Running as it avoids needing
+  # root just to serve static files on an unprivileged internal port.
+  user: "101:101"
+  # nginx needs writable runtime/cache directories even when the image
+  # filesystem is read-only; tmpfs keeps those writes ephemeral.
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    - /var/cache/nginx:rw,noexec,nosuid,size=64m,mode=1777
+    - /var/run:rw,noexec,nosuid,size=8m,mode=1777
+
 services:
   traefik:
+    <<: *prod-locked-down-service
     command:
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      # Use a static file provider instead of the Docker provider so Traefik
+      # does not need access to /var/run/docker.sock. This prevents a Traefik
+      # compromise from becoming Docker API access to the host.
+      - "--providers.file.filename=/etc/traefik/prod-mono.dynamic.yaml"
+      - "--providers.file.watch=false"
+      # Listen on high ports inside the container so Traefik does not require
+      # NET_BIND_SERVICE. The router exposes public 80/443 and forwards to the
+      # host's high published ports below.
+      - "--entrypoints.web.address=:8080"
+      - "--entrypoints.websecure.address=:8443"
+      # Public traffic reaches the host through router port forwarding:
+      # internet 80 -> host 40080 -> container 8080, and
+      # internet 443 -> host 40443 -> container 8443. Redirect directly to the
+      # public HTTPS port because Traefik v3 has no separate redirect port flag.
+      - "--entrypoints.web.http.redirections.entrypoint.to=:443"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
       - "--certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      # Use TLS-ALPN-01 instead of HTTP-01 because this local hosting setup may
+      # have public port 80 blocked while public 443 is still reachable.
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+
+    configs:
+      - source: traefik_dynamic_prod_mono
+        target: /etc/traefik/prod-mono.dynamic.yaml
+
+    environment:
+      ROOT_DOMAIN: ${ROOT_DOMAIN}
 
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Persist ACME state across container restarts to avoid certificate
+      # re-issuance loops and Let's Encrypt rate limits.
       - traefik_letsencrypt:/letsencrypt
 
     ports:
-      - "80:80"
-      - "443:443"
+      - "40080:8080"
+      - "40443:8443"
+
+    networks:
+      # Traefik is the only service reachable from the host. It joins the
+      # private backend networks solely to reverse-proxy to each service.
+      - traefik_public
+      - frontend_private
+      - api_private
+      - tiles_private
+      - raster_private
+      - valhalla_private
+
+  postgres_osm:
+    <<: *prod-service-defaults
+
+    volumes:
+      # Postgres needs a writable data directory; other inputs are read-only so
+      # a database compromise cannot rewrite initialization/config files.
+      - postgres_osm_data:/var/lib/postgresql/data
+      - ./postgres_osm/postgres.conf:/etc/postgresql.conf:ro
+      - ./postgres_osm/init:/docker-entrypoint-initdb.d/:ro
+
+    networks:
+      # Postgres is not attached to any Traefik-facing network. Only the API can
+      # reach it over this private data network.
+      - postgres_private
 
   omt_tileserver_gl:
-    volumes:
-      - openmaptiles_data:/data:ro
-      - openmaptiles_style:/style:ro
-      - openmaptiles_build:/build:ro
+    <<: *prod-locked-down-service
 
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.omt_tileserver_gl.rule=Host(`tiles.${ROOT_DOMAIN}`)"
-      - "traefik.http.routers.omt_tileserver_gl.entrypoints=websecure"
-      - "traefik.http.routers.omt_tileserver_gl.tls.certresolver=letsencrypt"
-      - "traefik.http.services.omt_tileserver_gl.loadbalancer.server.port=8080"
+    volumes:
+      # Tile data/style/build artifacts are runtime inputs, not mutable service
+      # state, so keep them read-only.
+      - ${OPENMAPTILES_DIR}/data:/data:ro
+      - ${OPENMAPTILES_DIR}/style:/style:ro
+      - ${OPENMAPTILES_DIR}/build:/build:ro
+
+    networks:
+      - tiles_private
 
   raster_tile_json_server:
-    volumes:
-      - sat_raster_tile_json:/usr/share/nginx/html/raster/sen2:ro
+    <<: *prod-nginx-service
 
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.raster_tile_json_server.rule=Host(`raster.${ROOT_DOMAIN}`)"
-      - "traefik.http.routers.raster_tile_json_server.entrypoints=websecure"
-      - "traefik.http.routers.raster_tile_json_server.tls.certresolver=letsencrypt"
-      - "traefik.http.services.raster_tile_json_server.loadbalancer.server.port=80"
+    volumes:
+      # Prod CORS is handled by Traefik, so use a smaller nginx config here and
+      # keep the raster data read-only.
+      - ./raster_tile_json_server/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
+
+    networks:
+      - raster_private
 
   frontend:
-    volumes:
-      - jlh_maps_dist:/usr/share/nginx/html:ro
+    <<: *prod-nginx-service
 
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`${ROOT_DOMAIN}`)"
-      - "traefik.http.routers.frontend.entrypoints=websecure"
-      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+    volumes:
+      # The frontend is a built artifact volume. Serving it read-only prevents a
+      # web-server compromise from changing the deployed application bundle.
+      - ${JLH_MAPS_DIST_DIR}:/usr/share/nginx/html:ro
+
+    networks:
+      - frontend_private
 
   core_service:
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.core_service.rule=Host(`api.${ROOT_DOMAIN}`)"
-      - "traefik.http.routers.core_service.entrypoints=websecure"
-      - "traefik.http.routers.core_service.tls.certresolver=letsencrypt"
-      - "traefik.http.services.core_service.loadbalancer.server.port=8080"
+    <<: *prod-locked-down-service
+    # Run the API as a high non-root uid/gid. The runtime image does not need to
+    # own files because the service is stateless.
+    user: "65532:65532"
+
+    networks:
+      # The API is the only public service that can also reach Postgres.
+      - api_private
+      - postgres_private
 
   valhalla:
-    volumes:
-      - valhalla_custom_files:/custom_files:ro
+    <<: *prod-locked-down-service
 
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.valhalla.rule=Host(`valhalla.${ROOT_DOMAIN}`)"
-      - "traefik.http.routers.valhalla.entrypoints=websecure"
-      - "traefik.http.routers.valhalla.middlewares=valhalla_cors"
-      - "traefik.http.routers.valhalla.tls.certresolver=letsencrypt"
-      - "traefik.http.services.valhalla.loadbalancer.server.port=8002"
-      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolallowmethods=GET,POST,OPTIONS"
-      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolallowheaders=Origin,Accept,Content-Type,X-Client-Id"
-      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolalloworiginlist=https://${ROOT_DOMAIN},https://maps.${ROOT_DOMAIN}"
-      - "traefik.http.middlewares.valhalla_cors.headers.accesscontrolmaxage=86400"
-      - "traefik.http.middlewares.valhalla_cors.headers.addvaryheader=true"
+    # The scripted image entrypoint is useful for building/updating data, but it
+    # rewrites files under /custom_files on startup. In prod serving mode, bypass
+    # that script and run Valhalla directly against prebuilt read-only data.
+    entrypoint:
+      - valhalla_service
+    command:
+      - /custom_files/valhalla.json
+      - "${VALHALLA_SERVER_THREADS:-2}"
+
+    volumes:
+      # Valhalla graph/config data is generated ahead of deployment and should
+      # not be writable by the request-serving container.
+      - ${VALHALLA_CUSTOM_FILES_DIR}:/custom_files:ro
+
+    networks:
+      - valhalla_private
+
+configs:
+  traefik_dynamic_prod_mono:
+    # Compose can mount file-backed configs into read-only services. Inline
+    # `content` configs are not supported when the service has read_only: true.
+    file: ./traefik/prod-mono.dynamic.yaml
+
+networks:
+  traefik_public:
+    driver: bridge
+  frontend_private:
+    driver: bridge
+    # Internal networks have no direct external routing. Public requests must
+    # pass through Traefik rather than reaching backend containers directly.
+    internal: true
+  api_private:
+    driver: bridge
+    internal: true
+  postgres_private:
+    driver: bridge
+    internal: true
+  tiles_private:
+    driver: bridge
+    internal: true
+  raster_private:
+    driver: bridge
+    internal: true
+  valhalla_private:
+    driver: bridge
+    internal: true
 
 volumes:
   traefik_letsencrypt:
-  openmaptiles_data:
-    external: true
-    name: ${PROD_MONO_OPENMAPTILES_DATA_VOLUME}
-  openmaptiles_style:
-    external: true
-    name: ${PROD_MONO_OPENMAPTILES_STYLE_VOLUME}
-  openmaptiles_build:
-    external: true
-    name: ${PROD_MONO_OPENMAPTILES_BUILD_VOLUME}
-  sat_raster_tile_json:
-    external: true
-    name: ${PROD_MONO_SAT_RASTER_TILE_JSON_VOLUME}
-  jlh_maps_dist:
-    external: true
-    name: ${PROD_MONO_JLH_MAPS_DIST_VOLUME}
-  valhalla_custom_files:
-    external: true
-    name: ${PROD_MONO_VALHALLA_CUSTOM_FILES_VOLUME}

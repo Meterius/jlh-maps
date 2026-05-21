@@ -5,4 +5,4 @@ _run-local:
     docker compose --env-file .env --env-file .local.env -f compose.yaml -f compose.local.yaml up
 
 _run-prod-mono:
-    docker compose --env-file .env --env-file .prod.mono.env -f compose.yaml -f compose.prod.mono.yaml up -d --build
+    docker compose --env-file .env --env-file .prod.mono.env -f compose.yaml -f compose.prod.mono.yaml up
