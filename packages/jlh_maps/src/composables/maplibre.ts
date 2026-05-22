@@ -2,25 +2,31 @@ import { useMap } from '@indoorequal/vue-maplibre-gl'
 import { extractOsmIdFromOmtFeatureId, type OsmId } from '@/utils/osm.ts'
 import {
   type AddLayerObject,
+  type CanvasSourceSpecification,
   type GeoJSONFeature,
   type GeoJSONSource,
   LngLat,
   type MapLayerMouseEvent,
   type MapLibreMap,
+  type RasterSourceSpecification,
+  type RasterTileSource,
+  type SourceSpecification,
   type MapMouseEvent,
+  type StyleImageInterface,
+  type StyleImageMetadata,
   type Subscription,
 } from 'maplibre-gl'
 import {
-  onBeforeUnmount,
   onUnmounted,
-  onWatcherCleanup,
   ref,
   shallowRef,
+  toValue,
   watch,
+  type MaybeRefOrGetter,
   type WatchSource,
 } from 'vue'
 import { get } from '@vueuse/core'
-import { watchDefinedOnce } from '@/composables/helper.ts'
+import { onScopeDisposeLifo, onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import type { GeoJSON } from 'geojson'
 
 const CLICK_LAYER_SYNC_BUFFER_MS = 50
@@ -170,7 +176,7 @@ export function useMapExtended(key?: symbol | string) {
         }),
       ]
 
-      onWatcherCleanup(() => {
+      onWatcherCleanupLifo(() => {
         subscriptions.forEach((sub) => sub.unsubscribe())
       })
     },
@@ -184,64 +190,111 @@ export function useMapExtended(key?: symbol | string) {
   }
 }
 
+export type UseSourceSpecification = SourceSpecification | CanvasSourceSpecification
+
+export function useSource(map: MapLibreMap, sourceId: string, source: UseSourceSpecification) {
+  map.addSource(sourceId, source)
+
+  onScopeDisposeLifo(() => {
+    if (map.getSource(sourceId)) {
+      map.removeSource(sourceId)
+    }
+  })
+}
+
 export function useGeoJsonSource(map: MapLibreMap, sourceId: string, data: WatchSource<GeoJSON>) {
-  map.addSource(sourceId, {
+  useSource(map, sourceId, {
     type: 'geojson',
-    data: {
-      type: 'FeatureCollection',
-      features: [],
-    },
+    data: toValue(data),
   })
 
-  const { stop: stopData } = watch(
+  watch(
     data,
     (updatedData) => {
       map.getSource<GeoJSONSource>(sourceId)?.setData(updatedData)
     },
     { immediate: true },
   )
-
-  let removed = false
-  const remove = () => {
-    if (removed) return
-    removed = true
-
-    stopData()
-    map.removeSource(sourceId)
-  }
-
-  onBeforeUnmount(remove)
-
-  return {
-    remove,
-  }
 }
 
-export function useLayer(map: MapLibreMap, layer: AddLayerObject, beforeId?: string) {
-  map.addLayer(layer, beforeId)
+export type UseRasterTilesBasedSourceSpecification = Omit<
+  RasterSourceSpecification,
+  'type' | 'url' | 'tiles'
+> & {
+  tiles: MaybeRefOrGetter<string[]>
+}
 
-  const visible = ref(true)
-  const { stop } = watch(
-    visible,
-    (value) => {
-      map.setLayoutProperty(layer.id, 'visibility', value ? 'visible' : 'none')
+export function useRasterTilesBasedSource(
+  map: MapLibreMap,
+  sourceId: string,
+  source: UseRasterTilesBasedSourceSpecification,
+) {
+  const { tiles, ...sourceOptions } = source
+
+  useSource(map, sourceId, {
+    type: 'raster',
+    ...sourceOptions,
+    tiles: toValue(tiles),
+  })
+
+  watch(
+    () => toValue(tiles),
+    (updatedTiles) => {
+      map.getSource<RasterTileSource>(sourceId)?.setTiles(updatedTiles)
     },
     { immediate: true },
   )
+}
 
-  let removed = false
-  const remove = () => {
-    if (removed) return
-    removed = true
+export interface UseLayerOptions {
+  beforeId?: string
+  visible?: WatchSource<boolean>
+}
 
-    stop()
-    map.removeLayer(layer.id)
+export function useLayer(map: MapLibreMap, layer: AddLayerObject, options: UseLayerOptions = {}) {
+  const { beforeId, visible } = options
+
+  map.addLayer(layer, beforeId)
+
+  if (visible !== undefined) {
+    watch(
+      visible,
+      (value) => {
+        if (map.getLayer(layer.id)) {
+          map.setLayoutProperty(layer.id, 'visibility', value ? 'visible' : 'none')
+        }
+      },
+      { immediate: true },
+    )
   }
 
-  onBeforeUnmount(remove)
+  onScopeDisposeLifo(() => {
+    if (map.getLayer(layer.id)) {
+      map.removeLayer(layer.id)
+    }
+  })
+}
 
-  return {
-    remove,
-    visible,
-  }
+type MapLibreMapImageData =
+  | HTMLImageElement
+  | ImageBitmap
+  | ImageData
+  | {
+      width: number
+      height: number
+      data: Uint8Array | Uint8ClampedArray
+    }
+  | StyleImageInterface
+
+export function useImage(
+  map: MapLibreMap,
+  imageId: string,
+  image: MapLibreMapImageData,
+  { options }: { options?: Partial<StyleImageMetadata> },
+) {
+  map.addImage(imageId, image, options)
+
+  onScopeDisposeLifo(() => {
+    map.removeImage(imageId)
+  })
 }

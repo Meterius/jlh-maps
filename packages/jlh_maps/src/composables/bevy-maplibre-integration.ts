@@ -16,8 +16,8 @@ import {
   type QuerySourceFeatureOptions,
   type Tile,
 } from 'maplibre-gl'
-import { onWatcherCleanup, shallowRef, toValue, type WatchSource } from 'vue'
-import { watchDefinedOnce } from '@/composables/helper.ts'
+import { shallowRef, toValue, type WatchSource } from 'vue'
+import { onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import { useMap } from '@indoorequal/vue-maplibre-gl'
 import type {
   CanonicalTileID,
@@ -102,7 +102,7 @@ export function useMaplibreGlJsIntegration(
 
       mapIntegration.value = integration
 
-      onWatcherCleanup(() => {
+      onWatcherCleanupLifo(() => {
         integration.stop()
         remove_map_integration(instanceId, mapIntegrationId)
       })

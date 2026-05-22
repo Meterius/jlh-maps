@@ -1,4 +1,5 @@
-import { onWatcherCleanup, ref, shallowRef, watch, type WatchSource } from 'vue'
+import { ref, shallowRef, watch, type WatchSource } from 'vue'
+import { onWatcherCleanupLifo } from '@/composables/helper.ts'
 
 export function useAsyncReactiveRequest<K, V>(
   params: WatchSource<K>,
@@ -14,7 +15,7 @@ export function useAsyncReactiveRequest<K, V>(
     async (value) => {
       const abortController = new AbortController()
 
-      onWatcherCleanup(() => {
+      onWatcherCleanupLifo(() => {
         abortController.abort()
       })
 

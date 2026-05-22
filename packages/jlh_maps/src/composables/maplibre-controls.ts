@@ -9,7 +9,8 @@ import {
   type ProjectionSpecification,
   type Subscription,
 } from 'maplibre-gl'
-import { computed, onUnmounted, onWatcherCleanup, ref, shallowRef, watch } from 'vue'
+import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { onWatcherCleanupLifo } from '@/composables/helper.ts'
 
 type HiddenNativeControl = {
   onAdd(map: MapLibreMap): HTMLElement
@@ -107,7 +108,7 @@ function useHiddenNativeControl<TControl extends HiddenNativeControl>(
         loadSubscription = map.on('load', mountControl)
       }
 
-      onWatcherCleanup(() => {
+      onWatcherCleanupLifo(() => {
         disposed = true
         loadSubscription?.unsubscribe()
         removeControl()
@@ -181,7 +182,7 @@ export function useProjectionControl(key?: symbol | string) {
         map.on('projectiontransition', syncProjection),
       ]
 
-      onWatcherCleanup(() => {
+      onWatcherCleanupLifo(() => {
         subscriptions.forEach((sub) => sub.unsubscribe())
       })
     },

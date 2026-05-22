@@ -1,7 +1,6 @@
 import type { DragPanOptions } from 'maplibre-gl'
 import { useMap } from '@indoorequal/vue-maplibre-gl'
-import { watchDefinedOnce } from '@/composables/helper.ts'
-import { onWatcherCleanup } from 'vue'
+import { onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
 
 const DESKTOP_DRAG_PAN_OPTIONS: DragPanOptions = {
   linearity: 0.35,
@@ -36,7 +35,7 @@ function clampUnit(value: number) {
 export function usePanProfiles(mapKey: string | symbol | undefined) {
   const mapInstance = useMap(mapKey)
 
-  const { stop } = watchDefinedOnce(
+  watchDefinedOnce(
     () => mapInstance.map,
     (map) => {
       const canvasContainer = map.getCanvasContainer()
@@ -64,7 +63,7 @@ export function usePanProfiles(mapKey: string | symbol | undefined) {
         passive: true,
       })
 
-      onWatcherCleanup(() => {
+      onWatcherCleanupLifo(() => {
         canvasContainer.removeEventListener('pointerdown', usePointerProfile, { capture: true })
         canvasContainer.removeEventListener('mousedown', useDesktopProfile, { capture: true })
         canvasContainer.removeEventListener('touchstart', useMobileProfile, { capture: true })
@@ -74,9 +73,4 @@ export function usePanProfiles(mapKey: string | symbol | undefined) {
       })
     },
   )
-
-  return {
-    // remove pan profiles, automatically invoked when unmounted
-    remove: () => stop(),
-  }
 }

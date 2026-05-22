@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, toValue, watch, type WatchSource } from 'vue'
+import { computed, effectScope, shallowRef, toValue, watch, type WatchSource } from 'vue'
 import type { GeoLocation } from '@/components/types.ts'
 import { decodePolylineToPositions, type Trip } from 'valhalla_client'
 import type { FeatureCollection, LineString, Point, Position } from 'geojson'
@@ -7,7 +7,8 @@ import { point as turfPoint } from '@turf/helpers'
 import { svgToImage } from '@/utils/svg-to-image.ts'
 import mapPinIconSvg from 'lucide-static/icons/map-pin.svg?raw'
 import type { Map as MapLibreMap } from 'maplibre-gl'
-import { useGeoJsonSource, useLayer } from '@/composables/maplibre.ts'
+import { useGeoJsonSource, useImage, useLayer } from '@/composables/maplibre.ts'
+import { onWatcherCleanupLifo } from '@/composables/helper.ts'
 
 const DIRECTION_TRIP_PRIMARY_SOURCE_ID = 'direction-trip-primary'
 const DIRECTION_TRIP_PRIMARY_LAYER_ID = 'direction-trip-primary'
@@ -25,9 +26,11 @@ export function useDirectionsLayers(
   {
     stops,
     tripPrimary,
+    visible,
   }: {
     stops: WatchSource<(GeoLocation | null)[]>
     tripPrimary: WatchSource<Trip | null>
+    visible?: WatchSource<boolean>
   },
   beforeLayerId?: string,
 ) {
@@ -137,34 +140,35 @@ export function useDirectionsLayers(
     },
   )
 
-  const registerDirectionStopImage = async (map: MapLibreMap) => {
-    if (!map.hasImage(DIRECTION_STOP_ICON_ID)) {
-      const { image } = await svgToImage(mapPinIconSvg, {
-        width: 24,
-        pixelRatio: 2,
-        color: '#2563eb',
+  const image = shallowRef<ImageData | null>(null)
+
+  watch(
+    image,
+    (value) => {
+      if (value === null) return
+
+      const scope = effectScope()
+      scope.run(() => {
+        useImage(map, DIRECTION_STOP_ICON_ID, value, {
+          options: { pixelRatio: 2 },
+        })
       })
-
-      map.addImage(DIRECTION_STOP_ICON_ID, image, {
-        pixelRatio: 2,
-      })
-    }
-  }
-
-  registerDirectionStopImage(map).catch(console.error)
-
-  const { remove: removeTripPrimarySource } = useGeoJsonSource(
-    map,
-    DIRECTION_TRIP_PRIMARY_SOURCE_ID,
-    directionsTripPrimaryGeoJsonData,
-  )
-  const { remove: removeTripPrimaryConnectorSource } = useGeoJsonSource(
-    map,
-    DIRECTION_TRIP_PRIMARY_CONNECTOR_SOURCE_ID,
-    directionsTripPrimaryConnectorGeoJsonData,
+      onWatcherCleanupLifo(() => scope.stop())
+    },
+    { once: true },
   )
 
-  const tripPrimaryLayer = useLayer(
+  svgToImage(mapPinIconSvg, {
+    width: 24,
+    pixelRatio: 2,
+    color: '#2563eb',
+  }).then((res) => {
+    image.value = res.image
+  }, console.error)
+
+  useGeoJsonSource(map, DIRECTION_TRIP_PRIMARY_SOURCE_ID, directionsTripPrimaryGeoJsonData)
+
+  useLayer(
     map,
     {
       id: DIRECTION_TRIP_PRIMARY_LAYER_ID,
@@ -180,10 +184,19 @@ export function useDirectionsLayers(
         'line-width': 5,
       },
     },
-    beforeLayerId,
+    {
+      beforeId: beforeLayerId,
+      visible,
+    },
   )
 
-  const tripPrimaryConnectorLayer = useLayer(
+  useGeoJsonSource(
+    map,
+    DIRECTION_TRIP_PRIMARY_CONNECTOR_SOURCE_ID,
+    directionsTripPrimaryConnectorGeoJsonData,
+  )
+
+  useLayer(
     map,
     {
       id: DIRECTION_TRIP_PRIMARY_CONNECTOR_LAYER_ID,
@@ -200,82 +213,59 @@ export function useDirectionsLayers(
         'line-width': 3,
       },
     },
-    DIRECTION_TRIP_PRIMARY_LAYER_ID,
+    {
+      beforeId: DIRECTION_TRIP_PRIMARY_LAYER_ID,
+      visible,
+    },
   )
 
-  const { remove: removeStopsSource } = useGeoJsonSource(
+  useGeoJsonSource(map, DIRECTION_STOPS_SOURCE_ID, directionStopsGeoJsonData)
+
+  useLayer(
     map,
-    DIRECTION_STOPS_SOURCE_ID,
-    directionStopsGeoJsonData,
+    {
+      id: DIRECTION_STOPS_SHADOW_LAYER_ID,
+      source: DIRECTION_STOPS_SOURCE_ID,
+      type: 'circle',
+      paint: {
+        'circle-radius': 16,
+        'circle-blur': 0.4,
+        'circle-color': '#000000',
+        'circle-opacity': 0.3,
+        'circle-translate': [0, 0],
+        'circle-translate-anchor': 'viewport',
+        'circle-pitch-alignment': 'map',
+      },
+    },
+    { visible },
   )
 
-  const stopsShadowLayer = useLayer(map, {
-    id: DIRECTION_STOPS_SHADOW_LAYER_ID,
-    source: DIRECTION_STOPS_SOURCE_ID,
-    type: 'circle',
-    paint: {
-      'circle-radius': 16,
-      'circle-blur': 0.4,
-      'circle-color': '#000000',
-      'circle-opacity': 0.3,
-      'circle-translate': [0, 0],
-      'circle-translate-anchor': 'viewport',
-      'circle-pitch-alignment': 'map',
+  useLayer(
+    map,
+    {
+      id: DIRECTION_STOPS_LAYER_ID,
+      source: DIRECTION_STOPS_SOURCE_ID,
+      type: 'symbol',
+      layout: {
+        'icon-image': DIRECTION_STOP_ICON_ID,
+        'icon-size': 1.5,
+        'icon-anchor': 'bottom',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'text-field': ['get', 'label'],
+        'text-anchor': 'bottom',
+        'text-offset': [0, -2.25],
+        'text-size': 16,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+        'symbol-sort-key': ['get', 'sortKey'],
+      },
+      paint: {
+        'text-color': '#111827',
+        'text-halo-color': '#ffffff',
+        'text-halo-width': 2,
+      },
     },
-  })
-
-  const stopsLayer = useLayer(map, {
-    id: DIRECTION_STOPS_LAYER_ID,
-    source: DIRECTION_STOPS_SOURCE_ID,
-    type: 'symbol',
-    layout: {
-      'icon-image': DIRECTION_STOP_ICON_ID,
-      'icon-size': 1.5,
-      'icon-anchor': 'bottom',
-      'icon-allow-overlap': true,
-      'icon-ignore-placement': true,
-      'text-field': ['get', 'label'],
-      'text-anchor': 'bottom',
-      'text-offset': [0, -2.25],
-      'text-size': 16,
-      'text-allow-overlap': true,
-      'text-ignore-placement': true,
-      'symbol-sort-key': ['get', 'sortKey'],
-    },
-    paint: {
-      'text-color': '#111827',
-      'text-halo-color': '#ffffff',
-      'text-halo-width': 2,
-    },
-  })
-
-  const visible = ref(true)
-  const { stop: stopVisibleSync } = watch(
-    visible,
-    (value) => {
-      tripPrimaryLayer.visible.value = value
-      tripPrimaryConnectorLayer.visible.value = value
-      stopsShadowLayer.visible.value = value
-      stopsLayer.visible.value = value
-    },
-    { immediate: true },
+    { visible },
   )
-
-  const remove = () => {
-    stopVisibleSync()
-    stopsLayer.remove()
-    stopsShadowLayer.remove()
-    removeStopsSource()
-    tripPrimaryConnectorLayer.remove()
-    tripPrimaryLayer.remove()
-    removeTripPrimaryConnectorSource()
-    removeTripPrimarySource()
-  }
-
-  onBeforeUnmount(remove)
-
-  return {
-    remove,
-    visible,
-  }
 }

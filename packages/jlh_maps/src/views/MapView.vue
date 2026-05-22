@@ -343,13 +343,20 @@ import {
   TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL,
   TILESERVER_RASTER_SEN2_TILE_URL_PATTERN,
 } from '@/external/endpoints.ts'
-import { makeUniqueMapKey, useMapExtended, useMapSelection } from '@/composables/maplibre.ts'
+import {
+  makeUniqueMapKey,
+  useLayer,
+  useMapExtended,
+  useMapSelection,
+  useRasterTilesBasedSource,
+  useSource,
+} from '@/composables/maplibre.ts'
 import {
   useGeolocateControl,
   useGlobeControl,
   useNavigationControl,
 } from '@/composables/maplibre-controls.ts'
-import { watchDefinedOnce } from '@/composables/helper.ts'
+import { onScopeDisposeLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import { useMaplibreGlJsIntegration } from '@/composables/bevy-maplibre-integration.ts'
 import { useBevy } from '@/composables/bevy.ts'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
@@ -363,6 +370,7 @@ import {
 } from '@/maplibre-layers/directions-layers.ts'
 import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
+import { useRainfallRasterProvider } from '@/composables/rainfall-raster-provider.ts'
 import { getTripBounds } from '@/utils/valhalla.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
 import {
@@ -379,6 +387,7 @@ const { instanceId, mapViewSettings, mapViewCameraSettings, tick, mapTextureOffs
   useBevy(`#${bevyCanvasId}`, '.maplibregl-canvas')
 
 const { mapInstance, loaded, zoom } = useMapExtended(mapKey)
+
 const {
   active: globeActive,
   ariaPressed: globeAriaPressed,
@@ -386,6 +395,7 @@ const {
   title: globeTitle,
   trigger: triggerGlobe,
 } = useGlobeControl(mapKey)
+
 const {
   active: geolocateActive,
   ariaPressed: geolocateAriaPressed,
@@ -397,6 +407,7 @@ const {
 } = useGeolocateControl(mapKey, {
   trackUserLocation: true,
 })
+
 const {
   compassDisabled,
   compassIconStyle,
@@ -417,9 +428,6 @@ const { syncOnRender } = useMaplibreGlJsIntegration(() => instanceId, mapKey, {
     { sourceId: 'openmaptiles', sourceLayer: 'water' },
   ],
 })
-
-const tilejsonUrl = TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString()
-console.debug('Using TileJson URL: ', tilejsonUrl)
 
 // Base Style
 
@@ -698,16 +706,15 @@ watch(
 const terrainEnabled = ref(false)
 const rainfallEnabled = ref(false)
 
-const rainfallLayer = useRainfallRasterLayer({
-  visible: rainfallEnabled,
+const rainfallRasterSourceProvider = useRainfallRasterProvider({
   onLoadError: (error) => {
     console.warn('Failed to load RainViewer rainfall layer', error)
     rainfallEnabled.value = false
   },
 })
 
-const rainfallRasterDataTime = rainfallLayer.rasterDataTime
-const rainfallRasterLoading = rainfallLayer.loading
+const rainfallRasterDataTime = rainfallRasterSourceProvider.rasterDataTime
+const rainfallRasterLoading = rainfallRasterSourceProvider.loading
 
 const rainfallRasterDataTimeFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
@@ -725,8 +732,8 @@ const rainfallRasterDataTimeLabel = computed(() => {
 })
 
 const refreshRainfallRasterData = () => {
-  rainfallLayer.refreshData().catch(() => {
-    // The layer composable reports load failures through onLoadError.
+  rainfallRasterSourceProvider.refreshData().catch(() => {
+    // The provider reports load failures through onLoadError.
   })
 }
 
@@ -753,15 +760,18 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
   source: TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString(),
   options: { diff: false },
   instantiate: (map) => {
-    const onCleanup: (() => void)[] = []
-
-    onCleanup.push(registerTouchContextMenu(map))
-    rainfallLayer.register(map, 'Water labels')
-    onCleanup.push(rainfallLayer.unregister)
+    onScopeDisposeLifo(registerTouchContextMenu(map))
+    useRainfallRasterLayer(
+      map,
+      {
+        tiles: rainfallRasterSourceProvider.tiles,
+        visible: rainfallEnabled,
+      },
+      'Water labels',
+    )
 
     if (useRaster) {
-      map.addSource('raster-sen2', {
-        type: 'raster',
+      useRasterTilesBasedSource(map, 'raster-sen2', {
         tiles: [TILESERVER_RASTER_SEN2_TILE_URL_PATTERN],
         bounds: [-180.0, -81.06141849964385, 180.0, 83.74834535283912],
         scheme: 'xyz',
@@ -770,7 +780,8 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         tileSize: 2048,
       })
 
-      map.addLayer(
+      useLayer(
+        map,
         {
           id: 'raster-sen2-layer',
           type: 'raster',
@@ -780,7 +791,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
             'raster-contrast': 0.2,
           },
         },
-        'Residential',
+        { beforeId: 'Residential' },
       )
 
       map.getLayersOrder().forEach((layerId) => {
@@ -841,13 +852,13 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
     // Sky / Terrain / Hillshade
 
-    map.addSource('terrain', {
+    useSource(map, 'terrain', {
       type: 'raster-dem',
       url: 'https://tiles.mapterhorn.com/tilejson.json',
       maxzoom: 16,
     })
 
-    map.addSource('hillshade', {
+    useSource(map, 'hillshade', {
       type: 'raster-dem',
       url: 'https://tiles.mapterhorn.com/tilejson.json',
       maxzoom: 16,
@@ -863,77 +874,68 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 0.45, 7, 0.25, 10, 0],
     })
 
-    onCleanup.push(
-      watch(
-        zoom,
-        (value) => {
-          if (value < 10) {
-            map.setLight({
-              anchor: 'map',
-              position: [1.5, 90, 80],
-              intensity: 0.25,
-            })
-          } else {
-            map.setLight({
-              anchor: 'viewport',
-              position: [1.15, 210, 30],
-              intensity: 0.5,
-            })
-          }
-        },
-        { immediate: true },
-      ).stop,
-    )
-
-    onCleanup.push(
-      watch(
-        terrainEnabled,
-        (enabled) => {
-          if (enabled) {
-            map.setTerrain({
-              source: 'terrain',
-              exaggeration: 1.0,
-            })
-          } else {
-            map.setTerrain(null)
-          }
-        },
-        { immediate: true },
-      ).stop,
-    )
-
-    map.addLayer({
-      id: 'hills',
-      type: 'hillshade',
-      source: 'hillshade',
-      paint: {
-        'hillshade-exaggeration': useRaster ? 0.4 : 0.5,
-        'hillshade-shadow-color': useRaster ? 'rgb(0 0 0 / 0.8)' : 'rgb(71 59 36 / 0.84)',
-        'hillshade-highlight-color': useRaster
-          ? 'rgb(255 255 255 / 0.29)'
-          : 'rgb(255 255 255 / 0.84)',
-        'hillshade-method': useRaster ? 'igor' : 'combined',
+    watch(
+      zoom,
+      (value) => {
+        if (value < 10) {
+          map.setLight({
+            anchor: 'map',
+            position: [1.5, 90, 80],
+            intensity: 0.25,
+          })
+        } else {
+          map.setLight({
+            anchor: 'viewport',
+            position: [1.15, 210, 30],
+            intensity: 0.5,
+          })
+        }
       },
+      { immediate: true },
+    )
+
+    watch(
+      terrainEnabled,
+      (enabled) => {
+        if (enabled) {
+          map.setTerrain({
+            source: 'terrain',
+            exaggeration: 1.0,
+          })
+        } else {
+          map.setTerrain(null)
+        }
+      },
+      { immediate: true },
+    )
+
+    onScopeDisposeLifo(() => {
+      map.setTerrain(null)
     })
 
-    onCleanup.push(
-      watch(
-        terrainEnabled,
-        (enabled) => {
-          if (enabled) {
-            map.setLayoutProperty('hills', 'visibility', 'visible')
-          } else {
-            map.setLayoutProperty('hills', 'visibility', 'none')
-          }
+    useLayer(
+      map,
+      {
+        id: 'hills',
+        type: 'hillshade',
+        source: 'hillshade',
+        paint: {
+          'hillshade-exaggeration': useRaster ? 0.4 : 0.5,
+          'hillshade-shadow-color': useRaster ? 'rgb(0 0 0 / 0.8)' : 'rgb(71 59 36 / 0.84)',
+          'hillshade-highlight-color': useRaster
+            ? 'rgb(255 255 255 / 0.29)'
+            : 'rgb(255 255 255 / 0.84)',
+          'hillshade-method': useRaster ? 'igor' : 'combined',
         },
-        { immediate: true },
-      ).stop,
+      },
+      { visible: terrainEnabled },
     )
 
     // Bevy
 
     if (!useRaster) {
-      map.addLayer(
+      useLayer(
+        map,
         new BevyLayer(mapTextureOffscreenCanvas, {
           id: 'bevy-texture',
           tick: () => {
@@ -941,42 +943,29 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
             tick()
           },
         }),
-        'Water labels',
+        { beforeId: 'Water labels' },
       )
       ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
-        const layer = map.getStyle().layers.find((l) => l.id === layerId)
-        if (!layer) return
-
-        map.removeLayer(layerId)
-        map.addLayer(layer, 'bevy-texture')
+        if (map.getLayer(layerId)) {
+          map.moveLayer(layerId, 'bevy-texture')
+        }
       })
     }
 
     // Highlight
 
-    onCleanup.push(
-      useHighlightLayer(map, () => selection.value.map((item) => item.feature.geometry)).remove,
-    )
+    useHighlightLayer(map, () => selection.value.map((item) => item.feature.geometry))
 
     // Directions
 
-    const directionsLayers = useDirectionsLayers(
+    useDirectionsLayers(
       map,
       {
         stops: directionStops,
         tripPrimary: directionsTripPrimary,
+        visible: computed(() => slideoverOpen.value === SlideoverTab.Directions),
       },
       'Other border',
-    )
-    onCleanup.push(directionsLayers.remove)
-    onCleanup.push(
-      watch(
-        () => slideoverOpen.value === SlideoverTab.Directions,
-        (visible) => {
-          directionsLayers.visible.value = visible
-        },
-        { immediate: true },
-      ).stop,
     )
 
     //
@@ -987,14 +976,14 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         (layer) => map.getLayer(layer)?.type === 'symbol' && layer !== DIRECTION_STOPS_LAYER_ID,
       )
 
-    onCleanup.push(() => (selectableLayers.value = []))
-    onCleanup.push(() => {
+    onScopeDisposeLifo(() => {
+      selectableLayers.value = []
+    })
+    onScopeDisposeLifo(() => {
       selection.value = []
     })
 
     // Clean-Up
-
-    return { onRemove: () => onCleanup.splice(0).forEach((callback) => callback()) }
   },
 })
 

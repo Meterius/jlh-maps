@@ -1,4 +1,4 @@
-import { onBeforeUnmount, toValue, type WatchSource } from 'vue'
+import { toValue, type WatchSource } from 'vue'
 import type { Map as MapLibreMap } from 'maplibre-gl'
 import type { Geometry } from 'geojson'
 import { useGeoJsonSource, useLayer } from '@/composables/maplibre.ts'
@@ -8,12 +8,12 @@ const HIGHLIGHT_SOURCE_ID = 'highlight'
 const HIGHLIGHT_LAYER_ID = 'highlight'
 
 export function useHighlightLayer(map: MapLibreMap, items: WatchSource<Geometry[]>) {
-  const { remove: removeSource } = useGeoJsonSource(map, HIGHLIGHT_SOURCE_ID, () => ({
+  useGeoJsonSource(map, HIGHLIGHT_SOURCE_ID, () => ({
     type: 'FeatureCollection',
     features: toValue<Geometry[]>(items).map((item) => center(item)),
   }))
 
-  const { remove: removeLayer, visible } = useLayer(map, {
+  useLayer(map, {
     id: HIGHLIGHT_LAYER_ID,
     source: HIGHLIGHT_SOURCE_ID,
     type: 'circle',
@@ -25,16 +25,4 @@ export function useHighlightLayer(map: MapLibreMap, items: WatchSource<Geometry[
       'circle-stroke-width': 3,
     },
   })
-
-  const remove = () => {
-    removeLayer()
-    removeSource()
-  }
-
-  onBeforeUnmount(remove)
-
-  return {
-    remove,
-    visible,
-  }
 }
