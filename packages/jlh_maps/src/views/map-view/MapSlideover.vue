@@ -115,9 +115,9 @@ import type {
 } from 'jlh_maps_app'
 import type { OsmId } from '@/utils/osm.ts'
 import type { PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
-import ContentDetails from '@/components/map-slideover/ContentDetails.vue'
-import ContentDirections from '@/components/map-slideover/ContentDirections.vue'
-import ContentSettings from '@/components/map-slideover/ContentSettings.vue'
+import ContentDetails from '@/views/map-view/map-slideover/ContentDetails.vue'
+import ContentDirections from '@/views/map-view/map-slideover/ContentDirections.vue'
+import ContentSettings from '@/views/map-view/map-slideover/ContentSettings.vue'
 
 export type MapSlideoverTab = 'details' | 'directions' | 'settings'
 

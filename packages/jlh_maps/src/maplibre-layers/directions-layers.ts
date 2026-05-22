@@ -7,7 +7,7 @@ import { point as turfPoint } from '@turf/helpers'
 import { svgToImage } from '@/utils/svg-to-image.ts'
 import mapPinIconSvg from 'lucide-static/icons/map-pin.svg?raw'
 import type { Map as MapLibreMap } from 'maplibre-gl'
-import { useGeoJsonSource, useImage, useLayer } from '@/composables/maplibre.ts'
+import { useGeoJsonSource, useImage, useLayer } from '@/composables/maplibre'
 import { onWatcherCleanupLifo } from '@/composables/helper.ts'
 
 const DIRECTION_TRIP_PRIMARY_SOURCE_ID = 'direction-trip-primary'
@@ -142,20 +142,17 @@ export function useDirectionsLayers(
 
   const image = shallowRef<ImageData | null>(null)
 
-  watch(
-    image,
-    (value) => {
-      if (value === null) return
+  watch(image, (value) => {
+    if (value === null) return
 
-      const scope = effectScope()
-      scope.run(() => {
-        useImage(map, DIRECTION_STOP_ICON_ID, value, {
-          options: { pixelRatio: 2 },
-        })
+    const scope = effectScope()
+    scope.run(() => {
+      useImage(map, DIRECTION_STOP_ICON_ID, value, {
+        options: { pixelRatio: 2 },
       })
-      onWatcherCleanupLifo(() => scope.stop())
-    },
-  )
+    })
+    onWatcherCleanupLifo(() => scope.stop())
+  })
 
   svgToImage(mapPinIconSvg, {
     width: 24,

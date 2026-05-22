@@ -1,7 +1,7 @@
 import { toValue, type WatchSource } from 'vue'
 import type { Map as MapLibreMap } from 'maplibre-gl'
 import type { Geometry } from 'geojson'
-import { useGeoJsonSource, useLayer } from '@/composables/maplibre.ts'
+import { useGeoJsonSource, useLayer } from '@/composables/maplibre'
 import { center } from '@turf/turf'
 
 const HIGHLIGHT_SOURCE_ID = 'highlight'

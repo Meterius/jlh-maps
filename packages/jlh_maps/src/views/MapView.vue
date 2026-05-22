@@ -345,17 +345,17 @@ import {
   useMapSelection,
   useRasterTilesBasedSource,
   useSource,
-} from '@/composables/maplibre.ts'
+} from '@/composables/maplibre'
 import {
   useGeolocateControl,
   useGlobeControl,
   useNavigationControl,
-} from '@/composables/maplibre-controls.ts'
+} from '@/composables/maplibre/controls'
 import { onScopeDisposeLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import { useMaplibreGlJsIntegration } from '@/composables/bevy-maplibre-integration.ts'
 import { useBevy } from '@/composables/bevy.ts'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
-import MapSlideover, { type MapSlideoverTab } from '@/components/map-slideover/MapSlideover.vue'
+import MapSlideover, { type MapSlideoverTab } from '@/views/map-view/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
 import type { ContextMenuItem } from '@nuxt/ui'
 import {
@@ -369,8 +369,8 @@ import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
 import {
   type MapStyleLifecycleConfig,
   useMapStyleLifecycle,
-} from '@/views/map-view/map-style-lifecycle.ts'
-import { usePanProfiles } from '@/views/map-view/map-pan-profiles.ts'
+} from '@/composables/maplibre/style-lifecycle'
+import { usePanProfiles } from '@/composables/maplibre/pan-profiles'
 import { provideMapDirectionStops } from '@/views/map-view/map-direction-stops.ts'
 import { provideMapCameraController } from '@/views/map-view/map-camera-controller.ts'
 

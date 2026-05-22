@@ -75,7 +75,7 @@ import type { GeoJSONFeature } from 'maplibre-gl'
 import OpeningHours from 'opening_hours'
 import { useNow } from '@vueuse/core'
 import type { OsmData } from '@/external/endpoints.ts'
-import InterpretedPropertyButton from '@/components/map-slideover/details/InterpretedPropertyButton.vue'
+import InterpretedPropertyButton from '@/views/map-view/map-slideover/details/InterpretedPropertyButton.vue'
 
 const props = defineProps<{
   feature?: GeoJSONFeature

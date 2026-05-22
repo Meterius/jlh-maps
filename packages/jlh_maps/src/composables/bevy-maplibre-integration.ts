@@ -546,9 +546,9 @@ class MaplibreGlJsIntegration {
 
   private getFeatureId(
     feature: GeoJSONFeature,
-    sourceId: string,
-    sourceLayer: string,
-    tileKey: TileCoord,
+    _sourceId: string,
+    _sourceLayer: string,
+    _tileKey: TileCoord,
   ): number | undefined {
     const id = feature.id
     if (typeof id === 'number' && Number.isSafeInteger(id) && id >= 0) return id

@@ -1,6 +1,6 @@
 import { effectScope, toValue, watch, type WatchSource } from 'vue'
 import type { Map as MapLibreMap } from 'maplibre-gl'
-import { useLayer, useRasterTilesBasedSource } from '@/composables/maplibre.ts'
+import { useLayer, useRasterTilesBasedSource } from '@/composables/maplibre'
 import { onWatcherCleanupLifo } from '@/composables/helper.ts'
 
 type RainfallRasterLayerOptions = {
