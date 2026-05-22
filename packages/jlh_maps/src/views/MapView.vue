@@ -847,6 +847,27 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       })
     }
 
+    // Bevy
+
+    if (!useRaster) {
+      useLayer(
+        map,
+        new BevyLayer(textureOffscreenCanvas, {
+          id: 'bevy-texture',
+          tick: () => {
+            syncOnRender()
+            tick()
+          },
+        }),
+        { beforeId: 'Water labels' },
+      )
+      ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.moveLayer(layerId, 'bevy-texture')
+        }
+      })
+    }
+
     // Sky / Terrain / Hillshade
 
     useSource(map, 'terrain', {
@@ -889,7 +910,11 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
           'hillshade-method': useRaster ? 'igor' : 'combined',
         },
       },
-      { visible: terrainEnabled },
+      {
+        visible: terrainEnabled,
+        // insert hillshade before bevy as otherwise bevy depth mask will clip hillshade
+        beforeId: useRaster ? undefined : 'bevy-texture',
+      },
     )
 
     map.setSky({
@@ -921,27 +946,6 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       },
       { immediate: true },
     )
-
-    // Bevy
-
-    if (!useRaster) {
-      useLayer(
-        map,
-        new BevyLayer(textureOffscreenCanvas, {
-          id: 'bevy-texture',
-          tick: () => {
-            syncOnRender()
-            tick()
-          },
-        }),
-        { beforeId: 'Water labels' },
-      )
-      ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.moveLayer(layerId, 'bevy-texture')
-        }
-      })
-    }
 
     // Highlight
 
