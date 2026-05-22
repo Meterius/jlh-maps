@@ -80,15 +80,7 @@
         <div
           class="grid min-h-0 min-w-0 w-full max-w-full flex-1 grid-rows-[minmax(0,1fr)] overflow-hidden"
         >
-          <ContentDirections
-            v-show="props.active === 'directions'"
-            class="h-full"
-            :stops="props.directionStops"
-            @update:stops="emit('update:direction-stops', $event)"
-            @update:trip-primary="emit('update:trip-primary', $event)"
-            @update:trip-alternates="emit('update:trip-alternates', $event)"
-            @focus-trip="emit('focus-trip', $event)"
-          />
+          <ContentDirections v-show="props.active === 'directions'" class="h-full" />
 
           <ContentDetails
             v-show="props.active === 'details'"
@@ -117,12 +109,10 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { DrawerHandle } from 'vaul-vue'
 import type { GeoJSONFeature, Map as MapLibreMap } from 'maplibre-gl'
-import type { Trip } from 'valhalla_client'
 import type {
   MapViewCameraSettings as MapViewCameraSettingsBevy,
   MapViewSettings as MapViewSettingsBevy,
 } from 'jlh_maps_app'
-import type { GeoLocation } from '@/components/types.ts'
 import type { OsmId } from '@/utils/osm.ts'
 import type { PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
 import ContentDetails from '@/components/map-slideover/ContentDetails.vue'
@@ -134,7 +124,6 @@ export type MapSlideoverTab = 'details' | 'directions' | 'settings'
 const props = defineProps<{
   open: boolean
   active: MapSlideoverTab | null
-  directionStops: (GeoLocation | null)[]
   detailsOsmId?: OsmId
   detailsFeature?: GeoJSONFeature
   map?: MapLibreMap
@@ -144,12 +133,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:open': [value: boolean]
-  'update:direction-stops': [value: (GeoLocation | null)[]]
-  'update:trip-primary': [value: Trip | null]
-  'update:trip-alternates': [value: Trip[]]
   'update:drawer-size': [value: { width: number; height: number }]
   'update:drawer-direction': [value: 'left' | 'right' | 'top' | 'bottom']
-  'focus-trip': [value: Trip]
 }>()
 
 const MOBILE_DRAWER_INITIAL_SNAP = 0.4

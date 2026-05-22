@@ -553,12 +553,12 @@ class MaplibreGlJsIntegration {
     const id = feature.id
     if (typeof id === 'number' && Number.isSafeInteger(id) && id >= 0) return id
 
-    console.warn('Skipping MapLibre feature without a numeric id', {
-      sourceId,
-      sourceLayer,
-      tileKey,
-      id,
-    })
+    // console.warn('Skipping MapLibre feature without a numeric id', {
+    //   sourceId,
+    //   sourceLayer,
+    //   tileKey,
+    //   id,
+    // })
     return undefined
   }
 

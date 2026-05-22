@@ -63,7 +63,7 @@
             :name="`Route ${idx + 1}`"
             :leg="leg"
             class=""
-            @focus-trip="emit('focus-trip', route.trip)"
+            @focus-trip="focusTrip(route.trip)"
           />
         </div>
 
@@ -80,22 +80,14 @@ import ValhallaTripLegCard from '@/components/directions/ValhallaTripLegCard.vue
 import ValhallaTripLegCardSkeleton from '@/components/directions/ValhallaTripLegCardSkeleton.vue'
 import { useAsyncReactiveRequest } from '@/composables/async-reactive-request.ts'
 import { valhallaClient } from '@/external/valhalla.ts'
-import { useVModel } from '@vueuse/core'
 import { CostingModel, type RouteResponse, type Trip } from 'valhalla_client'
 import { computed, ref, watch, watchEffect } from 'vue'
+import { useMapDirectionStopsOrThrow } from '@/views/map-view/map-direction-stops.ts'
+import { useMapCameraControllerOrThrow } from '@/views/map-view/map-camera-controller.ts'
 
-const props = defineProps<{
-  stops: (GeoLocation | null)[]
-}>()
-
-const emit = defineEmits<{
-  'update:stops': [value: (GeoLocation | null)[]]
-  'update:trip-primary': [value: Trip | null]
-  'update:trip-alternates': [value: Trip[]]
-  'focus-trip': [value: Trip]
-}>()
-
-const stops = useVModel(props, 'stops', emit)
+const mapDirectionStops = useMapDirectionStopsOrThrow()
+const mapCameraController = useMapCameraControllerOrThrow()
+const stops = mapDirectionStops.directionStops
 
 interface RouteRequestParams {
   stops: GeoLocation[]
@@ -211,8 +203,9 @@ watch(
       console.log('Valhalla route result', value)
     }
 
-    emit('update:trip-primary', value?.trip ?? null)
-    emit('update:trip-alternates', value?.alternates?.map((alternate) => alternate.trip) ?? [])
+    mapDirectionStops.directionsTripPrimary.value = value?.trip ?? null
+    mapDirectionStops.directionsTripAlternates.value =
+      value?.alternates?.map((alternate) => alternate.trip) ?? []
   },
   { immediate: true },
 )
@@ -222,11 +215,18 @@ watch(
   (value) => {
     if (!value) return
 
-    emit('update:trip-primary', null)
-    emit('update:trip-alternates', [])
+    mapDirectionStops.directionsTripPrimary.value = null
+    mapDirectionStops.directionsTripAlternates.value = []
   },
   { immediate: true },
 )
+
+const focusTrip = (trip: Trip) => {
+  mapCameraController.fitTrip(trip, {
+    maxZoom: 17,
+    duration: 700,
+  })
+}
 
 const formatRouteError = (error: unknown) => {
   if (!error) return null

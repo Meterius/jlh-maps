@@ -313,18 +313,13 @@
       ref="mapSlideover"
       :open="slideoverOpen !== null"
       :active="slideoverOpen"
-      :direction-stops="directionStops"
       :details-osm-id="selection[0]?.osm_id"
       :details-feature="selection[0]?.feature"
       :map="mapInstance.map"
       :bevy-settings="mapViewSettings"
       :bevy-camera-settings="mapViewCameraSettings"
-      @update:direction-stops="directionStops = $event"
-      @update:trip-primary="directionsTripPrimary = $event"
-      @update:trip-alternates="directionsTripAlternates = $event"
       @update:drawer-direction="slideoverDirection = $event"
       @update:drawer-size="slideoverSize = $event"
-      @focus-trip="focusTrip"
       @update:open="
         (value: boolean) => {
           if (!value) onSlideoverClose()
@@ -363,7 +358,6 @@ import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
 import MapSlideover, { type MapSlideoverTab } from '@/components/map-slideover/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
 import type { ContextMenuItem } from '@nuxt/ui'
-import type { Trip } from 'valhalla_client'
 import {
   DIRECTION_STOPS_LAYER_ID,
   useDirectionsLayers,
@@ -371,13 +365,14 @@ import {
 import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { useRainfallRasterProvider } from '@/composables/rainfall-raster-provider.ts'
-import { getTripBounds } from '@/utils/valhalla.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
 import {
   type MapStyleLifecycleConfig,
   useMapStyleLifecycle,
 } from '@/views/map-view/map-style-lifecycle.ts'
 import { usePanProfiles } from '@/views/map-view/map-pan-profiles.ts'
+import { provideMapDirectionStops } from '@/views/map-view/map-direction-stops.ts'
+import { provideMapCameraController } from '@/views/map-view/map-camera-controller.ts'
 
 const mapKey = makeUniqueMapKey()
 
@@ -508,58 +503,12 @@ const onMapContextMenu = ({ event }: MglMapMouseEvent) => {
   })
 }
 
-const setDirectionStop = (idx: number) => {
-  if (!contextMenuLocation.value) return
-
-  if (slideoverOpen.value !== SlideoverTab.Directions) {
-    directionStops.value =
-      idx === 0 ? [contextMenuLocation.value, null] : [null, contextMenuLocation.value]
-    slideoverOpen.value = SlideoverTab.Directions
-    return
-  }
-
-  const stops = [...directionStops.value]
-  stops[idx] = contextMenuLocation.value
-
-  directionStops.value = stops
-  slideoverOpen.value = SlideoverTab.Directions
-}
-
 const contextMenuCoordinateLabel = computed(() => {
   const location = contextMenuLocation.value
   if (!location) return 'No location selected'
 
   return `${location.coords.lat.toFixed(6)}, ${location.coords.lng.toFixed(6)}`
 })
-
-const contextMenuItems = computed((): ContextMenuItem[] => [
-  {
-    label: contextMenuCoordinateLabel.value,
-    type: 'label',
-    icon: 'material-symbols:location-on-outline-rounded',
-  },
-  {
-    type: 'separator',
-  },
-  {
-    label: 'Directions From Here',
-    icon: 'material-symbols:line-end-circle-outline-rounded',
-    ui: {
-      itemLeadingIcon: '-rotate-90',
-    } as unknown as ContextMenuItem['ui'],
-    onSelect: () => setDirectionStop(0),
-    disabled: directionStops.value.length < 1,
-  },
-  {
-    label: 'Directions To Here',
-    icon: 'material-symbols:line-end-circle-outline-rounded',
-    ui: {
-      itemLeadingIcon: 'rotate-90',
-    } as unknown as ContextMenuItem['ui'],
-    onSelect: () => setDirectionStop(directionStops.value.length - 1),
-    disabled: directionStops.value.length < 2,
-  },
-])
 
 const registerTouchContextMenu = (map: NonNullable<typeof mapInstance.map>) => {
   const canvas = map.getCanvas()
@@ -655,26 +604,65 @@ const onSlideoverClose = () => {
   slideoverOpen.value = null
 }
 
+// Camera
+
+provideMapCameraController(mapKey, {
+  viewPadding: () => mapSlideover.value?.getRouteFitPadding() ?? 80,
+})
+
 // Directions
 
-const directionStops = shallowRef<(GeoLocation | null)[]>([null, null])
+const mapDirectionStops = provideMapDirectionStops()
 
-const directionsTripPrimary = shallowRef<Trip | null>(null)
-const directionsTripAlternates = shallowRef<Trip[]>([])
+const { directionStops, directionsTripPrimary } = mapDirectionStops
 
-const focusTrip = (trip: Trip) => {
-  const map = mapInstance.map
-  if (!map) return
+const setDirectionStop = (idx: number) => {
+  if (idx < 0) return
 
-  const bounds = getTripBounds(trip)
-  if (!bounds) return
+  const location = contextMenuLocation.value
+  if (!location) return
 
-  map.fitBounds(bounds, {
-    padding: mapSlideover.value?.getRouteFitPadding() ?? 80,
-    maxZoom: 17,
-    duration: 700,
-  })
+  if (slideoverOpen.value !== SlideoverTab.Directions) {
+    directionStops.value = idx === 0 ? [location, null] : [null, location]
+    slideoverOpen.value = SlideoverTab.Directions
+    return
+  }
+
+  const stops = [...directionStops.value]
+  stops[idx] = location
+
+  directionStops.value = stops
+  slideoverOpen.value = SlideoverTab.Directions
 }
+
+const contextMenuItems = computed((): ContextMenuItem[] => [
+  {
+    label: contextMenuCoordinateLabel.value,
+    type: 'label',
+    icon: 'material-symbols:location-on-outline-rounded',
+  },
+  {
+    type: 'separator',
+  },
+  {
+    label: 'Directions From Here',
+    icon: 'material-symbols:line-end-circle-outline-rounded',
+    ui: {
+      itemLeadingIcon: '-rotate-90',
+    } as unknown as ContextMenuItem['ui'],
+    onSelect: () => setDirectionStop(0),
+    disabled: directionStops.value.length < 1,
+  },
+  {
+    label: 'Directions To Here',
+    icon: 'material-symbols:line-end-circle-outline-rounded',
+    ui: {
+      itemLeadingIcon: 'rotate-90',
+    } as unknown as ContextMenuItem['ui'],
+    onSelect: () => setDirectionStop(directionStops.value.length - 1),
+    disabled: directionStops.value.length < 2,
+  },
+])
 
 // Selection
 
@@ -761,6 +749,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
   options: { diff: false },
   instantiate: (map) => {
     onScopeDisposeLifo(registerTouchContextMenu(map))
+
     useRainfallRasterLayer(
       map,
       {
@@ -858,11 +847,42 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       maxzoom: 16,
     })
 
-    useSource(map, 'hillshade', {
-      type: 'raster-dem',
-      url: 'https://tiles.mapterhorn.com/tilejson.json',
-      maxzoom: 16,
+    watch(
+      terrainEnabled,
+      (enabled) => {
+        if (enabled) {
+          map.setTerrain({
+            source: 'terrain',
+            exaggeration: 1.0,
+          })
+        } else {
+          map.setTerrain(null)
+        }
+      },
+      { immediate: true },
+    )
+
+    onScopeDisposeLifo(() => {
+      map.setTerrain(null)
     })
+
+    useLayer(
+      map,
+      {
+        id: 'hills',
+        type: 'hillshade',
+        source: 'terrain',
+        paint: {
+          'hillshade-exaggeration': useRaster ? 0.4 : 0.5,
+          'hillshade-shadow-color': useRaster ? 'rgb(0 0 0 / 0.8)' : 'rgb(71 59 36 / 0.84)',
+          'hillshade-highlight-color': useRaster
+            ? 'rgb(255 255 255 / 0.29)'
+            : 'rgb(255 255 255 / 0.84)',
+          'hillshade-method': useRaster ? 'igor' : 'combined',
+        },
+      },
+      { visible: terrainEnabled },
+    )
 
     map.setSky({
       'sky-color': '#199EF3',
@@ -892,43 +912,6 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         }
       },
       { immediate: true },
-    )
-
-    watch(
-      terrainEnabled,
-      (enabled) => {
-        if (enabled) {
-          map.setTerrain({
-            source: 'terrain',
-            exaggeration: 1.0,
-          })
-        } else {
-          map.setTerrain(null)
-        }
-      },
-      { immediate: true },
-    )
-
-    onScopeDisposeLifo(() => {
-      map.setTerrain(null)
-    })
-
-    useLayer(
-      map,
-      {
-        id: 'hills',
-        type: 'hillshade',
-        source: 'hillshade',
-        paint: {
-          'hillshade-exaggeration': useRaster ? 0.4 : 0.5,
-          'hillshade-shadow-color': useRaster ? 'rgb(0 0 0 / 0.8)' : 'rgb(71 59 36 / 0.84)',
-          'hillshade-highlight-color': useRaster
-            ? 'rgb(255 255 255 / 0.29)'
-            : 'rgb(255 255 255 / 0.84)',
-          'hillshade-method': useRaster ? 'igor' : 'combined',
-        },
-      },
-      { visible: terrainEnabled },
     )
 
     // Bevy

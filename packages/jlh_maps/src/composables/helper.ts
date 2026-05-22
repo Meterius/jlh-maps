@@ -24,6 +24,18 @@ export function watchDefinedOnce<T>(
   )
 }
 
+export function createInjectOrThrow<T>(useInjected: () => T, errorMessage: string) {
+  return () => {
+    const value = useInjected()
+
+    if (value == null) {
+      throw new Error(errorMessage)
+    }
+
+    return value as NonNullable<T>
+  }
+}
+
 // LIFO Semantics For Effect Scope And Watcher Effect Cleanup
 
 const scopeCleanupQueues = new WeakMap<EffectScope, (() => void)[]>()

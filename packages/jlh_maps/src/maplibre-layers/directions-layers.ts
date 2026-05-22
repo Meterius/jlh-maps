@@ -155,7 +155,6 @@ export function useDirectionsLayers(
       })
       onWatcherCleanupLifo(() => scope.stop())
     },
-    { once: true },
   )
 
   svgToImage(mapPinIconSvg, {
