@@ -9,79 +9,150 @@
         :zoom="14"
         :canvas-context-attributes="{ antialias: true }"
         @map:contextmenu="onMapContextMenu"
-      >
-        <mgl-custom-control position="top-right">
-          <button
-            class="map-custom-control"
-            type="button"
-            title="Map settings"
-            aria-label="Map settings"
-            @click="slideoverOpen = SlideoverTab.Settings"
-          >
-            <UIcon
-              name="material-symbols:settings-outline-rounded"
-              class="size-6"
-              style="margin: auto"
-            />
-          </button>
-        </mgl-custom-control>
+      />
 
-        <mgl-custom-control position="top-right">
-          <button
-            class="map-custom-control"
-            type="button"
-            title="Navigation"
-            aria-label="Navigation"
-            @click="slideoverOpen = SlideoverTab.Directions"
-          >
-            <UIcon
-              name="material-symbols:signpost-outline-rounded"
-              class="size-6"
-              style="margin: auto"
-            />
-          </button>
-        </mgl-custom-control>
+      <div class="pointer-events-none absolute right-2 top-2 z-10 flex flex-col gap-2">
+        <UButton
+          color="neutral"
+          active-color="primary"
+          variant="outline-solid"
+          :active="globeActive"
+          :disabled="globeDisabled"
+          size="xl"
+          class="pointer-events-auto cursor-pointer"
+          icon="lucide:globe"
+          :title="globeTitle"
+          :aria-label="globeTitle"
+          :aria-pressed="globeAriaPressed"
+          @click="triggerGlobe"
+        />
 
-        <mgl-custom-control position="top-right">
-          <button
-            class="map-custom-control"
-            type="button"
-            title="Show bevy"
-            aria-label="Show bevy"
-            :aria-pressed="showBevyCanvas"
-            @click="showBevyCanvas = !showBevyCanvas"
-          >
-            <UIcon
-              name="material-symbols:bug-report-outline-rounded"
-              :class="['size-6', ...[showBevyCanvas ? ['text-secondary'] : []]]"
-              style="margin: auto"
-            />
-          </button>
-        </mgl-custom-control>
-      </mgl-map>
+        <UButton
+          color="neutral"
+          active-color="primary"
+          variant="outline-solid"
+          :active="geolocateActive"
+          :disabled="geolocateDisabled"
+          :loading="geolocateLoading"
+          size="xl"
+          class="pointer-events-auto cursor-pointer"
+          :icon="geolocateIcon"
+          :title="geolocateTitle"
+          :aria-label="geolocateTitle"
+          :aria-pressed="geolocateAriaPressed"
+          @click="triggerGeolocate"
+        />
+
+        <UFieldGroup orientation="vertical" class="pointer-events-auto">
+          <UButton
+            color="neutral"
+            variant="outline-solid"
+            :disabled="zoomInDisabled"
+            size="xl"
+            class="cursor-pointer"
+            icon="lucide:plus"
+            :title="zoomInTitle"
+            :aria-label="zoomInTitle"
+            @click="zoomIn"
+          />
+
+          <UButton
+            color="neutral"
+            variant="outline-solid"
+            :disabled="zoomOutDisabled"
+            size="xl"
+            class="cursor-pointer"
+            icon="lucide:minus"
+            :title="zoomOutTitle"
+            :aria-label="zoomOutTitle"
+            @click="zoomOut"
+          />
+
+          <UButton
+            color="neutral"
+            variant="outline-solid"
+            :disabled="compassDisabled"
+            size="xl"
+            class="cursor-pointer"
+            icon="mingcute:compass-3-fill"
+            :title="compassTitle"
+            :aria-label="compassTitle"
+            :style="compassIconStyle"
+            :ui="{ leadingIcon: '[transform:var(--compass-icon-transform)]' }"
+            @pointerdown="startCompassDrag"
+            @click="resetBearing"
+          />
+        </UFieldGroup>
+
+        <UButton
+          color="neutral"
+          active-color="primary"
+          variant="outline-solid"
+          :active="slideoverOpen === SlideoverTab.Settings"
+          size="xl"
+          class="pointer-events-auto cursor-pointer"
+          icon="lucide:settings"
+          title="Map settings"
+          aria-label="Map settings"
+          @click="slideoverOpen = SlideoverTab.Settings"
+        />
+
+        <UButton
+          color="neutral"
+          active-color="primary"
+          variant="outline-solid"
+          :active="slideoverOpen === SlideoverTab.Directions"
+          size="xl"
+          class="pointer-events-auto cursor-pointer"
+          icon="lucide:signpost"
+          title="Navigation"
+          aria-label="Navigation"
+          @click="slideoverOpen = SlideoverTab.Directions"
+        />
+
+        <UButton
+          color="neutral"
+          active-color="primary"
+          variant="outline-solid"
+          :active="showBevyCanvas"
+          size="xl"
+          class="pointer-events-auto cursor-pointer"
+          icon="lucide:bug"
+          title="Show bevy"
+          aria-label="Show bevy"
+          :aria-pressed="showBevyCanvas"
+          @click="showBevyCanvas = !showBevyCanvas"
+        />
+      </div>
 
       <div
         class="pointer-events-none absolute z-10 flex gap-2 p-2 transition-[bottom,left] duration-200 ease-out"
         :style="layersControlStyle"
       >
         <UPopover modal>
-          <UButton
-            color="neutral"
-            variant="outline"
-            size="xl"
-            class="pointer-events-auto cursor-pointer"
-            icon="lucide:layers"
-            title="Layers"
-            aria-label="Layers"
-          />
+          <template #default="{ open }">
+            <UButton
+              color="neutral"
+              active-color="primary"
+              variant="outline-solid"
+              :active="open"
+              size="xl"
+              class="pointer-events-auto cursor-pointer"
+              icon="lucide:layers"
+              title="Layers"
+              aria-label="Layers"
+            />
+          </template>
 
           <template #content>
             <UCard :ui="{ body: '!p-2 grid w-72 max-w-[calc(100vw-1rem)] gap-2' }">
               <div class="grid grid-cols-2 gap-1">
                 <UButton
                   label="Shadows"
-                  :color="mapViewSettings.enable_shadows ? 'primary' : 'neutral'"
-                  variant="outline"
+                  color="neutral"
+                  active-color="primary"
+                  variant="outline-solid"
+                  :active="mapViewSettings.enable_shadows"
                   size="md"
                   class="cursor-pointer"
                   icon="lucide:sunset"
@@ -90,8 +161,10 @@
 
                 <UButton
                   label="3D Buildings"
-                  :color="mapViewSettings.enable_buildings ? 'primary' : 'neutral'"
-                  variant="outline"
+                  color="neutral"
+                  active-color="primary"
+                  variant="outline-solid"
+                  :active="mapViewSettings.enable_buildings"
                   size="md"
                   class="cursor-pointer"
                   icon="lucide:building"
@@ -100,8 +173,10 @@
 
                 <UButton
                   label="Terrain"
-                  :color="terrainEnabled ? 'primary' : 'neutral'"
-                  variant="outline"
+                  color="neutral"
+                  active-color="primary"
+                  variant="outline-solid"
+                  :active="terrainEnabled"
                   size="md"
                   class="cursor-pointer"
                   icon="lucide:mountain"
@@ -110,8 +185,10 @@
 
                 <UButton
                   label="Dark Theme"
-                  :color="darkThemeEnabled ? 'primary' : 'neutral'"
-                  variant="outline"
+                  color="neutral"
+                  active-color="primary"
+                  variant="outline-solid"
+                  :active="darkThemeEnabled"
                   size="md"
                   class="cursor-pointer"
                   :icon="darkThemeEnabled ? 'lucide:moon' : 'lucide:sun'"
@@ -125,8 +202,10 @@
                 <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
                   <UButton
                     label="Rainfall"
-                    :color="rainfallEnabled ? 'primary' : 'neutral'"
-                    variant="outline"
+                    color="neutral"
+                    active-color="primary"
+                    variant="outline-solid"
+                    :active="rainfallEnabled"
                     size="md"
                     class="min-w-0 cursor-pointer justify-start"
                     icon="lucide:cloud-rain"
@@ -136,7 +215,7 @@
                   <UButton
                     :disabled="!rainfallEnabled"
                     color="neutral"
-                    variant="outline"
+                    variant="outline-solid"
                     size="md"
                     class="shrink-0 cursor-pointer"
                     icon="lucide:refresh-cw"
@@ -164,22 +243,26 @@
         </UPopover>
 
         <UPopover modal>
-          <UButton
-            color="neutral"
-            variant="outline"
-            size="xl"
-            class="pointer-events-auto cursor-pointer"
-            icon="lucide:sun"
-            title="Sun"
-            aria-label="Sun"
-          />
+          <template #default="{ open }">
+            <UButton
+              color="neutral"
+              active-color="primary"
+              variant="outline-solid"
+              :active="open"
+              size="xl"
+              class="pointer-events-auto cursor-pointer"
+              icon="lucide:sun"
+              title="Sun"
+              aria-label="Sun"
+            />
+          </template>
 
           <template #content>
             <UCard :ui="{ body: '!p-3 grid min-w-72 gap-3' }">
-              <label class="sun-control-field">
-                <span class="sun-control-label">
+              <label class="grid gap-2">
+                <span class="flex justify-between gap-4 text-sm">
                   <span>Azimuth</span>
-                  <output>{{ sunAzimuthLabel }}</output>
+                  <output class="text-muted tabular-nums">{{ sunAzimuthLabel }}</output>
                 </span>
                 <USlider
                   v-model.number="mapViewSettings.sun_azimuth_degrees"
@@ -189,10 +272,10 @@
                 />
               </label>
 
-              <label class="sun-control-field">
-                <span class="sun-control-label">
+              <label class="grid gap-2">
+                <span class="flex justify-between gap-4 text-sm">
                   <span>Elevation</span>
-                  <output>{{ sunElevationLabel }}</output>
+                  <output class="text-muted tabular-nums">{{ sunElevationLabel }}</output>
                 </span>
                 <USlider
                   v-model.number="mapViewSettings.sun_elevation_degrees"
@@ -256,9 +339,6 @@ import { MglMap } from '@indoorequal/vue-maplibre-gl'
 import { computed, onWatcherCleanup, ref, shallowRef, watch, watchEffect } from 'vue'
 import { onLongPress, useDark } from '@vueuse/core'
 import {
-  GeolocateControl,
-  GlobeControl,
-  NavigationControl,
   type DragPanOptions,
   type Map as MapLibreMap,
   type MapMouseEvent,
@@ -272,6 +352,11 @@ import {
   TILESERVER_RASTER_SEN2_TILE_URL_PATTERN,
 } from '@/external/endpoints.ts'
 import { makeUniqueMapKey, useMapExtended, useMapSelection } from '@/composables/maplibre.ts'
+import {
+  useGeolocateControl,
+  useGlobeControl,
+  useNavigationControl,
+} from '@/composables/maplibre-controls.ts'
 import { watchDefinedOnce } from '@/composables/helper.ts'
 import { useMaplibreGlJsIntegration } from '@/composables/bevy-maplibre-integration.ts'
 import { useBevy } from '@/composables/bevy.ts'
@@ -297,6 +382,37 @@ const { instanceId, mapViewSettings, mapViewCameraSettings, tick, mapTextureOffs
   useBevy(`#${bevyCanvasId}`, '.maplibregl-canvas')
 
 const { mapInstance, loaded, zoom } = useMapExtended(mapKey)
+const {
+  active: globeActive,
+  ariaPressed: globeAriaPressed,
+  disabled: globeDisabled,
+  title: globeTitle,
+  trigger: triggerGlobe,
+} = useGlobeControl(mapKey)
+const {
+  active: geolocateActive,
+  ariaPressed: geolocateAriaPressed,
+  disabled: geolocateDisabled,
+  icon: geolocateIcon,
+  loading: geolocateLoading,
+  title: geolocateTitle,
+  trigger: triggerGeolocate,
+} = useGeolocateControl(mapKey, {
+  trackUserLocation: true,
+})
+const {
+  compassDisabled,
+  compassIconStyle,
+  compassTitle,
+  resetBearing,
+  startCompassDrag,
+  zoomIn,
+  zoomInDisabled,
+  zoomInTitle,
+  zoomOut,
+  zoomOutDisabled,
+  zoomOutTitle,
+} = useNavigationControl(mapKey, { northRotationOffset: 135 })
 
 const { syncOnRender } = useMaplibreGlJsIntegration(() => instanceId, mapKey, {
   featureSourceLayers: [
@@ -709,10 +825,6 @@ function registerDragPanInertiaProfiles(map: MapLibreMap) {
 watchDefinedOnce(
   () => (loaded.value ? mapInstance.map : undefined),
   (map) => {
-    map.addControl(new GlobeControl())
-    map.addControl(new NavigationControl())
-    map.addControl(new GeolocateControl({}))
-
     map.setMaxPitch(85)
   },
 )
@@ -1005,58 +1117,8 @@ watchDefinedOnce(
 <style lang="css">
 @import 'maplibre-gl/dist/maplibre-gl.css';
 
+/* Background for the inserted maplibre canvas */
 .maplibregl-canvas {
   background: #131d25;
-}
-
-.map-custom-control {
-  width: 29px;
-  height: 29px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  padding: 0;
-  background: #fff;
-  color: #333;
-  cursor: pointer;
-}
-
-.map-custom-control:hover {
-  background: #f2f2f2;
-}
-
-.map-custom-control:focus-visible {
-  outline: 2px solid #2563eb;
-  outline-offset: -2px;
-}
-
-.map-custom-control.is-active {
-  background: #e0f2fe;
-  color: #0369a1;
-  box-shadow: inset 0 0 0 2px #0284c7;
-}
-
-.map-custom-control-icon {
-  width: 17px;
-  height: 17px;
-  display: block;
-}
-
-.sun-control-field {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.sun-control-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  font-size: 0.875rem;
-}
-
-.sun-control-label output {
-  color: #64748b;
-  font-variant-numeric: tabular-nums;
 }
 </style>

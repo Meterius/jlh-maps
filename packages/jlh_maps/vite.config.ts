@@ -5,7 +5,10 @@ import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
 import ui from '@nuxt/ui/vite'
 import vueDevTools from 'vite-plugin-vue-devtools'
-import wasm from "vite-plugin-wasm"
+import wasm from 'vite-plugin-wasm'
+
+const outlineSolidBase =
+  'relative isolate overflow-hidden bg-default before:absolute before:inset-0 before:pointer-events-none before:content-[""] before:opacity-0 disabled:before:opacity-0 aria-disabled:before:opacity-0 focus:outline-none'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -27,6 +30,57 @@ export default defineConfig({
           warning: 'yellow',
           error: 'red',
           neutral: 'slatish',
+        },
+        button: {
+          variants: {
+            variant: {
+              'outline-solid': '',
+            },
+          },
+          compoundVariants: [
+            {
+              color: 'primary',
+              variant: 'outline-solid',
+              class:
+                `${outlineSolidBase} ring ring-inset ring-primary/50 text-primary before:bg-primary hover:before:opacity-10 active:before:opacity-10 focus-visible:ring-2 focus-visible:ring-primary`,
+            },
+            {
+              color: 'secondary',
+              variant: 'outline-solid',
+              class:
+                `${outlineSolidBase} ring ring-inset ring-secondary/50 text-secondary before:bg-secondary hover:before:opacity-10 active:before:opacity-10 focus-visible:ring-2 focus-visible:ring-secondary`,
+            },
+            {
+              color: 'success',
+              variant: 'outline-solid',
+              class:
+                `${outlineSolidBase} ring ring-inset ring-success/50 text-success before:bg-success hover:before:opacity-10 active:before:opacity-10 focus-visible:ring-2 focus-visible:ring-success`,
+            },
+            {
+              color: 'info',
+              variant: 'outline-solid',
+              class:
+                `${outlineSolidBase} ring ring-inset ring-info/50 text-info before:bg-info hover:before:opacity-10 active:before:opacity-10 focus-visible:ring-2 focus-visible:ring-info`,
+            },
+            {
+              color: 'warning',
+              variant: 'outline-solid',
+              class:
+                `${outlineSolidBase} ring ring-inset ring-warning/50 text-warning before:bg-warning hover:before:opacity-10 active:before:opacity-10 focus-visible:ring-2 focus-visible:ring-warning`,
+            },
+            {
+              color: 'error',
+              variant: 'outline-solid',
+              class:
+                `${outlineSolidBase} ring ring-inset ring-error/50 text-error before:bg-error hover:before:opacity-10 active:before:opacity-10 focus-visible:ring-2 focus-visible:ring-error`,
+            },
+            {
+              color: 'neutral',
+              variant: 'outline-solid',
+              class:
+                'ring ring-inset ring-accented text-default bg-default hover:bg-elevated active:bg-elevated disabled:bg-default aria-disabled:bg-default focus:outline-none focus-visible:ring-2 focus-visible:ring-inverted',
+            },
+          ],
         },
       },
     }),
