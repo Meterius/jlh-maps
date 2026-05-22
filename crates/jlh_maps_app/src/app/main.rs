@@ -68,9 +68,31 @@ impl ExtractResource for AppWindows {
     }
 }
 
+thread_local! {
+    static INITIALIZED: RefCell<bool> = RefCell::new(false);
+}
+
 #[wasm_bindgen]
 pub fn initialize() {
-    console_error_panic_hook::set_once();
+    let initialized = INITIALIZED.with(|initialized| {
+        let prev = *initialized.borrow();
+        if !prev {
+            *initialized.borrow_mut() = true;
+        }
+        prev
+    });
+
+    if !initialized {
+        console_error_panic_hook::set_once();
+        let mut app = App::new();
+
+        // Log plugin only performs settings global logger and subscribers,
+        // initializing only once to avoid errors on repeat
+        app.add_plugins(LogPlugin {
+            filter: "info,wgpu_core=warn,wgpu_hal=warn".into(),
+            ..default()
+        });
+    }
 }
 
 #[wasm_bindgen]
@@ -94,10 +116,6 @@ pub fn mount(instance_id: String, debug_canvas: OffscreenCanvas, texture_canvas:
                 exit_condition: ExitCondition::DontExit,
                 ..default()
             })
-            .set(LogPlugin {
-                filter: "info,wgpu_core=warn,wgpu_hal=warn".into(),
-                ..default()
-            })
             .set(RenderPlugin {
                 render_creation: RenderCreation::Automatic(WgpuSettings {
                     features: WgpuFeatures::default(),
@@ -106,6 +124,7 @@ pub fn mount(instance_id: String, debug_canvas: OffscreenCanvas, texture_canvas:
                 }),
                 ..default()
             })
+            .disable::<LogPlugin>()
             .disable::<WinitPlugin>()
             .disable::<TransformPlugin>(),
         MaterialsPlugin,
