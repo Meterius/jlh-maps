@@ -336,15 +336,9 @@
 
 <script setup lang="ts">
 import { MglMap } from '@indoorequal/vue-maplibre-gl'
-import { computed, onWatcherCleanup, ref, shallowRef, watch, watchEffect } from 'vue'
+import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { onLongPress, useDark } from '@vueuse/core'
-import {
-  type DragPanOptions,
-  type Map as MapLibreMap,
-  type MapMouseEvent,
-  type StyleSwapOptions,
-  type StyleOptions,
-} from 'maplibre-gl'
+import type { MapMouseEvent } from 'maplibre-gl'
 import { center } from '@turf/turf'
 import type { FeatureCollection } from 'geojson'
 import {
@@ -373,7 +367,8 @@ import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { getTripBounds } from '@/utils/valhalla.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
-import  { type MapStyleLifecycleConfig, useMapStyleLifecycle } from '@/views/map-view/map-style-lifecycle.ts'
+import { type MapStyleLifecycleConfig, useMapStyleLifecycle } from '@/views/map-view/map-style-lifecycle.ts'
+import { usePanProfiles } from '@/views/map-view/map-pan-profiles.ts'
 
 const mapKey = makeUniqueMapKey()
 
@@ -758,69 +753,6 @@ watch(rainfallEnabled, (value) => {
   }
 })
 
-const DESKTOP_DRAG_PAN_OPTIONS: DragPanOptions = {
-  linearity: 0.35,
-  maxSpeed: 3200,
-  deceleration: 6000,
-  easing: lateBrakeDragPanEasing,
-}
-
-const MOBILE_DRAG_PAN_OPTIONS: DragPanOptions = {
-  linearity: 0.7,
-  maxSpeed: 4800,
-  deceleration: 2000,
-  easing: gradualFadeDragPanEasing,
-}
-
-function lateBrakeDragPanEasing(t: number) {
-  const x = clampUnit(t)
-
-  return (4 * x - x ** 4) / 3
-}
-
-function gradualFadeDragPanEasing(t: number) {
-  const x = clampUnit(t)
-
-  return 1 - (1 - x) ** 2
-}
-
-function clampUnit(value: number) {
-  return Math.max(0, Math.min(1, value))
-}
-
-function registerDragPanInertiaProfiles(map: MapLibreMap) {
-  const canvasContainer = map.getCanvasContainer()
-  const useDesktopProfile = () => map.dragPan.enable(DESKTOP_DRAG_PAN_OPTIONS)
-  const useMobileProfile = () => map.dragPan.enable(MOBILE_DRAG_PAN_OPTIONS)
-  const usePointerProfile = (event: PointerEvent) => {
-    if (event.pointerType === 'touch' || event.pointerType === 'pen') {
-      useMobileProfile()
-      return
-    }
-
-    useDesktopProfile()
-  }
-
-  if (window.matchMedia('(pointer: coarse)').matches) {
-    useMobileProfile()
-  } else {
-    useDesktopProfile()
-  }
-
-  canvasContainer.addEventListener('pointerdown', usePointerProfile, { capture: true })
-  canvasContainer.addEventListener('mousedown', useDesktopProfile, { capture: true })
-  canvasContainer.addEventListener('touchstart', useMobileProfile, {
-    capture: true,
-    passive: true,
-  })
-
-  return () => {
-    canvasContainer.removeEventListener('pointerdown', usePointerProfile, { capture: true })
-    canvasContainer.removeEventListener('mousedown', useDesktopProfile, { capture: true })
-    canvasContainer.removeEventListener('touchstart', useMobileProfile, { capture: true })
-  }
-}
-
 // Controls
 
 watchDefinedOnce(
@@ -830,6 +762,8 @@ watchDefinedOnce(
   },
 )
 
+usePanProfiles(mapKey)
+
 // Base Styles
 
 const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
@@ -838,7 +772,6 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
   instantiate: (map) => {
     const onCleanup: (() => void)[] = []
 
-    onCleanup.push(registerDragPanInertiaProfiles(map))
     onCleanup.push(registerTouchContextMenu(map))
     rainfallLayer.register(map, 'Water labels')
     onCleanup.push(rainfallLayer.unregister)

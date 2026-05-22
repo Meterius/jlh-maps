@@ -4,7 +4,7 @@ export function watchDefinedOnce<T>(
   value: WatchSource<T | undefined>,
   callback: (value: T) => void,
 ) {
-  watch(
+  return watch(
     value,
     (val, prev) => {
       if (val !== undefined && prev === undefined) {
