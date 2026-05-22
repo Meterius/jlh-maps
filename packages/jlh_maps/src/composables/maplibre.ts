@@ -1,15 +1,27 @@
 import { useMap } from '@indoorequal/vue-maplibre-gl'
 import { extractOsmIdFromOmtFeatureId, type OsmId } from '@/utils/osm.ts'
 import {
+  type AddLayerObject,
   type GeoJSONFeature,
+  type GeoJSONSource,
   LngLat,
   type MapLayerMouseEvent,
+  type MapLibreMap,
   type MapMouseEvent,
   type Subscription,
 } from 'maplibre-gl'
-import { onUnmounted, onWatcherCleanup, ref, shallowRef, watch, type WatchSource } from 'vue'
+import {
+  onBeforeUnmount,
+  onUnmounted,
+  onWatcherCleanup,
+  ref,
+  shallowRef,
+  watch,
+  type WatchSource,
+} from 'vue'
 import { get } from '@vueuse/core'
 import { watchDefinedOnce } from '@/composables/helper.ts'
+import type { GeoJSON } from 'geojson'
 
 const CLICK_LAYER_SYNC_BUFFER_MS = 50
 
@@ -169,5 +181,67 @@ export function useMapExtended(key?: symbol | string) {
     zoom,
     pitch,
     mapInstance,
+  }
+}
+
+export function useGeoJsonSource(map: MapLibreMap, sourceId: string, data: WatchSource<GeoJSON>) {
+  map.addSource(sourceId, {
+    type: 'geojson',
+    data: {
+      type: 'FeatureCollection',
+      features: [],
+    },
+  })
+
+  const { stop: stopData } = watch(
+    data,
+    (updatedData) => {
+      map.getSource<GeoJSONSource>(sourceId)?.setData(updatedData)
+    },
+    { immediate: true },
+  )
+
+  let removed = false
+  const remove = () => {
+    if (removed) return
+    removed = true
+
+    stopData()
+    map.removeSource(sourceId)
+  }
+
+  onBeforeUnmount(remove)
+
+  return {
+    remove,
+  }
+}
+
+export function useLayer(map: MapLibreMap, layer: AddLayerObject, beforeId?: string) {
+  map.addLayer(layer, beforeId)
+
+  const visible = ref(true)
+  const { stop } = watch(
+    visible,
+    (value) => {
+      map.setLayoutProperty(layer.id, 'visibility', value ? 'visible' : 'none')
+    },
+    { immediate: true },
+  )
+
+  let removed = false
+  const remove = () => {
+    if (removed) return
+    removed = true
+
+    stop()
+    map.removeLayer(layer.id)
+  }
+
+  onBeforeUnmount(remove)
+
+  return {
+    remove,
+    visible,
   }
 }

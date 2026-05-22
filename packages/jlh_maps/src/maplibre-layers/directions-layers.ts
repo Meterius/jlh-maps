@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, toValue, watchEffect, type WatchSource } from 'vue'
+import { computed, onBeforeUnmount, ref, toValue, watch, type WatchSource } from 'vue'
 import type { GeoLocation } from '@/components/types.ts'
 import { decodePolylineToPositions, type Trip } from 'valhalla_client'
 import type { FeatureCollection, LineString, Point, Position } from 'geojson'
@@ -6,7 +6,8 @@ import { distance } from '@turf/turf'
 import { point as turfPoint } from '@turf/helpers'
 import { svgToImage } from '@/utils/svg-to-image.ts'
 import mapPinIconSvg from 'lucide-static/icons/map-pin.svg?raw'
-import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl'
+import type { Map as MapLibreMap } from 'maplibre-gl'
+import { useGeoJsonSource, useLayer } from '@/composables/maplibre.ts'
 
 const DIRECTION_TRIP_PRIMARY_SOURCE_ID = 'direction-trip-primary'
 const DIRECTION_TRIP_PRIMARY_LAYER_ID = 'direction-trip-primary'
@@ -19,15 +20,17 @@ const DIRECTION_STOPS_SHADOW_LAYER_ID = 'direction-stops-shadow'
 export const DIRECTION_STOPS_LAYER_ID = 'direction-stops'
 const DIRECTION_STOP_ICON_ID = 'lucide:map-pin'
 
-export function useDirectionsLayers({
-  stops,
-  tripPrimary,
-  visible,
-}: {
-  stops: WatchSource<(GeoLocation | null)[]>
-  tripPrimary: WatchSource<Trip | null>
-  visible: WatchSource<boolean>
-}) {
+export function useDirectionsLayers(
+  map: MapLibreMap,
+  {
+    stops,
+    tripPrimary,
+  }: {
+    stops: WatchSource<(GeoLocation | null)[]>
+    tripPrimary: WatchSource<Trip | null>
+  },
+  beforeLayerId?: string,
+) {
   const getTripLineCoordinates = (trip: Trip | null): Position[] =>
     trip?.legs.flatMap((leg) => {
       const shape = leg.shape ?? leg.encoded_shape
@@ -148,180 +151,131 @@ export function useDirectionsLayers({
     }
   }
 
-  const onCleanupCallbacks: (() => void)[] = []
+  registerDirectionStopImage(map).catch(console.error)
 
-  const cleanup = () => {
-    onCleanupCallbacks.splice(0).forEach((callback) => callback())
-  }
+  const { remove: removeTripPrimarySource } = useGeoJsonSource(
+    map,
+    DIRECTION_TRIP_PRIMARY_SOURCE_ID,
+    directionsTripPrimaryGeoJsonData,
+  )
+  const { remove: removeTripPrimaryConnectorSource } = useGeoJsonSource(
+    map,
+    DIRECTION_TRIP_PRIMARY_CONNECTOR_SOURCE_ID,
+    directionsTripPrimaryConnectorGeoJsonData,
+  )
 
-  const register = (map: MapLibreMap, beforeLayerId?: string) => {
-    cleanup()
-
-    registerDirectionStopImage(map).catch(console.error)
-
-    // Direction Trips Layers
-
-    map.addSource(DIRECTION_TRIP_PRIMARY_SOURCE_ID, {
-      type: 'geojson',
-      data: directionsTripPrimaryGeoJsonData.value,
-    })
-
-    map.addSource(DIRECTION_TRIP_PRIMARY_CONNECTOR_SOURCE_ID, {
-      type: 'geojson',
-      data: directionsTripPrimaryConnectorGeoJsonData.value,
-    })
-
-    onCleanupCallbacks.push(
-      watchEffect(() => {
-        map
-          .getSource<GeoJSONSource>(DIRECTION_TRIP_PRIMARY_SOURCE_ID)
-          ?.setData(toValue(directionsTripPrimaryGeoJsonData))
-      }).stop,
-      watchEffect(() => {
-        map
-          .getSource<GeoJSONSource>(DIRECTION_TRIP_PRIMARY_CONNECTOR_SOURCE_ID)
-          ?.setData(toValue(directionsTripPrimaryConnectorGeoJsonData))
-      }).stop,
-    )
-
-    map.addLayer(
-      {
-        id: DIRECTION_TRIP_PRIMARY_LAYER_ID,
-        source: DIRECTION_TRIP_PRIMARY_SOURCE_ID,
-        type: 'line',
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
-        },
-        paint: {
-          'line-color': '#2563eb',
-          'line-opacity': 0.85,
-          'line-width': 5,
-        },
-      },
-      beforeLayerId,
-    )
-
-    onCleanupCallbacks.push(
-      watchEffect(() => {
-        map.setLayoutProperty(
-          DIRECTION_TRIP_PRIMARY_LAYER_ID,
-          'visibility',
-          toValue(visible) ? 'visible' : 'none',
-        )
-      }).stop,
-    )
-
-    map.addLayer(
-      {
-        id: DIRECTION_TRIP_PRIMARY_CONNECTOR_LAYER_ID,
-        source: DIRECTION_TRIP_PRIMARY_CONNECTOR_SOURCE_ID,
-        type: 'line',
-        layout: {
-          'line-cap': 'round',
-          'line-join': 'round',
-        },
-        paint: {
-          'line-color': '#2563eb',
-          'line-dasharray': [0.5, 2.0],
-          'line-opacity': 0.75,
-          'line-width': 3,
-        },
-      },
-      DIRECTION_TRIP_PRIMARY_LAYER_ID,
-    )
-
-    onCleanupCallbacks.push(
-      watchEffect(() => {
-        map.setLayoutProperty(
-          DIRECTION_TRIP_PRIMARY_CONNECTOR_LAYER_ID,
-          'visibility',
-          toValue(visible) ? 'visible' : 'none',
-        )
-      }).stop,
-    )
-
-    // Direction Stops Layer
-
-    map.addSource(DIRECTION_STOPS_SOURCE_ID, {
-      type: 'geojson',
-      data: directionStopsGeoJsonData.value,
-    })
-
-    onCleanupCallbacks.push(
-      watchEffect(() => {
-        map
-          .getSource<GeoJSONSource>(DIRECTION_STOPS_SOURCE_ID)
-          ?.setData(directionStopsGeoJsonData.value)
-      }).stop,
-    )
-
-    map.addLayer({
-      id: DIRECTION_STOPS_SHADOW_LAYER_ID,
-      source: DIRECTION_STOPS_SOURCE_ID,
-      type: 'circle',
-      paint: {
-        'circle-radius': 16,
-        'circle-blur': 0.4,
-        'circle-color': '#000000',
-        'circle-opacity': 0.3,
-        'circle-translate': [0, 0],
-        'circle-translate-anchor': 'viewport',
-        'circle-pitch-alignment': 'map',
-      },
-    })
-
-    onCleanupCallbacks.push(
-      watchEffect(() => {
-        map.setLayoutProperty(
-          DIRECTION_STOPS_SHADOW_LAYER_ID,
-          'visibility',
-          toValue(visible) ? 'visible' : 'none',
-        )
-      }).stop,
-    )
-
-    map.addLayer({
-      id: DIRECTION_STOPS_LAYER_ID,
-      source: DIRECTION_STOPS_SOURCE_ID,
-      type: 'symbol',
+  const tripPrimaryLayer = useLayer(
+    map,
+    {
+      id: DIRECTION_TRIP_PRIMARY_LAYER_ID,
+      source: DIRECTION_TRIP_PRIMARY_SOURCE_ID,
+      type: 'line',
       layout: {
-        'icon-image': DIRECTION_STOP_ICON_ID,
-        'icon-size': 1.5,
-        'icon-anchor': 'bottom',
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
-        'text-field': ['get', 'label'],
-        'text-anchor': 'bottom',
-        'text-offset': [0, -2.25],
-        'text-size': 16,
-        'text-allow-overlap': true,
-        'text-ignore-placement': true,
-        'symbol-sort-key': ['get', 'sortKey'],
+        'line-cap': 'round',
+        'line-join': 'round',
       },
       paint: {
-        'text-color': '#111827',
-        'text-halo-color': '#ffffff',
-        'text-halo-width': 2,
+        'line-color': '#2563eb',
+        'line-opacity': 0.85,
+        'line-width': 5,
       },
-    })
+    },
+    beforeLayerId,
+  )
 
-    onCleanupCallbacks.push(
-      watchEffect(() => {
-        map.setLayoutProperty(
-          DIRECTION_STOPS_LAYER_ID,
-          'visibility',
-          toValue(visible) ? 'visible' : 'none',
-        )
-      }).stop,
-    )
-  }
+  const tripPrimaryConnectorLayer = useLayer(
+    map,
+    {
+      id: DIRECTION_TRIP_PRIMARY_CONNECTOR_LAYER_ID,
+      source: DIRECTION_TRIP_PRIMARY_CONNECTOR_SOURCE_ID,
+      type: 'line',
+      layout: {
+        'line-cap': 'round',
+        'line-join': 'round',
+      },
+      paint: {
+        'line-color': '#2563eb',
+        'line-dasharray': [0.5, 2.0],
+        'line-opacity': 0.75,
+        'line-width': 3,
+      },
+    },
+    DIRECTION_TRIP_PRIMARY_LAYER_ID,
+  )
 
-  onBeforeUnmount(() => {
-    cleanup()
+  const { remove: removeStopsSource } = useGeoJsonSource(
+    map,
+    DIRECTION_STOPS_SOURCE_ID,
+    directionStopsGeoJsonData,
+  )
+
+  const stopsShadowLayer = useLayer(map, {
+    id: DIRECTION_STOPS_SHADOW_LAYER_ID,
+    source: DIRECTION_STOPS_SOURCE_ID,
+    type: 'circle',
+    paint: {
+      'circle-radius': 16,
+      'circle-blur': 0.4,
+      'circle-color': '#000000',
+      'circle-opacity': 0.3,
+      'circle-translate': [0, 0],
+      'circle-translate-anchor': 'viewport',
+      'circle-pitch-alignment': 'map',
+    },
   })
 
+  const stopsLayer = useLayer(map, {
+    id: DIRECTION_STOPS_LAYER_ID,
+    source: DIRECTION_STOPS_SOURCE_ID,
+    type: 'symbol',
+    layout: {
+      'icon-image': DIRECTION_STOP_ICON_ID,
+      'icon-size': 1.5,
+      'icon-anchor': 'bottom',
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      'text-field': ['get', 'label'],
+      'text-anchor': 'bottom',
+      'text-offset': [0, -2.25],
+      'text-size': 16,
+      'text-allow-overlap': true,
+      'text-ignore-placement': true,
+      'symbol-sort-key': ['get', 'sortKey'],
+    },
+    paint: {
+      'text-color': '#111827',
+      'text-halo-color': '#ffffff',
+      'text-halo-width': 2,
+    },
+  })
+
+  const visible = ref(true)
+  const { stop: stopVisibleSync } = watch(
+    visible,
+    (value) => {
+      tripPrimaryLayer.visible.value = value
+      tripPrimaryConnectorLayer.visible.value = value
+      stopsShadowLayer.visible.value = value
+      stopsLayer.visible.value = value
+    },
+    { immediate: true },
+  )
+
+  const remove = () => {
+    stopVisibleSync()
+    stopsLayer.remove()
+    stopsShadowLayer.remove()
+    removeStopsSource()
+    tripPrimaryConnectorLayer.remove()
+    tripPrimaryLayer.remove()
+    removeTripPrimaryConnectorSource()
+    removeTripPrimarySource()
+  }
+
+  onBeforeUnmount(remove)
+
   return {
-    register,
+    remove,
+    visible,
   }
 }

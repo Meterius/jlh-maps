@@ -5,9 +5,9 @@ import { watchDefinedOnce } from '@/composables/helper.ts'
 
 export interface MapStyleLifecycleConfig {
   source: string
-  options?: StyleSwapOptions & StyleOptions,
+  options?: StyleSwapOptions & StyleOptions
   // callback when map is loaded with new style
-  instantiate: (map: MapLibreMap) => StyleInstance,
+  instantiate: (map: MapLibreMap) => StyleInstance
 }
 
 export interface StyleInstance {
@@ -22,7 +22,7 @@ export function useMapStyleLifecycle(
 ) {
   const mapInstance = useMap(mapKey)
 
-  watchDefinedOnce(
+  const { stop } = watchDefinedOnce(
     () => mapInstance.map,
     (map) => {
       const onWatcherCleanupCallbacks: (() => void)[] = []
@@ -67,4 +67,8 @@ export function useMapStyleLifecycle(
       })
     },
   )
+
+  return {
+    remove: stop,
+  }
 }

@@ -339,8 +339,6 @@ import { MglMap } from '@indoorequal/vue-maplibre-gl'
 import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { onLongPress, useDark } from '@vueuse/core'
 import type { MapMouseEvent } from 'maplibre-gl'
-import { center } from '@turf/turf'
-import type { FeatureCollection } from 'geojson'
 import {
   TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL,
   TILESERVER_RASTER_SEN2_TILE_URL_PATTERN,
@@ -367,7 +365,10 @@ import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { getTripBounds } from '@/utils/valhalla.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
-import { type MapStyleLifecycleConfig, useMapStyleLifecycle } from '@/views/map-view/map-style-lifecycle.ts'
+import {
+  type MapStyleLifecycleConfig,
+  useMapStyleLifecycle,
+} from '@/views/map-view/map-style-lifecycle.ts'
 import { usePanProfiles } from '@/views/map-view/map-pan-profiles.ts'
 
 const mapKey = makeUniqueMapKey()
@@ -653,12 +654,6 @@ const directionStops = shallowRef<(GeoLocation | null)[]>([null, null])
 const directionsTripPrimary = shallowRef<Trip | null>(null)
 const directionsTripAlternates = shallowRef<Trip[]>([])
 
-const directionsLayers = useDirectionsLayers({
-  stops: directionStops,
-  tripPrimary: directionsTripPrimary,
-  visible: computed(() => slideoverOpen.value === SlideoverTab.Directions),
-})
-
 const focusTrip = (trip: Trip) => {
   const map = mapInstance.map
   if (!map) return
@@ -688,18 +683,6 @@ watchEffect(() => {
   } else if (selection.value.length !== 1 && slideoverOpen.value === SlideoverTab.Details) {
     slideoverOpen.value = null
   }
-})
-
-const highlightGeoJsonData = computed(
-  (): FeatureCollection => ({
-    type: 'FeatureCollection',
-    features: selection.value.map((item) => center(item.feature.geometry)),
-  }),
-)
-
-const highlightLayer = useHighlightLayer({
-  data: highlightGeoJsonData,
-  visible: computed(() => true),
 })
 
 const showBevyCanvas = ref(false)
@@ -971,11 +954,30 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
     // Highlight
 
-    highlightLayer.register(map)
+    onCleanup.push(
+      useHighlightLayer(map, () => selection.value.map((item) => item.feature.geometry)).remove,
+    )
 
     // Directions
 
-    directionsLayers.register(map, 'Other border')
+    const directionsLayers = useDirectionsLayers(
+      map,
+      {
+        stops: directionStops,
+        tripPrimary: directionsTripPrimary,
+      },
+      'Other border',
+    )
+    onCleanup.push(directionsLayers.remove)
+    onCleanup.push(
+      watch(
+        () => slideoverOpen.value === SlideoverTab.Directions,
+        (visible) => {
+          directionsLayers.visible.value = visible
+        },
+        { immediate: true },
+      ).stop,
+    )
 
     //
 
@@ -985,7 +987,10 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         (layer) => map.getLayer(layer)?.type === 'symbol' && layer !== DIRECTION_STOPS_LAYER_ID,
       )
 
-    onCleanup.push(() => selectableLayers.value = [])
+    onCleanup.push(() => (selectableLayers.value = []))
+    onCleanup.push(() => {
+      selection.value = []
+    })
 
     // Clean-Up
 

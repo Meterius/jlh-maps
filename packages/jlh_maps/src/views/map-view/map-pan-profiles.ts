@@ -1,4 +1,4 @@
-import type { DragPanOptions, Map as MapLibreMap } from 'maplibre-gl'
+import type { DragPanOptions } from 'maplibre-gl'
 import { useMap } from '@indoorequal/vue-maplibre-gl'
 import { watchDefinedOnce } from '@/composables/helper.ts'
 import { onWatcherCleanup } from 'vue'
@@ -36,31 +36,33 @@ function clampUnit(value: number) {
 export function usePanProfiles(mapKey: string | symbol | undefined) {
   const mapInstance = useMap(mapKey)
 
-  const { stop } = watchDefinedOnce(() => mapInstance.map, (map) => {
-    const canvasContainer = map.getCanvasContainer()
-    const useDesktopProfile = () => map.dragPan.enable(DESKTOP_DRAG_PAN_OPTIONS)
-    const useMobileProfile = () => map.dragPan.enable(MOBILE_DRAG_PAN_OPTIONS)
-    const usePointerProfile = (event: PointerEvent) => {
-      if (event.pointerType === 'touch' || event.pointerType === 'pen') {
-        useMobileProfile()
-        return
+  const { stop } = watchDefinedOnce(
+    () => mapInstance.map,
+    (map) => {
+      const canvasContainer = map.getCanvasContainer()
+      const useDesktopProfile = () => map.dragPan.enable(DESKTOP_DRAG_PAN_OPTIONS)
+      const useMobileProfile = () => map.dragPan.enable(MOBILE_DRAG_PAN_OPTIONS)
+      const usePointerProfile = (event: PointerEvent) => {
+        if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+          useMobileProfile()
+          return
+        }
+
+        useDesktopProfile()
       }
 
-      useDesktopProfile()
-    }
+      if (window.matchMedia('(pointer: coarse)').matches) {
+        useMobileProfile()
+      } else {
+        useDesktopProfile()
+      }
 
-    if (window.matchMedia('(pointer: coarse)').matches) {
-      useMobileProfile()
-    } else {
-      useDesktopProfile()
-    }
-
-    canvasContainer.addEventListener('pointerdown', usePointerProfile, { capture: true })
-    canvasContainer.addEventListener('mousedown', useDesktopProfile, { capture: true })
-    canvasContainer.addEventListener('touchstart', useMobileProfile, {
-      capture: true,
-      passive: true,
-    })
+      canvasContainer.addEventListener('pointerdown', usePointerProfile, { capture: true })
+      canvasContainer.addEventListener('mousedown', useDesktopProfile, { capture: true })
+      canvasContainer.addEventListener('touchstart', useMobileProfile, {
+        capture: true,
+        passive: true,
+      })
 
       onWatcherCleanup(() => {
         canvasContainer.removeEventListener('pointerdown', usePointerProfile, { capture: true })
@@ -70,10 +72,11 @@ export function usePanProfiles(mapKey: string | symbol | undefined) {
         // reset drag pan configuration
         map.dragPan.enable()
       })
-  })
+    },
+  )
 
   return {
     // remove pan profiles, automatically invoked when unmounted
-    remove: () => stop()
+    remove: () => stop(),
   }
 }
