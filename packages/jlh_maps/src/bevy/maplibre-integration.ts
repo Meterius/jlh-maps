@@ -16,7 +16,7 @@ import {
   type QuerySourceFeatureOptions,
   type Tile,
 } from 'maplibre-gl'
-import { shallowRef, toValue, type WatchSource } from 'vue'
+import { shallowRef } from 'vue'
 import { onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import { useMap } from '@indoorequal/vue-maplibre-gl'
 import type {
@@ -25,9 +25,10 @@ import type {
   Map as InternalMap,
   Terrain,
   Tile as InternalTile,
-} from '@/types/maplibre-gl-internals'
+} from 'maplibre-gl/src/index.ts'
 // @ts-expect-error Class not properly exported by dist
 import { OverscaledTileID } from 'maplibre-gl/src/tile/tile_id'
+import { useBevy } from '@/bevy/index.ts'
 
 type TileKey = string
 type SourceLayerTileKey = string
@@ -74,23 +75,19 @@ interface MaplibreGlJsIntegrationOptions {
   featureSourceLayers?: FeatureSourceLayer[]
 }
 
-export function useMaplibreGlJsIntegration(
-  instanceId: WatchSource<string | undefined>,
-  key?: string | symbol,
+export function useMaplibreIntegration(
+  instanceId: string,
+  mapKey?: string | symbol,
   options: MaplibreGlJsIntegrationOptions = {},
 ) {
-  const mapInstance = useMap(key)
+  const bevyInstance = useBevy(instanceId)
+  const mapInstance = useMap(mapKey)
 
   const mapIntegration = shallowRef<MaplibreGlJsIntegration | null>(null)
 
   watchDefinedOnce(
-    () => {
-      const instanceIdValue = toValue(instanceId)
-      if (instanceIdValue === undefined || mapInstance.map === undefined) return undefined
-
-      return { instanceId: instanceIdValue, map: mapInstance.map }
-    },
-    ({ instanceId, map }) => {
+    () => (bevyInstance.isMounted.value ? mapInstance.map : undefined),
+    (map) => {
       const mapIntegrationId = create_map_integration(instanceId)
       const integration = new MaplibreGlJsIntegration(
         map,

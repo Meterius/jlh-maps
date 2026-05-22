@@ -295,6 +295,7 @@
       :style="`position: absolute; width: ${showBevyCanvas ? '100%' : '10px'}; height: ${showBevyCanvas ? '50%' : '1px'}; bottom: 0`"
     >
       <canvas
+        ref="bevyDebugCanvas"
         :id="bevyCanvasId"
         style="position: absolute; inset: 0; height: 100%; width: 100%"
       ></canvas>
@@ -316,8 +317,7 @@
       :details-osm-id="selection[0]?.osm_id"
       :details-feature="selection[0]?.feature"
       :map="mapInstance.map"
-      :bevy-settings="mapViewSettings"
-      :bevy-camera-settings="mapViewCameraSettings"
+      :bevy-instance-id="instanceId"
       @update:drawer-direction="slideoverDirection = $event"
       @update:drawer-size="slideoverSize = $event"
       @update:open="
@@ -352,8 +352,8 @@ import {
   useNavigationControl,
 } from '@/composables/maplibre/controls'
 import { onScopeDisposeLifo, watchDefinedOnce } from '@/composables/helper.ts'
-import { useMaplibreGlJsIntegration } from '@/composables/bevy-maplibre-integration.ts'
-import { useBevy } from '@/composables/bevy.ts'
+import { useMaplibreIntegration } from '@/bevy/maplibre-integration'
+import { mountBevy, useBevy } from '@/bevy'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
 import MapSlideover, { type MapSlideoverTab } from '@/views/map-view/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
@@ -377,11 +377,15 @@ import { provideMapCameraController } from '@/views/map-view/map-camera-controll
 const mapKey = makeUniqueMapKey()
 
 const bevyCanvasId = `bevy-canvas-${mapKey}`
-
-const { instanceId, mapViewSettings, mapViewCameraSettings, tick, mapTextureOffscreenCanvas } =
-  useBevy(`#${bevyCanvasId}`, '.maplibregl-canvas')
+const bevyDebugCanvas = ref<HTMLCanvasElement | null>(null)
 
 const { mapInstance, loaded, zoom } = useMapExtended(mapKey)
+
+const { instanceId } = mountBevy(
+  () => bevyDebugCanvas.value ?? null,
+  () => mapInstance.map?.getCanvas() ?? null,
+)
+const { tick, textureOffscreenCanvas, mapViewSettings } = useBevy(instanceId)
 
 const {
   active: globeActive,
@@ -417,7 +421,7 @@ const {
   zoomOutTitle,
 } = useNavigationControl(mapKey, { northRotationOffset: 135 })
 
-const { syncOnRender } = useMaplibreGlJsIntegration(() => instanceId, mapKey, {
+const { syncOnRender } = useMaplibreIntegration(instanceId, mapKey, {
   featureSourceLayers: [
     { sourceId: 'openmaptiles', sourceLayer: 'building' },
     { sourceId: 'openmaptiles', sourceLayer: 'water' },
@@ -591,8 +595,12 @@ const layersControlStyle = computed(() => ({
   left: slideoverDirection.value === 'left' ? `${slideoverSize.value.width}px` : '0px',
 }))
 
-const sunAzimuthLabel = computed(() => `${Math.round(mapViewSettings.sun_azimuth_degrees)} deg`)
-const sunElevationLabel = computed(() => `${Math.round(mapViewSettings.sun_elevation_degrees)} deg`)
+const sunAzimuthLabel = computed(
+  () => `${Math.round(mapViewSettings.value.sun_azimuth_degrees)} deg`,
+)
+const sunElevationLabel = computed(
+  () => `${Math.round(mapViewSettings.value.sun_elevation_degrees)} deg`,
+)
 
 const onSlideoverClose = () => {
   switch (slideoverOpen.value) {
@@ -686,7 +694,7 @@ const showBevyCanvas = ref(false)
 watch(
   showBevyCanvas,
   (value) => {
-    mapViewSettings.enable_window_cameras = value
+    mapViewSettings.value.enable_window_cameras = value
   },
   { immediate: true },
 )
@@ -919,7 +927,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
     if (!useRaster) {
       useLayer(
         map,
-        new BevyLayer(mapTextureOffscreenCanvas, {
+        new BevyLayer(textureOffscreenCanvas, {
           id: 'bevy-texture',
           tick: () => {
             syncOnRender()

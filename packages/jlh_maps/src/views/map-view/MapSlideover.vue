@@ -95,8 +95,7 @@
             v-show="props.active === 'settings'"
             class="h-full"
             :map="props.map"
-            :bevy-settings="props.bevySettings"
-            :bevy-camera-settings="props.bevyCameraSettings"
+            :bevy-instance-id="props.bevyInstanceId"
           />
         </div>
       </div>
@@ -109,10 +108,6 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { DrawerHandle } from 'vaul-vue'
 import type { GeoJSONFeature, Map as MapLibreMap } from 'maplibre-gl'
-import type {
-  MapViewCameraSettings as MapViewCameraSettingsBevy,
-  MapViewSettings as MapViewSettingsBevy,
-} from 'jlh_maps_app'
 import type { OsmId } from '@/utils/osm.ts'
 import type { PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
 import ContentDetails from '@/views/map-view/map-slideover/ContentDetails.vue'
@@ -127,8 +122,7 @@ const props = defineProps<{
   detailsOsmId?: OsmId
   detailsFeature?: GeoJSONFeature
   map?: MapLibreMap
-  bevySettings: MapViewSettingsBevy
-  bevyCameraSettings: MapViewCameraSettingsBevy
+  bevyInstanceId: string
 }>()
 
 const emit = defineEmits<{

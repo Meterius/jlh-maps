@@ -93,16 +93,14 @@ import { MapLibreMap } from 'maplibre-gl'
 import { computed, shallowRef, useTemplateRef, watch } from 'vue'
 import type { TreeItem } from '@nuxt/ui'
 import { useSortable } from '@vueuse/integrations/useSortable'
-import type {
-  MapViewCameraSettings as MapViewCameraSettingsBevy,
-  MapViewSettings as MapViewSettingsBevy,
-} from 'jlh_maps_app'
+import { useBevy } from '@/bevy'
 
 const props = defineProps<{
   map: MapLibreMap
-  bevySettings: MapViewSettingsBevy
-  bevyCameraSettings: MapViewCameraSettingsBevy
+  bevyInstanceId: string
 }>()
+
+const { mapViewCameraSettings, mapViewSettings } = useBevy(props.bevyInstanceId)
 
 const showTileBoundaries = computed({
   get: () => props.map.showTileBoundaries,
@@ -129,74 +127,65 @@ const showPadding = computed({
 })
 
 const enableBuildings = computed({
-  get: () => props.bevySettings.enable_buildings,
+  get: () => mapViewSettings.value.enable_buildings,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevySettings.enable_buildings = value
+    mapViewSettings.value.enable_buildings = value
   },
 })
 
 const enableWaters = computed({
-  get: () => props.bevySettings.enable_waters,
+  get: () => mapViewSettings.value.enable_waters,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevySettings.enable_waters = value
+    mapViewSettings.value.enable_waters = value
   },
 })
 
 const enableShadows = computed({
-  get: () => props.bevySettings.enable_shadows,
+  get: () => mapViewSettings.value.enable_shadows,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevySettings.enable_shadows = value
+    mapViewSettings.value.enable_shadows = value
   },
 })
 
 const enableWindowCameras = computed({
-  get: () => props.bevySettings.enable_window_cameras,
+  get: () => mapViewSettings.value.enable_window_cameras,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevySettings.enable_window_cameras = value
+    mapViewSettings.value.enable_window_cameras = value
   },
 })
 
 const enableColorGrading = computed({
-  get: () => props.bevyCameraSettings.enable_color_grading,
+  get: () => mapViewCameraSettings.value.enable_color_grading,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevyCameraSettings.enable_color_grading = value
+    mapViewCameraSettings.value.enable_color_grading = value
   },
 })
 
 const enableTonemapping = computed({
-  get: () => props.bevyCameraSettings.enable_tonemapping,
+  get: () => mapViewCameraSettings.value.enable_tonemapping,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevyCameraSettings.enable_tonemapping = value
+    mapViewCameraSettings.value.enable_tonemapping = value
   },
 })
 
 const enableSsao = computed({
-  get: () => props.bevyCameraSettings.enable_ssao,
+  get: () => mapViewCameraSettings.value.enable_ssao,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevyCameraSettings.enable_ssao = value
+    mapViewCameraSettings.value.enable_ssao = value
   },
 })
 
 const enableTaa = computed({
-  get: () => props.bevyCameraSettings.enable_taa,
+  get: () => mapViewCameraSettings.value.enable_taa,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevyCameraSettings.enable_taa = value
+    mapViewCameraSettings.value.enable_taa = value
   },
 })
 
 const enableMsaa = computed({
-  get: () => props.bevyCameraSettings.enable_msaa,
+  get: () => mapViewCameraSettings.value.enable_msaa,
   set: (value: boolean) => {
-    // eslint-disable-next-line vue/no-mutating-props
-    props.bevyCameraSettings.enable_msaa = value
+    mapViewCameraSettings.value.enable_msaa = value
   },
 })
 
