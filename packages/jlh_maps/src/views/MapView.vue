@@ -373,6 +373,7 @@ import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { getTripBounds } from '@/utils/valhalla.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
+import  { type MapStyleLifecycleConfig, useMapStyleLifecycle } from '@/views/map-view/map-style-lifecycle.ts'
 
 const mapKey = makeUniqueMapKey()
 
@@ -831,18 +832,10 @@ watchDefinedOnce(
 
 // Base Styles
 
-type BaseStyle = {
-  source: string
-  options?: StyleSwapOptions & StyleOptions
-  onLoaded: (map: MapLibreMap) => {
-    onCleanup: (() => void)[]
-  }
-}
-
-const makeBasicStyle = (useRaster: boolean): BaseStyle => ({
+const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
   source: TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString(),
   options: { diff: false },
-  onLoaded: (map) => {
+  instantiate: (map) => {
     const onCleanup: (() => void)[] = []
 
     onCleanup.push(registerDragPanInertiaProfiles(map))
@@ -1059,9 +1052,11 @@ const makeBasicStyle = (useRaster: boolean): BaseStyle => ({
         (layer) => map.getLayer(layer)?.type === 'symbol' && layer !== DIRECTION_STOPS_LAYER_ID,
       )
 
+    onCleanup.push(() => selectableLayers.value = [])
+
     // Clean-Up
 
-    return { onCleanup }
+    return { onRemove: () => onCleanup.splice(0).forEach((callback) => callback()) }
   },
 })
 
@@ -1072,46 +1067,7 @@ const baseStyleDefinitions = {
 
 const baseStyle = computed(() => baseStyleDefinitions[baseStyleType.value])
 
-watchDefinedOnce(
-  () => mapInstance.map,
-  (map) => {
-    const onWatcherCleanupCallbacks: (() => void)[] = []
-    let styleRequestId = 0
-    let onStyleCleanupCallbacks: (() => void)[] = []
-
-    const cleanupStyle = () => {
-      onStyleCleanupCallbacks.splice(0).forEach((callback) => callback())
-      selectableLayers.value = []
-    }
-
-    onWatcherCleanupCallbacks.push(
-      watch(
-        baseStyle,
-        async (selectedBaseStyle) => {
-          const currentStyleRequestId = ++styleRequestId
-
-          cleanupStyle()
-
-          const styleLoaded = map.once('style.load') as Promise<unknown>
-          map.setStyle(selectedBaseStyle.source, selectedBaseStyle.options)
-
-          await styleLoaded
-
-          if (currentStyleRequestId !== styleRequestId) return
-
-          onStyleCleanupCallbacks = selectedBaseStyle.onLoaded(map).onCleanup
-        },
-        { immediate: true },
-      ).stop,
-    )
-
-    onWatcherCleanup(() => {
-      styleRequestId++
-      cleanupStyle()
-      onWatcherCleanupCallbacks.forEach((callback) => callback())
-    })
-  },
-)
+useMapStyleLifecycle(mapKey, baseStyle)
 </script>
 
 <style lang="css">
