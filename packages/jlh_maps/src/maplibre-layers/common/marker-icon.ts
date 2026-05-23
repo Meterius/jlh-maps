@@ -11,7 +11,7 @@ type ParsedMarkerIconSvg = {
   viewBox: string
 }
 
-export type MarkerIconOptions = {
+export type MarkerOptions = {
   width?: number
   height?: number
   color?: string
@@ -49,7 +49,7 @@ export const DEFAULT_MARKER_ICON_OPTIONS = {
   headCenterY: 16,
   markerPath: DEFAULT_MARKER_PATH,
   viewBox: '0 0 32 36',
-} satisfies Required<MarkerIconOptions>
+} satisfies Required<MarkerOptions>
 
 const parsedMarkerIconSvgCache = new Map<string, ParsedMarkerIconSvg>()
 
@@ -89,7 +89,7 @@ const getMarkerIconBounds = ({
   iconScale,
   headCenterX,
   headCenterY,
-}: Required<MarkerIconOptions>) => {
+}: Required<MarkerOptions>) => {
   const iconSize = iconBaseSize * iconScale
 
   return {
@@ -101,7 +101,7 @@ const getMarkerIconBounds = ({
 
 export const makeMarkerIcon = (
   iconSvg: string | undefined,
-  marker: Required<MarkerIconOptions>,
+  marker: Required<MarkerOptions>,
 ) => {
   const { innerHtml, presentationAttributes, viewBox } = parseMarkerIconSvg(iconSvg)
   const iconBounds = getMarkerIconBounds(marker)
