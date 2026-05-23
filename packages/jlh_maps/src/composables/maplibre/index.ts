@@ -275,7 +275,7 @@ export function useLayer(map: MapLibreMap, layer: AddLayerObject, options: UseLa
   })
 }
 
-type MapLibreMapImageData =
+export type MapLibreMapImageData =
   | HTMLImageElement
   | ImageBitmap
   | ImageData
@@ -286,13 +286,22 @@ type MapLibreMapImageData =
     }
   | StyleImageInterface
 
+type ImageAddedCallback = (image: MapLibreMapImageData, imageId: string) => void
+
 export function useImage(
   map: MapLibreMap,
   imageId: string,
   image: MapLibreMapImageData,
-  { options }: { options?: Partial<StyleImageMetadata> },
+  {
+    options,
+    onImageAdded,
+  }: {
+    options?: Partial<StyleImageMetadata>
+    onImageAdded?: ImageAddedCallback
+  },
 ) {
   map.addImage(imageId, image, options)
+  onImageAdded?.(image, imageId)
 
   onScopeDisposeLifo(() => {
     map.removeImage(imageId)
@@ -308,6 +317,7 @@ export type OnDemandImageProviderOptions<T> = {
   fetchImage: (params: T) => Promise<{
     image: MapLibreMapImageData
   }>
+  onImageAdded?: ImageAddedCallback
 }
 
 export function useOnDemandImageProvider<T>(
@@ -329,10 +339,12 @@ export function useOnDemandImageProvider<T>(
 
     const initialImage = options.getInitialImage(params)
     map.addImage(imageId, initialImage.image, initialImage.options)
+    options.onImageAdded?.(initialImage.image, imageId)
 
     options.fetchImage(params).then((image) => {
       if (!removed) {
         map.updateImage(imageId, image.image)
+        options.onImageAdded?.(image.image, imageId)
         map.triggerRepaint()
       }
     }, console.error)

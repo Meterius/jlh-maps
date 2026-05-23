@@ -5,10 +5,15 @@ import {
   resolveOmtPoiIconSvg,
 } from '@/constants/omt-mapping.ts'
 import { createKeyedSharedComposable } from '@/composables/helper.ts'
-import { getMapHashKey, useLayer, useOnDemandImageProvider } from '@/composables/maplibre'
+import {
+  getMapHashKey,
+  type MapLibreMapImageData,
+  useLayer,
+  useOnDemandImageProvider,
+} from '@/composables/maplibre'
 import { getUsableCssColor } from '@/utils/css-color.ts'
 import { makeStringPropertyMatchExpression, scaleStyleNumber } from '@/utils/maplibre.ts'
-import { type SvgRasterImage, svgToImage } from '@/utils/svg-to-image.ts'
+import { svgToImage } from '@/utils/svg-to-image.ts'
 import {
   DEFAULT_MARKER_ICON_OPTIONS,
   makeMarkerIcon,
@@ -63,17 +68,15 @@ const loadPoiMarkerImage = async (
     width: markerIconOptions.width,
     height: markerIconOptions.height,
     pixelRatio,
-    color: markerIconOptions.color,
-    sourceIsRenderable: true,
   })
 }
 
 const makeEmptyPoiMarkerImage = (
   markerIconOptions: Required<MarkerIconOptions>,
   pixelRatio: number,
-): SvgRasterImage => {
-  const width = Math.ceil(markerIconOptions.width * pixelRatio)
-  const height = Math.ceil(markerIconOptions.height * pixelRatio)
+): MapLibreMapImageData => {
+  const width = Math.round(markerIconOptions.width * pixelRatio)
+  const height = Math.round(markerIconOptions.height * pixelRatio)
 
   return {
     width,
@@ -116,8 +119,11 @@ const useSharedPoiMarkerImageProvider = createKeyedSharedComposable(
         },
       }),
       fetchImage: async ({ iconName, markerIconOptions, pixelRatio }) => ({
-        image: (await loadPoiMarkerImage(iconName, markerIconOptions, pixelRatio)).image,
+        image: await loadPoiMarkerImage(iconName, markerIconOptions, pixelRatio),
       }),
+      onImageAdded: (image) => {
+        if (image instanceof ImageBitmap) image.close()
+      },
     })
 
     return {

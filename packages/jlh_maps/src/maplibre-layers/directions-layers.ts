@@ -4,11 +4,18 @@ import { decodePolylineToPositions, type Trip } from 'valhalla_client'
 import type { FeatureCollection, LineString, Point, Position } from 'geojson'
 import { distance } from '@turf/turf'
 import { point as turfPoint } from '@turf/helpers'
-import { svgToImage, type SvgRasterImage } from '@/utils/svg-to-image.ts'
+import { svgToImage } from '@/utils/svg-to-image.ts'
 import mapPinIconSvg from 'lucide-static/icons/map-pin.svg?raw'
 import type { Map as MapLibreMap } from 'maplibre-gl'
 import { useGeoJsonSource, useImage, useLayer } from '@/composables/maplibre'
 import { onWatcherCleanupLifo } from '@/composables/helper.ts'
+import {
+  escapeSvgAttribute,
+  getSvgPresentationAttributes,
+  parseSvgElementOrThrow,
+  parseSvgViewBox,
+  SVG_NAMESPACE,
+} from '@/utils/svg.ts'
 
 const DIRECTION_TRIP_PRIMARY_SOURCE_ID = 'direction-trip-primary'
 const DIRECTION_TRIP_PRIMARY_LAYER_ID = 'direction-trip-primary'
@@ -20,6 +27,19 @@ const DIRECTION_STOPS_SOURCE_ID = 'direction-stops'
 const DIRECTION_STOPS_SHADOW_LAYER_ID = 'direction-stops-shadow'
 export const DIRECTION_STOPS_LAYER_ID = 'direction-stops'
 const DIRECTION_STOP_ICON_ID = 'lucide:map-pin'
+const DIRECTION_STOP_ICON_COLOR = '#2563eb'
+
+const makeRenderableSvgIcon = (
+  svgSource: string,
+  { width, height = width, color }: { width: number; height?: number; color: string },
+) => {
+  const svg = parseSvgElementOrThrow(svgSource)
+
+  return `
+<svg xmlns="${SVG_NAMESPACE}" width="${width}" height="${height}" viewBox="${parseSvgViewBox(svg)}" color="${escapeSvgAttribute(color)}">
+  <g ${getSvgPresentationAttributes(svg)}>${svg.innerHTML}</g>
+</svg>`.trim()
+}
 
 export function useDirectionsLayers(
   map: MapLibreMap,
@@ -140,7 +160,7 @@ export function useDirectionsLayers(
     },
   )
 
-  const image = shallowRef<SvgRasterImage | null>(null)
+  const image = shallowRef<ImageBitmap | null>(null)
 
   watch(image, (value) => {
     if (value === null) return
@@ -149,17 +169,22 @@ export function useDirectionsLayers(
     scope.run(() => {
       useImage(map, DIRECTION_STOP_ICON_ID, value, {
         options: { pixelRatio: 2 },
+        onImageAdded: (image) => {
+          if (image instanceof ImageBitmap) image.close()
+        },
       })
     })
     onWatcherCleanupLifo(() => scope.stop())
   })
 
-  svgToImage(mapPinIconSvg, {
-    width: 24,
-    pixelRatio: 2,
-    color: '#2563eb',
-  }).then((res) => {
-    image.value = res.image
+  svgToImage(
+    makeRenderableSvgIcon(mapPinIconSvg, { width: 24, color: DIRECTION_STOP_ICON_COLOR }),
+    {
+      width: 24,
+      pixelRatio: 2,
+    },
+  ).then((value) => {
+    image.value = value
   }, console.error)
 
   useGeoJsonSource(map, DIRECTION_TRIP_PRIMARY_SOURCE_ID, directionsTripPrimaryGeoJsonData)
@@ -175,7 +200,7 @@ export function useDirectionsLayers(
         'line-join': 'round',
       },
       paint: {
-        'line-color': '#2563eb',
+        'line-color': DIRECTION_STOP_ICON_COLOR,
         'line-opacity': 0.85,
         'line-width': 5,
       },
@@ -203,7 +228,7 @@ export function useDirectionsLayers(
         'line-join': 'round',
       },
       paint: {
-        'line-color': '#2563eb',
+        'line-color': DIRECTION_STOP_ICON_COLOR,
         'line-dasharray': [0.5, 2.0],
         'line-opacity': 0.75,
         'line-width': 3,
