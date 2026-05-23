@@ -6,23 +6,24 @@ import {
   type GeoJSONFeature,
   type GeoJSONSource,
   LngLat,
+  type MapGeoJSONFeature,
   type MapLayerMouseEvent,
   type MapLibreMap,
+  type MapMouseEvent,
   type RasterSourceSpecification,
   type RasterTileSource,
   type SourceSpecification,
-  type MapMouseEvent,
   type StyleImageInterface,
   type StyleImageMetadata,
   type Subscription,
 } from 'maplibre-gl'
 import {
+  type MaybeRefOrGetter,
   onUnmounted,
   ref,
   shallowRef,
   toValue,
   watch,
-  type MaybeRefOrGetter,
   type WatchSource,
 } from 'vue'
 import { get } from '@vueuse/core'
@@ -148,6 +149,59 @@ export function useMapSelection(options: {
   return {
     selection,
   }
+}
+
+export function useHoverFeatureState(
+  map: MapLibreMap,
+  layerId: string,
+  isHoveredPropertyName: string,
+) {
+  const layer = map.getLayer(layerId)
+  if (!layer) {
+    throw new Error(`Layer ${layerId} not found`)
+  }
+
+  let hoveredFeatureIds: (string | number)[] = []
+  const updateFeatureHoveredFeatureIds = (next: (string | number)[]) => {
+    hoveredFeatureIds.forEach((featureId) => {
+      map.removeFeatureState(getFeatureIdentifier(featureId), isHoveredPropertyName)
+    })
+
+    next.forEach((featureId) => {
+      map.setFeatureState(getFeatureIdentifier(featureId), {
+        [isHoveredPropertyName]: true,
+      })
+    })
+
+    hoveredFeatureIds = next
+  }
+
+  const extractLayerFeatureIds = (features: MapGeoJSONFeature[]) =>
+    features.flatMap((feature) =>
+      feature.layer.id === layerId && feature.id !== undefined ? [feature.id] : [],
+    )
+
+  const subscriptions = [
+    map.on('mousemove', layerId, (event) => {
+      updateFeatureHoveredFeatureIds(extractLayerFeatureIds(event.features ?? []))
+    }),
+    map.on('mouseleave', layerId, (event) => {
+      updateFeatureHoveredFeatureIds(extractLayerFeatureIds(event.features ?? []))
+    }),
+  ]
+
+  const getFeatureIdentifier = (featureId: string | number) => ({
+    id: featureId,
+    source: layer.source,
+    sourceLayer: layer.sourceLayer,
+  })
+
+  onScopeDisposeLifo(() => {
+    subscriptions.forEach((subscription) => {
+      subscription.unsubscribe()
+    })
+    updateFeatureHoveredFeatureIds([])
+  })
 }
 
 export function useMapExtended(key?: symbol | string) {

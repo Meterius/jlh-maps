@@ -6,6 +6,7 @@ import {
   onScopeDispose,
   onWatcherCleanup,
   type ReactiveEffect,
+  toValue,
   watch,
   type WatchSource,
 } from 'vue'
@@ -15,16 +16,18 @@ export function watchDefinedOnce<T>(
   value: WatchSource<T | undefined>,
   callback: (value: T) => void,
 ) {
-  const handle = watch(
-    value,
-    (val, prev) => {
-      if (val !== undefined && prev === undefined) {
-        callback(val)
-        handle.pause()
-      }
-    },
-    { immediate: true },
-  )
+  const initialValue = toValue(value)
+  if (initialValue !== undefined) {
+    callback(initialValue)
+    return { stop: () => {} }
+  }
+
+  const handle = watch(value, (val, prev) => {
+    if (val !== undefined && prev === undefined) {
+      callback(val)
+      handle.pause()
+    }
+  })
 
   return { stop: handle.stop }
 }

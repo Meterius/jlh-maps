@@ -339,6 +339,7 @@ import {
   TILESERVER_RASTER_SEN2_TILE_URL_PATTERN,
 } from '@/external/endpoints.ts'
 import {
+  useHoverFeatureState,
   makeUniqueMapKey,
   useLayer,
   useMapExtended,
@@ -773,7 +774,10 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       )
       .filter((layer) => layer['source-layer'] === 'poi')
       .forEach((baseLayer) => {
-        usePoiLayer(map, baseLayer)
+        const poiLayer = usePoiLayer(map, baseLayer, {
+          hoverFeatureStateProperty: 'isHovered',
+        })
+        useHoverFeatureState(map, poiLayer.layerId, 'isHovered')
         map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
       })
 

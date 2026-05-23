@@ -16,6 +16,7 @@ import {
   type MarkerOptions,
 } from '@/maplibre-layers/common/marker-icon.ts'
 import {
+  type MarkerLayerMarker,
   type MarkerLayerSpecification,
   useMarkerImageSourceProvider,
   useMarkerLayer,
@@ -70,7 +71,10 @@ const makePoiIconNameExpression = () =>
     makePropertyIconMatchExpression('class', OMT_DEFAULT_POI_METADATA.iconName),
   )
 
-const makePoiMarkerLayer = (baseLayer: SymbolLayerSpecification): MarkerLayerSpecification => {
+const makePoiMarkerLayer = (
+  baseLayer: SymbolLayerSpecification,
+  additionalMarkerLayerMarkerFields: Partial<Pick<MarkerLayerMarker, 'hoverFeatureStateProperty'>>,
+): MarkerLayerSpecification => {
   const layout = baseLayer.layout ?? {}
   const paint = baseLayer.paint ?? {}
 
@@ -82,6 +86,7 @@ const makePoiMarkerLayer = (baseLayer: SymbolLayerSpecification): MarkerLayerSpe
       scale: POI_MARKER_SCALE,
       textSize: scaleStyleNumber(layout['text-size'], POI_FONT_SCALE, 16) as number,
       headIconName: makePoiIconNameExpression(),
+      ...additionalMarkerLayerMarkerFields,
     },
     layout: {
       ...layout,
@@ -92,20 +97,29 @@ const makePoiMarkerLayer = (baseLayer: SymbolLayerSpecification): MarkerLayerSpe
     },
     paint: {
       ...paint,
-      'text-color': paint['text-color'] ?? '#1f2937',
+      'text-color': getUsableCssColor(paint['text-color']) ?? '#1f2937',
       'text-halo-color': paint['text-halo-color'] ?? '#ffffff',
       'text-halo-width': paint['text-halo-width'] ?? 1.5,
     },
   }
 }
 
-export const usePoiLayer = (map: MapLibreMap, baseLayer: SymbolLayerSpecification) => {
+export const usePoiLayer = (
+  map: MapLibreMap,
+  baseLayer: SymbolLayerSpecification,
+  additionalMarkerLayerMarkerFields?: Partial<Pick<MarkerLayerMarker, 'hoverFeatureStateProperty'>>,
+) => {
   const layerId = `${baseLayer.id}${POI_MARKER_LAYER_SUFFIX}`
   const poiMarkerImageProvider = usePoiMarkerImageProvider()
 
-  useMarkerLayer(map, makePoiMarkerLayer(baseLayer), poiMarkerImageProvider, {
-    beforeId: baseLayer.id,
-  })
+  useMarkerLayer(
+    map,
+    makePoiMarkerLayer(baseLayer, additionalMarkerLayerMarkerFields ?? {}),
+    poiMarkerImageProvider,
+    {
+      beforeId: baseLayer.id,
+    },
+  )
 
   return {
     layerId,

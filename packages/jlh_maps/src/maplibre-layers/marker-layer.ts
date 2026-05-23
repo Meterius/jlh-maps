@@ -7,7 +7,8 @@ import { createKeyedSharedComposable } from '@/composables/helper.ts'
 import {
   getMapHashKey,
   type MapLibreMapImageData,
-  useLayer, type UseLayerOptions,
+  useLayer,
+  type UseLayerOptions,
   useOnDemandImageProvider,
 } from '@/composables/maplibre'
 import { svgToImage } from '@/utils/svg-to-image.ts'
@@ -41,7 +42,11 @@ type UseSharedMarkerImageProviderParams = {
 
 export type UseMarkerImageSourceProviderReturn = ReturnType<typeof useMarkerImageSourceProvider>
 
-export type UseSharedMarkerImageProviderReturn = ReturnType<UseMarkerImageSourceProviderReturn['useSharedMarkerImageProvider']>
+export type UseSharedMarkerImageProviderReturn = ReturnType<
+  UseMarkerImageSourceProviderReturn['useSharedMarkerImageProvider']
+>
+
+const DEFAULT_MARKER_TEXT_COLOR = '#1f2937'
 
 export function useMarkerImageSourceProvider(
   fetchMarkerHeadIcon: (iconName: string) => Promise<string>,
@@ -51,11 +56,7 @@ export function useMarkerImageSourceProvider(
   const useSharedMarkerImageProvider = createKeyedSharedComposable(
     ({ map, markerOptions, pixelRatio }: UseSharedMarkerImageProviderParams) =>
       [getMapHashKey(map), JSON.stringify([markerOptions, pixelRatio])].join(':'),
-    ({
-       map,
-       markerOptions,
-       pixelRatio,
-     }: UseSharedMarkerImageProviderParams) => {
+    ({ map, markerOptions, pixelRatio }: UseSharedMarkerImageProviderParams) => {
       const composableId = nextSharedMarkerImageProviderId++
       const imageIdPrefix = `poi-icon-${composableId}-`
       const getImageId = (iconName: string) => `${imageIdPrefix}${iconName}`
@@ -95,22 +96,27 @@ export function useMarkerImageSourceProvider(
         },
       })
 
-      const markerHeadIconNameToImageIdFlatEntries = markerHeadIconNames.flatMap(iconName => [iconName, getImageId(iconName)])
+      const markerHeadIconNameToImageIdFlatEntries = markerHeadIconNames.flatMap((iconName) => [
+        iconName,
+        getImageId(iconName),
+      ])
 
       return {
-        makeImageIdFromIconNameExpression: (iconNameExpression: ExpressionSpecification): ExpressionSpecification =>
+        makeImageIdFromIconNameExpression: (
+          iconNameExpression: ExpressionSpecification,
+        ): ExpressionSpecification =>
           [
             'match',
             iconNameExpression,
             ...markerHeadIconNameToImageIdFlatEntries,
-            ""
-          ] as ExpressionSpecification
+            '',
+          ] as ExpressionSpecification,
       }
     },
   )
 
   return {
-    useSharedMarkerImageProvider
+    useSharedMarkerImageProvider,
   }
 }
 
@@ -120,14 +126,16 @@ const makeSymbolLayerForMarkerLayer = (
   markerLayerSpecification: MarkerLayerSpecification,
   sharedMarkerImageProvider: UseSharedMarkerImageProviderReturn,
 ): SymbolLayerSpecification => {
-  const layout = (markerLayerSpecification.layout ?? {})
+  const layout = markerLayerSpecification.layout ?? {}
+  const paint = (markerLayerSpecification.paint ?? {}) as MarkerLayerPaint
+  const hoverFeatureStateProperty = markerLayerSpecification.marker.hoverFeatureStateProperty
 
   return {
     ...markerLayerSpecification,
     layout: {
       ...layout,
       'icon-image': sharedMarkerImageProvider.makeImageIdFromIconNameExpression(
-        markerLayerSpecification.marker.headIconName
+        markerLayerSpecification.marker.headIconName,
       ),
       'icon-size': markerLayerSpecification.marker.scale,
       'icon-anchor': 'bottom',
@@ -138,26 +146,56 @@ const makeSymbolLayerForMarkerLayer = (
       'text-optional': false,
       'icon-optional': false,
     },
+    paint: {
+      ...paint,
+      ...(hoverFeatureStateProperty
+        ? {
+            'text-color': [
+              'case',
+              ['boolean', ['feature-state', hoverFeatureStateProperty], false],
+              markerLayerSpecification.marker.hoverTextColor ?? [
+                'interpolate',
+                ['linear'],
+                0.4,
+                0.0,
+                paint['text-color'] ?? DEFAULT_MARKER_TEXT_COLOR,
+                1.0,
+                '#000000',
+              ],
+              paint['text-color'] ?? DEFAULT_MARKER_TEXT_COLOR,
+            ] as ExpressionSpecification,
+          }
+        : {}),
+    },
   }
 }
 
-export type MarkerLayerSpecification = Omit<
-  SymbolLayerSpecification, "layout" | "paint"
-> & {
-  paint: Omit<SymbolLayerSpecification['paint'], "icon-color">
+type MarkerLayerPaint = Omit<NonNullable<SymbolLayerSpecification['paint']>, 'icon-color'>
+type MarkerLayerLayout = Omit<
+  NonNullable<SymbolLayerSpecification['layout']>,
+  | 'text-optional'
+  | 'icon-optional'
+  | 'text-offset'
+  | 'text-anchor'
+  | 'icon-size'
+  | 'icon-image'
+  | 'text-size'
+>
+export type MarkerLayerMarker = {
+  scale: number
+  textSize: number
+  headIconName: ExpressionSpecification
+  hoverFeatureStateProperty?: string
+  hoverTextColor?: ExpressionSpecification
+}
+
+export type MarkerLayerSpecification = Omit<SymbolLayerSpecification, 'layout' | 'paint'> & {
+  paint: MarkerLayerPaint
 } & {
-  layout: Omit<
-    SymbolLayerSpecification['layout'],
-    "text-optional" | "icon-optional" | "text-offset" | "text-anchor" | "icon-size" | "icon-image"
-    | "text-size"
-  >
+  layout: MarkerLayerLayout
 } & {
-  markerOptions: MarkerOptions,
-  marker: {
-    scale: number,
-    textSize: number,
-    headIconName: ExpressionSpecification
-  }
+  markerOptions: MarkerOptions
+  marker: MarkerLayerMarker
 }
 
 export const useMarkerLayer = (
@@ -180,5 +218,9 @@ export const useMarkerLayer = (
     pixelRatio: 2.0,
   })
 
-  useLayer(map, makeSymbolLayerForMarkerLayer(markerLayerSpecificationWithDefaults, sharedMarkerImageProvider), options)
+  useLayer(
+    map,
+    makeSymbolLayerForMarkerLayer(markerLayerSpecificationWithDefaults, sharedMarkerImageProvider),
+    options,
+  )
 }

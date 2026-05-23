@@ -99,10 +99,7 @@ const getMarkerIconBounds = ({
   }
 }
 
-export const makeMarkerIcon = (
-  iconSvg: string | undefined,
-  marker: Required<MarkerOptions>,
-) => {
+export const makeMarkerIcon = (iconSvg: string | undefined, marker: Required<MarkerOptions>) => {
   const { innerHtml, presentationAttributes, viewBox } = parseMarkerIconSvg(iconSvg)
   const iconBounds = getMarkerIconBounds(marker)
 
