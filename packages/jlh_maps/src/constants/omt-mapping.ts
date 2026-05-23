@@ -1,4 +1,4 @@
-import type { PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
+import { resolvePoiIconSvg, type PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
 import { makeLucideIconSvgLoader } from '@/utils/lucide-icon-svg.ts'
 
 // Values from the OpenMapTiles POI layer mapping in poi/mapping.yaml, plus SQL-derived values.
@@ -719,6 +719,15 @@ export const OMT_POI_SUBCLASS_METADATA: Record<OmtPoiSubclass, PoiDisplayMetadat
       },
     ]),
   ) as Record<OmtPoiSubclass, PoiDisplayMetadata>
+
+const getOmtPoiIconMetadata = (iconName: string): PoiDisplayMetadata | undefined =>
+  iconName === OMT_DEFAULT_POI_METADATA.iconName
+    ? OMT_DEFAULT_POI_METADATA
+    : Object.values(OMT_POI_SUBCLASS_METADATA).find((metadata) => metadata.iconName === iconName)
+
+export const resolveOmtPoiIconSvg = async (iconName: string) =>
+  (await resolvePoiIconSvg(getOmtPoiIconMetadata(iconName)?.iconSvg)) ??
+  (await resolvePoiIconSvg(OMT_DEFAULT_POI_METADATA.iconSvg))
 
 export const getOmtPoiSubclassMetadata = (value?: string): PoiDisplayMetadata | undefined =>
   value && isOmtPoiSubclass(value) ? OMT_POI_SUBCLASS_METADATA[value] : undefined

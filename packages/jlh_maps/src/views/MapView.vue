@@ -333,7 +333,7 @@
 import { MglMap } from '@indoorequal/vue-maplibre-gl'
 import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { onLongPress, useDark } from '@vueuse/core'
-import type { MapMouseEvent } from 'maplibre-gl'
+import type { LayerSpecification, MapMouseEvent, SymbolLayerSpecification } from 'maplibre-gl'
 import {
   TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL,
   TILESERVER_RASTER_SEN2_TILE_URL_PATTERN,
@@ -363,7 +363,7 @@ import {
   useDirectionsLayers,
 } from '@/maplibre-layers/directions-layers.ts'
 import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
-import { usePoiLayers } from '@/maplibre-layers/poi-layer.ts'
+import { usePoiLayer } from '@/maplibre-layers/poi-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { useRainfallRasterProvider } from '@/composables/rainfall-raster-provider.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
@@ -767,7 +767,15 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       },
       'Water labels',
     )
-    usePoiLayers(map)
+    ;(map.getStyle().layers ?? [])
+      .filter(
+        (layer: LayerSpecification): layer is SymbolLayerSpecification => layer.type === 'symbol',
+      )
+      .filter((layer) => layer['source-layer'] === 'poi')
+      .forEach((baseLayer) => {
+        usePoiLayer(map, baseLayer)
+        map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
+      })
 
     if (useRaster) {
       useRasterTilesBasedSource(map, 'raster-sen2', {

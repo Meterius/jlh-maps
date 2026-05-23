@@ -1,4 +1,5 @@
 import {
+  effectScope,
   type EffectScope,
   getCurrentScope,
   getCurrentWatcher,
@@ -8,6 +9,7 @@ import {
   watch,
   type WatchSource,
 } from 'vue'
+import { isClient, tryOnScopeDispose } from '@vueuse/core'
 
 export function watchDefinedOnce<T>(
   value: WatchSource<T | undefined>,
@@ -36,6 +38,60 @@ export function createInjectOrThrow<T>(useInjected: () => T, errorMessage: strin
     }
 
     return value as NonNullable<T>
+  }
+}
+
+export function createKeyedSharedComposable<Params, Ret>(
+  getKey: (params: Params) => string,
+  composable: (params: Params) => Ret,
+) {
+  if (!isClient) return (params: Params) => composable(params)
+
+  type SharedState = {
+    subscribers: number
+    state: Ret | undefined
+    scope: EffectScope | undefined
+  }
+
+  const sharedStates = new Map<string, SharedState>()
+
+  return (params: Params) => {
+    const key = getKey(params)
+
+    let sharedState = sharedStates.get(key)
+
+    if (!sharedState) {
+      sharedState = {
+        subscribers: 0,
+        state: undefined,
+        scope: undefined,
+      }
+      sharedStates.set(key, sharedState)
+    }
+
+    sharedState.subscribers += 1
+
+    const dispose = () => {
+      if (!sharedState) return
+
+      sharedState.subscribers -= 1
+
+      if (sharedState.scope && sharedState.subscribers <= 0) {
+        sharedState.scope.stop()
+        sharedState.state = undefined
+        sharedState.scope = undefined
+        sharedStates.delete(key)
+      }
+    }
+
+    if (!sharedState.scope) {
+      sharedState.scope = effectScope(true)
+      sharedState.state = sharedState.scope.run(() => composable(params))
+    }
+
+    tryOnScopeDispose(dispose)
+
+    return sharedState.state!
   }
 }
 

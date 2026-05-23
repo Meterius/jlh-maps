@@ -348,3 +348,17 @@ export function useOnDemandImageProvider<T>(
     })
   })
 }
+
+const mapHashKeys = new WeakMap<MapLibreMap, number>()
+let mapHashKeyCounter = 0
+
+export function getMapHashKey(map: MapLibreMap): number {
+  let mapHashKey = mapHashKeys.get(map)
+
+  if (mapHashKey === undefined) {
+    mapHashKey = mapHashKeyCounter++
+    mapHashKeys.set(map, mapHashKey)
+  }
+
+  return mapHashKey
+}
