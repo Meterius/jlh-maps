@@ -363,7 +363,7 @@ import {
   useDirectionsLayers,
 } from '@/maplibre-layers/directions-layers.ts'
 import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
-import { usePoiLayer } from '@/maplibre-layers/poi-layer.ts'
+import { usePoiLayers } from '@/maplibre-layers/poi-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { useRainfallRasterProvider } from '@/composables/rainfall-raster-provider.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
@@ -767,7 +767,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       },
       'Water labels',
     )
-    usePoiLayer(map)
+    usePoiLayers(map)
 
     if (useRaster) {
       useRasterTilesBasedSource(map, 'raster-sen2', {

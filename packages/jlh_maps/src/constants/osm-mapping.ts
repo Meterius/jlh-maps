@@ -1,7 +1,13 @@
+export type PoiIconSvg = string | (() => string | Promise<string | undefined> | undefined)
+
 export type PoiDisplayMetadata = {
   label: string
-  icon: string
+  iconName: string
+  iconSvg?: PoiIconSvg
 }
+
+export const resolvePoiIconSvg = async (iconSvg: PoiIconSvg | undefined) =>
+  typeof iconSvg === 'function' ? await iconSvg() : iconSvg
 
 // Documented values from https://wiki.openstreetmap.org/wiki/Key:amenity.
 export enum OsmAmenityValue {
@@ -301,7 +307,7 @@ export const OSM_AMENITY_METADATA: Record<OsmAmenityValue, PoiDisplayMetadata> =
     value,
     {
       label: formatOsmValueLabel(value),
-      icon: OSM_AMENITY_ICONS[value],
+      iconName: OSM_AMENITY_ICONS[value],
     },
   ]),
 ) as Record<OsmAmenityValue, PoiDisplayMetadata>

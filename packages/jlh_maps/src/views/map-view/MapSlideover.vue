@@ -52,7 +52,7 @@
               <UBadge
                 v-if="headerBadge"
                 class="min-w-0 max-w-full justify-self-end"
-                :icon="headerBadge.icon"
+                :icon="headerBadge.iconName"
                 color="info"
                 variant="outline"
                 :label="headerBadge.label"

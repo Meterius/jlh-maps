@@ -1,145 +1,31 @@
-import type { ExpressionSpecification, LayerSpecification, Map as MapLibreMap } from 'maplibre-gl'
-import {
-  Armchair,
-  AudioLines,
-  Baby,
-  BadgeDollarSign,
-  Banknote,
-  BatteryCharging,
-  Bed,
-  Beer,
-  Bike,
-  Binoculars,
-  Bird,
-  BookOpen,
-  BriefcaseBusiness,
-  Bug,
-  Building2,
-  Bus,
-  Camera,
-  Candy,
-  Car,
-  CarTaxiFront,
-  Caravan,
-  Castle,
-  Church,
-  Cigarette,
-  Circle,
-  CircleSlash,
-  Code2,
-  Coffee,
-  Compass,
-  Cross,
-  DoorOpen,
-  Droplets,
-  Dumbbell,
-  Ear,
-  Factory,
-  Film,
-  Flag,
-  Flame,
-  FlameKindling,
-  Flower2,
-  Footprints,
-  Fuel,
-  Gamepad2,
-  Gem,
-  Gift,
-  Glasses,
-  GraduationCap,
-  Hamburger,
-  Hammer,
-  HardHat,
-  Heart,
-  HeartHandshake,
-  HeartPulse,
-  Hospital,
-  Hotel,
-  House,
-  IceCreamBowl,
-  Images,
-  Info,
-  KeyRound,
-  Lamp,
-  Landmark,
-  Languages,
-  Lock,
-  Mail,
-  Mailbox,
-  Map,
-  MapPin,
-  Megaphone,
-  Microscope,
-  Monitor,
-  Mountain,
-  MountainSnow,
-  Music,
-  Newspaper,
-  NotebookPen,
-  Package,
-  Paintbrush,
-  Palette,
-  PawPrint,
-  Phone,
-  Pill,
-  Plane,
-  Plug,
-  Printer,
-  Puzzle,
-  RadioTower,
-  Recycle,
-  RefreshCw,
-  RollerCoaster,
-  Ruler,
-  Scale,
-  School,
-  Scissors,
-  Search,
-  Shield,
-  ShieldCheck,
-  Ship,
-  Shirt,
-  ShoppingBag,
-  ShoppingBasket,
-  ShoppingCart,
-  Smartphone,
-  Snowflake,
-  Sparkles,
-  SquareParking,
-  Star,
-  Stethoscope,
-  Store,
-  Target,
-  Tent,
-  Theater,
-  Ticket,
-  Toilet,
-  TrainFront,
-  TramFront,
-  Trash2,
-  TreePine,
-  Trees,
-  Trophy,
-  Truck,
-  Users,
-  Utensils,
-  Warehouse,
-  WashingMachine,
-  Watch,
-  Waves,
-  Wheat,
-  Wine,
-  Wrench,
-  Zap,
-} from 'lucide-static'
-import { OMT_POI_SUBCLASS_METADATA } from '@/constants/omt-mapping.ts'
+import type {
+  ExpressionSpecification,
+  LayerSpecification,
+  Map as MapLibreMap,
+  MapStyleImageMissingEvent,
+} from 'maplibre-gl'
+import { OMT_DEFAULT_POI_METADATA, OMT_POI_SUBCLASS_METADATA } from '@/constants/omt-mapping.ts'
+import { resolvePoiIconSvg, type PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
 import { onScopeDisposeLifo } from '@/composables/helper.ts'
 import { useLayer } from '@/composables/maplibre'
-import { svgToImage } from '@/utils/svg-to-image.ts'
+import { getUsableCssColor } from '@/utils/css-color.ts'
+import { makeStringPropertyMatchExpression, scaleStyleNumber } from '@/utils/maplibre.ts'
+import {
+  escapeSvgAttribute,
+  getSvgPresentationAttributes,
+  parseSvgElement,
+  SVG_NAMESPACE,
+} from '@/utils/svg.ts'
+import { svgToImage, type SvgRasterImage } from '@/utils/svg-to-image.ts'
 
 type SymbolLayerSpecification = Extract<LayerSpecification, { type: 'symbol' }>
 type SymbolLayerLayout = NonNullable<SymbolLayerSpecification['layout']>
 type SymbolLayerPaint = NonNullable<SymbolLayerSpecification['paint']>
+type ParsedSvgContent = {
+  innerHtml: string
+  presentationAttributes: string
+  viewBox: string
+}
 
 type PoiMarkerOptions = {
   width?: number
@@ -155,21 +41,11 @@ type PoiMarkerOptions = {
   pixelRatio?: number
 }
 
-type UsePoiLayerMode = 'replace' | 'overlay'
-
-export type UsePoiLayerOptions = {
-  sourceLayer?: string
-  layerIds?: string[]
-  layerFilter?: (layer: SymbolLayerSpecification) => boolean
-  mode?: UsePoiLayerMode
-  beforeLayerId?: string
-  marker?: PoiMarkerOptions
-}
-
 const DEFAULT_SOURCE_LAYER = 'poi'
-const DEFAULT_POI_ICON = 'lucide:map-pin'
 const POI_MARKER_LAYER_SUFFIX = '-poi-marker'
-const POI_MARKER_IMAGE_VERSION = 'v3'
+const POI_MARKER_IMAGE_VERSION = 'v4'
+const DEFAULT_SVG_PRESENTATION =
+  'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
 
 const DEFAULT_MARKER_OPTIONS: Required<PoiMarkerOptions> = {
   width: 32,
@@ -185,157 +61,9 @@ const DEFAULT_MARKER_OPTIONS: Required<PoiMarkerOptions> = {
   pixelRatio: 2,
 }
 
-const LUCIDE_ICON_SVGS: Record<string, string> = {
-  armchair: Armchair,
-  'audio-lines': AudioLines,
-  baby: Baby,
-  'badge-dollar-sign': BadgeDollarSign,
-  banknote: Banknote,
-  'battery-charging': BatteryCharging,
-  bed: Bed,
-  beer: Beer,
-  bike: Bike,
-  binoculars: Binoculars,
-  bird: Bird,
-  'book-open': BookOpen,
-  'briefcase-business': BriefcaseBusiness,
-  bug: Bug,
-  'building-2': Building2,
-  bus: Bus,
-  camera: Camera,
-  candy: Candy,
-  car: Car,
-  'car-taxi-front': CarTaxiFront,
-  caravan: Caravan,
-  castle: Castle,
-  church: Church,
-  cigarette: Cigarette,
-  circle: Circle,
-  'circle-slash': CircleSlash,
-  'code-2': Code2,
-  coffee: Coffee,
-  compass: Compass,
-  cross: Cross,
-  'door-open': DoorOpen,
-  droplets: Droplets,
-  dumbbell: Dumbbell,
-  ear: Ear,
-  factory: Factory,
-  film: Film,
-  flag: Flag,
-  flame: Flame,
-  'flame-kindling': FlameKindling,
-  'flower-2': Flower2,
-  footprints: Footprints,
-  fuel: Fuel,
-  'gamepad-2': Gamepad2,
-  gem: Gem,
-  gift: Gift,
-  glasses: Glasses,
-  'graduation-cap': GraduationCap,
-  hamburger: Hamburger,
-  hammer: Hammer,
-  'hard-hat': HardHat,
-  heart: Heart,
-  'heart-handshake': HeartHandshake,
-  'heart-pulse': HeartPulse,
-  hospital: Hospital,
-  hotel: Hotel,
-  house: House,
-  'ice-cream-bowl': IceCreamBowl,
-  images: Images,
-  info: Info,
-  'key-round': KeyRound,
-  lamp: Lamp,
-  landmark: Landmark,
-  languages: Languages,
-  lock: Lock,
-  mail: Mail,
-  mailbox: Mailbox,
-  map: Map,
-  'map-pin': MapPin,
-  megaphone: Megaphone,
-  microscope: Microscope,
-  monitor: Monitor,
-  mountain: Mountain,
-  'mountain-snow': MountainSnow,
-  music: Music,
-  newspaper: Newspaper,
-  'notebook-pen': NotebookPen,
-  package: Package,
-  paintbrush: Paintbrush,
-  palette: Palette,
-  'paw-print': PawPrint,
-  phone: Phone,
-  pill: Pill,
-  plane: Plane,
-  plug: Plug,
-  printer: Printer,
-  puzzle: Puzzle,
-  'radio-tower': RadioTower,
-  recycle: Recycle,
-  'refresh-cw': RefreshCw,
-  'roller-coaster': RollerCoaster,
-  ruler: Ruler,
-  scale: Scale,
-  school: School,
-  scissors: Scissors,
-  search: Search,
-  shield: Shield,
-  'shield-check': ShieldCheck,
-  ship: Ship,
-  shirt: Shirt,
-  'shopping-bag': ShoppingBag,
-  'shopping-basket': ShoppingBasket,
-  'shopping-cart': ShoppingCart,
-  smartphone: Smartphone,
-  snowflake: Snowflake,
-  sparkles: Sparkles,
-  'square-parking': SquareParking,
-  star: Star,
-  stethoscope: Stethoscope,
-  store: Store,
-  target: Target,
-  tent: Tent,
-  theater: Theater,
-  ticket: Ticket,
-  toilet: Toilet,
-  'train-front': TrainFront,
-  'tram-front': TramFront,
-  'trash-2': Trash2,
-  'tree-pine': TreePine,
-  trees: Trees,
-  trophy: Trophy,
-  truck: Truck,
-  users: Users,
-  utensils: Utensils,
-  warehouse: Warehouse,
-  'washing-machine': WashingMachine,
-  watch: Watch,
-  waves: Waves,
-  wheat: Wheat,
-  wine: Wine,
-  wrench: Wrench,
-  zap: Zap,
-}
-
-const escapeAttribute = (value: string) =>
-  value
-    .replaceAll('&', '&amp;')
-    .replaceAll('"', '&quot;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-
-const SVG_PRESENTATION_ATTRIBUTES = [
-  'clip-rule',
-  'fill',
-  'fill-rule',
-  'stroke',
-  'stroke-linecap',
-  'stroke-linejoin',
-  'stroke-miterlimit',
-  'stroke-width',
-] as const
+let poiIconMetadataCache: PoiDisplayMetadata[] | undefined
+const parsedPoiIconContentCache = new Map<string, Promise<ParsedSvgContent>>()
+const poiMarkerImageCache = new Map<string, Promise<SvgRasterImage>>()
 
 const sanitizeImageIdPart = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '-')
 
@@ -357,74 +85,10 @@ const getMarkerStyleKey = (marker: Required<PoiMarkerOptions>) =>
 const getPoiMarkerImageId = (icon: string, marker: Required<PoiMarkerOptions>) =>
   `jlh-poi-marker-${POI_MARKER_IMAGE_VERSION}-${getMarkerStyleKey(marker)}-${sanitizeImageIdPart(icon)}`
 
-const getFunctionArguments = (value: string, functionName: string) => {
-  const match = value.match(new RegExp(`^${functionName}a?\\((.*)\\)$`, 'i'))
-
-  return match?.[1]
-}
-
-const getColorNumber = (value: string | undefined) => {
-  if (!value) return undefined
-
-  const normalized = value.trim()
-
-  return normalized.endsWith('%')
-    ? Number.parseFloat(normalized.slice(0, -1))
-    : Number.parseFloat(normalized)
-}
-
-const isZeroColorComponent = (value: string | undefined) => getColorNumber(value) === 0
-
-const isBlackRgbColor = (value: string) => {
-  const args = getFunctionArguments(value, 'rgb')
-  if (!args) return false
-
-  const [colorChannels] = args.split('/')
-  const channels = colorChannels
-    ?.trim()
-    .split(/[,\s]+/)
-    .filter(Boolean)
-
-  return channels?.length === 3 && channels.every((channel) => isZeroColorComponent(channel))
-}
-
-const isBlackHslColor = (value: string) => {
-  const args = getFunctionArguments(value, 'hsl')
-  if (!args) return false
-
-  const [colorChannels] = args.split('/')
-  const channels = colorChannels
-    ?.trim()
-    .split(/[,\s]+/)
-    .filter(Boolean)
-
-  return channels !== undefined && isZeroColorComponent(channels[2])
-}
-
-const isBlackHexColor = (value: string) => {
-  const color = value.slice(1)
-
-  return /^0{3,4}$/i.test(color) || /^0{6}([0-9a-f]{2})?$/i.test(color)
-}
-
-const isBlackColor = (value: string) => {
-  const normalized = value.trim().toLowerCase()
-
-  return (
-    normalized === 'black' ||
-    (normalized.startsWith('#') && isBlackHexColor(normalized)) ||
-    isBlackRgbColor(normalized) ||
-    isBlackHslColor(normalized)
-  )
-}
-
-const getConstantColor = (value: unknown) =>
-  typeof value === 'string' && value.trim().length > 0 && !isBlackColor(value) ? value : undefined
-
 const getOriginalLayerIconColor = (baseLayer: SymbolLayerSpecification) => {
   const paint = (baseLayer.paint ?? {}) as SymbolLayerPaint
 
-  return getConstantColor(paint['icon-color']) ?? getConstantColor(paint['text-color'])
+  return getUsableCssColor(paint['icon-color']) ?? getUsableCssColor(paint['text-color'])
 }
 
 const makeLayerMarkerOptions = (
@@ -433,9 +97,9 @@ const makeLayerMarkerOptions = (
   overrideMarkerColor: string | undefined,
 ): Required<PoiMarkerOptions> => {
   const color =
-    getConstantColor(overrideMarkerColor) ??
+    getUsableCssColor(overrideMarkerColor) ??
     getOriginalLayerIconColor(baseLayer) ??
-    getConstantColor(marker.color) ??
+    getUsableCssColor(marker.color) ??
     DEFAULT_MARKER_OPTIONS.color
 
   return {
@@ -445,47 +109,47 @@ const makeLayerMarkerOptions = (
   }
 }
 
-const getLucideIconName = (icon: string) =>
-  icon.startsWith('lucide:') ? icon.slice('lucide:'.length) : undefined
-
-const getLucideIconSvg = (icon: string) => {
-  const iconName = getLucideIconName(icon)
-  if (!iconName) return undefined
-
-  return LUCIDE_ICON_SVGS[iconName]
-}
-
-const parseSvgContent = (source: string | undefined) => {
+const parseSvgContent = (source: string | undefined): ParsedSvgContent => {
   if (!source) {
     return {
       innerHtml: '',
-      presentationAttributes:
-        'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"',
+      presentationAttributes: DEFAULT_SVG_PRESENTATION,
       viewBox: '0 0 24 24',
     }
   }
 
-  const svg = new DOMParser().parseFromString(source, 'image/svg+xml').documentElement
-
-  if (svg.tagName.toLowerCase() !== 'svg') {
+  const svg = parseSvgElement(source)
+  if (!svg) {
     return {
       innerHtml: '',
-      presentationAttributes:
-        'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"',
+      presentationAttributes: DEFAULT_SVG_PRESENTATION,
       viewBox: '0 0 24 24',
     }
   }
 
   return {
     innerHtml: svg.innerHTML,
-    presentationAttributes: SVG_PRESENTATION_ATTRIBUTES.flatMap((name) => {
-      const value = svg.getAttribute(name)
-      if (value === null) return []
-
-      return [`${name}="${escapeAttribute(value)}"`]
-    }).join(' '),
+    presentationAttributes: getSvgPresentationAttributes(svg),
     viewBox: svg.getAttribute('viewBox') ?? '0 0 24 24',
   }
+}
+
+const getParsedPoiIconContent = (metadata: PoiDisplayMetadata) => {
+  const cached = parsedPoiIconContentCache.get(metadata.iconName)
+  if (cached) return cached
+
+  const parsedContent = (async () => {
+    const iconSvg =
+      (await resolvePoiIconSvg(metadata.iconSvg)) ??
+      (await resolvePoiIconSvg(OMT_DEFAULT_POI_METADATA.iconSvg))
+
+    return parseSvgContent(iconSvg)
+  })()
+
+  parsedPoiIconContentCache.set(metadata.iconName, parsedContent)
+  parsedContent.catch(() => parsedPoiIconContentCache.delete(metadata.iconName))
+
+  return parsedContent
 }
 
 const formatSvgNumber = (value: number) => Number(value.toFixed(3)).toString()
@@ -501,119 +165,116 @@ const getMarkerIconBounds = (marker: Required<PoiMarkerOptions>) => {
   }
 }
 
-const buildPoiMarkerSvg = (iconSvg: string | undefined, marker: Required<PoiMarkerOptions>) => {
-  const { innerHtml, presentationAttributes, viewBox } = parseSvgContent(iconSvg)
+const buildPoiMarkerSvg = (
+  { innerHtml, presentationAttributes, viewBox }: ParsedSvgContent,
+  marker: Required<PoiMarkerOptions>,
+) => {
   const iconBounds = getMarkerIconBounds(marker)
   const markerPath =
     'M16 34C15.25 34 14.55 33.68 13.95 33.05C11.3 30.3 4 22.65 4 15.8C4 8.85 9.37 3.5 16 3.5C22.63 3.5 28 8.85 28 15.8C28 22.65 20.7 30.3 18.05 33.05C17.45 33.68 16.75 34 16 34Z'
 
   return `
-<svg xmlns="http://www.w3.org/2000/svg" width="${marker.width}" height="${marker.height}" viewBox="0 0 32 36">
-  <ellipse cx="16" cy="34.5" rx="7" ry="1.5" fill="${escapeAttribute(marker.shadowColor)}"/>
-  <path d="${markerPath}" fill="${escapeAttribute(marker.color)}"/>
-  <path d="${markerPath}" fill="none" stroke="${escapeAttribute(marker.outlineColor)}" stroke-width="1"/>
-  <circle cx="16" cy="16" r="9" fill="${escapeAttribute(marker.headColor)}"/>
-  <svg x="${iconBounds.x}" y="${iconBounds.y}" width="${iconBounds.size}" height="${iconBounds.size}" viewBox="${escapeAttribute(viewBox)}" color="${escapeAttribute(marker.iconColor)}" ${presentationAttributes}>
+<svg xmlns="${SVG_NAMESPACE}" width="${marker.width}" height="${marker.height}" viewBox="0 0 32 36">
+  <ellipse cx="16" cy="34.5" rx="7" ry="1.5" fill="${escapeSvgAttribute(marker.shadowColor)}"/>
+  <path d="${markerPath}" fill="${escapeSvgAttribute(marker.color)}"/>
+  <path d="${markerPath}" fill="none" stroke="${escapeSvgAttribute(marker.outlineColor)}" stroke-width="1"/>
+  <circle cx="16" cy="16" r="9" fill="${escapeSvgAttribute(marker.headColor)}"/>
+  <svg x="${iconBounds.x}" y="${iconBounds.y}" width="${iconBounds.size}" height="${iconBounds.size}" viewBox="${escapeSvgAttribute(viewBox)}" color="${escapeSvgAttribute(marker.iconColor)}" ${presentationAttributes}>
     ${innerHtml}
   </svg>
 </svg>`.trim()
 }
 
-const loadPoiMarkerImage = async (icon: string, marker: Required<PoiMarkerOptions>) => {
-  const iconSvg = getLucideIconSvg(icon) ?? getLucideIconSvg(DEFAULT_POI_ICON)
-  const markerSvg = buildPoiMarkerSvg(iconSvg, marker)
+const loadPoiMarkerImage = async (
+  metadata: PoiDisplayMetadata,
+  marker: Required<PoiMarkerOptions>,
+) => {
+  const markerSvg = buildPoiMarkerSvg(await getParsedPoiIconContent(metadata), marker)
 
   return svgToImage(markerSvg, {
     width: marker.width,
     height: marker.height,
     pixelRatio: marker.pixelRatio,
     color: marker.color,
+    sourceIsRenderable: true,
   })
 }
 
-const getPoiIconIds = () => [
-  ...new Set([
-    DEFAULT_POI_ICON,
-    ...Object.values(OMT_POI_SUBCLASS_METADATA).map((item) => item.icon),
-  ]),
-]
+const getPoiIconMetadata = () => {
+  if (poiIconMetadataCache) return poiIconMetadataCache
+
+  const seenIconNames = new Set<string>()
+
+  poiIconMetadataCache = [
+    OMT_DEFAULT_POI_METADATA,
+    ...Object.values(OMT_POI_SUBCLASS_METADATA),
+  ].filter((metadata) => {
+    if (seenIconNames.has(metadata.iconName)) return false
+
+    seenIconNames.add(metadata.iconName)
+    return true
+  })
+
+  return poiIconMetadataCache
+}
+
+const getCachedPoiMarkerImage = (
+  imageId: string,
+  metadata: PoiDisplayMetadata,
+  marker: Required<PoiMarkerOptions>,
+) => {
+  const cached = poiMarkerImageCache.get(imageId)
+  if (cached) return cached
+
+  const image = loadPoiMarkerImage(metadata, marker).then((result) => result.image)
+
+  poiMarkerImageCache.set(imageId, image)
+  image.catch(() => poiMarkerImageCache.delete(imageId))
+
+  return image
+}
+
+const makeEmptyPoiMarkerImage = (marker: Required<PoiMarkerOptions>): SvgRasterImage => {
+  const width = Math.ceil(marker.width * marker.pixelRatio)
+  const height = Math.ceil(marker.height * marker.pixelRatio)
+
+  return {
+    width,
+    height,
+    data: new Uint8ClampedArray(width * height * 4),
+  }
+}
 
 const makePropertyIconMatchExpression = (
   property: 'class' | 'subclass',
   marker: Required<PoiMarkerOptions>,
   fallback: string | ExpressionSpecification,
-): ExpressionSpecification =>
-  [
-    'match',
-    ['to-string', ['get', property]],
-    ...Object.entries(OMT_POI_SUBCLASS_METADATA).flatMap(([subclass, metadata]) => [
-      subclass,
-      getPoiMarkerImageId(metadata.icon, marker),
-    ]),
+) =>
+  makeStringPropertyMatchExpression(
+    property,
+    Object.entries(OMT_POI_SUBCLASS_METADATA).map(
+      ([subclass, metadata]) =>
+        [subclass, getPoiMarkerImageId(metadata.iconName, marker)] as [string, string],
+    ),
     fallback,
-  ] as ExpressionSpecification
+  )
 
-const makePoiIconImageExpression = (marker: Required<PoiMarkerOptions>): ExpressionSpecification =>
+const makePoiIconImageExpression = (marker: Required<PoiMarkerOptions>) =>
   makePropertyIconMatchExpression(
     'subclass',
     marker,
-    makePropertyIconMatchExpression('class', marker, getPoiMarkerImageId(DEFAULT_POI_ICON, marker)),
+    makePropertyIconMatchExpression(
+      'class',
+      marker,
+      getPoiMarkerImageId(OMT_DEFAULT_POI_METADATA.iconName, marker),
+    ),
   )
 
-type LegacyTextSizeSpecification = {
-  stops: [number, number][]
-  [key: string]: unknown
-}
+const isPoiSymbolLayer = (layer: LayerSpecification): layer is SymbolLayerSpecification =>
+  layer.type === 'symbol' && layer['source-layer'] === DEFAULT_SOURCE_LAYER
 
-const isLegacyTextSizeSpecification = (value: unknown): value is LegacyTextSizeSpecification => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
-
-  const stops = (value as { stops?: unknown }).stops
-
-  return (
-    Array.isArray(stops) &&
-    stops.every(
-      (stop): stop is [number, number] =>
-        Array.isArray(stop) &&
-        stop.length === 2 &&
-        typeof stop[0] === 'number' &&
-        typeof stop[1] === 'number',
-    )
-  )
-}
-
-const scaleTextSize = (value: unknown, scale: number): SymbolLayerLayout['text-size'] => {
-  if (typeof value === 'number') return value * scale
-  if (Array.isArray(value)) return ['*', value, scale] as unknown as ExpressionSpecification
-  if (isLegacyTextSizeSpecification(value)) {
-    return {
-      ...value,
-      stops: value.stops.map(([zoom, size]) => [zoom, size * scale]),
-    } as unknown as SymbolLayerLayout['text-size']
-  }
-
-  return 16 * scale
-}
-
-const isPoiSymbolLayer = (
-  layer: LayerSpecification,
-  sourceLayer: string,
-): layer is SymbolLayerSpecification =>
-  layer.type === 'symbol' && layer['source-layer'] === sourceLayer
-
-const pickPoiSymbolLayers = (
-  map: MapLibreMap,
-  { sourceLayer = DEFAULT_SOURCE_LAYER, layerIds, layerFilter }: UsePoiLayerOptions,
-) => {
-  const layerIdSet = layerIds ? new Set(layerIds) : undefined
-
-  return (map.getStyle().layers ?? []).filter(
-    (layer): layer is SymbolLayerSpecification =>
-      isPoiSymbolLayer(layer, sourceLayer) &&
-      (layerIdSet?.has(layer.id) ?? true) &&
-      (layerFilter?.(layer) ?? true),
-  )
-}
+const getPoiSymbolLayers = (map: MapLibreMap) =>
+  (map.getStyle().layers ?? []).filter(isPoiSymbolLayer)
 
 const makePoiMarkerLayer = (
   baseLayer: SymbolLayerSpecification,
@@ -636,7 +297,11 @@ const makePoiMarkerLayer = (
       'text-field': layout['text-field'],
       'text-anchor': 'top',
       'text-offset': [0, 0.55],
-      'text-size': scaleTextSize(layout['text-size'], marker.fontScale),
+      'text-size': scaleStyleNumber(
+        layout['text-size'],
+        marker.fontScale,
+        16,
+      ) as SymbolLayerLayout['text-size'],
       'text-optional': false,
       'icon-optional': false,
       'symbol-sort-key': layout['symbol-sort-key'] ?? ['to-number', ['get', 'rank']],
@@ -651,11 +316,37 @@ const makePoiMarkerLayer = (
 }
 
 const registerPoiMarkerImages = (map: MapLibreMap, marker: Required<PoiMarkerOptions>) => {
+  const metadataByImageId = new Map(
+    getPoiIconMetadata().map((metadata) => [
+      getPoiMarkerImageId(metadata.iconName, marker),
+      metadata,
+    ]),
+  )
   const addedImageIds = new Set<string>()
   let disposed = false
 
+  const handleStyleImageMissing = (event: MapStyleImageMissingEvent) => {
+    const metadata = metadataByImageId.get(event.id)
+    if (!metadata || disposed || map.hasImage(event.id)) return
+
+    map.addImage(event.id, makeEmptyPoiMarkerImage(marker), {
+      pixelRatio: marker.pixelRatio,
+    })
+    addedImageIds.add(event.id)
+
+    getCachedPoiMarkerImage(event.id, metadata, marker).then((image) => {
+      if (disposed || !map.hasImage(event.id)) return
+
+      map.updateImage(event.id, image)
+      map.triggerRepaint()
+    }, console.error)
+  }
+
+  map.on('styleimagemissing', handleStyleImageMissing)
+
   onScopeDisposeLifo(() => {
     disposed = true
+    map.off('styleimagemissing', handleStyleImageMissing)
 
     addedImageIds.forEach((imageId) => {
       if (map.hasImage(imageId)) {
@@ -663,68 +354,53 @@ const registerPoiMarkerImages = (map: MapLibreMap, marker: Required<PoiMarkerOpt
       }
     })
   })
-
-  getPoiIconIds().forEach((icon) => {
-    const imageId = getPoiMarkerImageId(icon, marker)
-
-    if (map.hasImage(imageId)) return
-
-    loadPoiMarkerImage(icon, marker).then(({ image }) => {
-      if (disposed || map.hasImage(imageId)) return
-
-      map.addImage(imageId, image, {
-        pixelRatio: marker.pixelRatio,
-      })
-      addedImageIds.add(imageId)
-    }, console.error)
-  })
 }
 
-export function usePoiLayer(
+const usePoiLayerWithRegisteredImages = (
   map: MapLibreMap,
-  optionsOrBeforeLayerId: UsePoiLayerOptions | string = {},
-) {
-  const options =
-    typeof optionsOrBeforeLayerId === 'string'
-      ? { beforeLayerId: optionsOrBeforeLayerId }
-      : optionsOrBeforeLayerId
-  const marker = {
-    ...DEFAULT_MARKER_OPTIONS,
-    ...options.marker,
+  baseLayer: SymbolLayerSpecification,
+  registeredMarkerKeys: Set<string>,
+) => {
+  const marker = { ...DEFAULT_MARKER_OPTIONS }
+  const previousVisibility = map.getLayoutProperty(baseLayer.id, 'visibility')
+  const layerMarker = makeLayerMarkerOptions(baseLayer, marker, undefined)
+  const layerMarkerKey = getMarkerStyleKey(layerMarker)
+  const layerId = `${baseLayer.id}${POI_MARKER_LAYER_SUFFIX}`
+
+  if (!registeredMarkerKeys.has(layerMarkerKey)) {
+    registeredMarkerKeys.add(layerMarkerKey)
+    registerPoiMarkerImages(map, layerMarker)
   }
-  const mode = options.mode ?? 'replace'
 
-  const baseLayers = pickPoiSymbolLayers(map, options)
-  const addedLayerIds = baseLayers.map((layer) => `${layer.id}${POI_MARKER_LAYER_SUFFIX}`)
-  const registeredMarkerKeys = new Set<string>()
+  useLayer(map, makePoiMarkerLayer(baseLayer, layerMarker), {
+    beforeId: baseLayer.id,
+  })
 
-  baseLayers.forEach((baseLayer) => {
-    const previousVisibility = map.getLayoutProperty(baseLayer.id, 'visibility')
-    const layerMarker = makeLayerMarkerOptions(baseLayer, marker, options.marker?.color)
-    const layerMarkerKey = getMarkerStyleKey(layerMarker)
+  map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
 
-    if (!registeredMarkerKeys.has(layerMarkerKey)) {
-      registeredMarkerKeys.add(layerMarkerKey)
-      registerPoiMarkerImages(map, layerMarker)
-    }
-
-    useLayer(map, makePoiMarkerLayer(baseLayer, layerMarker), {
-      beforeId: options.beforeLayerId ?? baseLayer.id,
-    })
-
-    if (mode === 'replace') {
-      map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
-
-      onScopeDisposeLifo(() => {
-        if (map.getLayer(baseLayer.id)) {
-          map.setLayoutProperty(baseLayer.id, 'visibility', previousVisibility ?? 'visible')
-        }
-      })
+  onScopeDisposeLifo(() => {
+    if (map.getLayer(baseLayer.id)) {
+      map.setLayoutProperty(baseLayer.id, 'visibility', previousVisibility ?? 'visible')
     }
   })
 
   return {
-    layerIds: addedLayerIds,
-    baseLayerIds: baseLayers.map((layer) => layer.id),
+    layerId,
+    baseLayerId: baseLayer.id,
+  }
+}
+
+export const usePoiLayer = (map: MapLibreMap, baseLayer: SymbolLayerSpecification) =>
+  usePoiLayerWithRegisteredImages(map, baseLayer, new Set())
+
+export const usePoiLayers = (map: MapLibreMap) => {
+  const registeredMarkerKeys = new Set<string>()
+  const layers = getPoiSymbolLayers(map).map((baseLayer) =>
+    usePoiLayerWithRegisteredImages(map, baseLayer, registeredMarkerKeys),
+  )
+
+  return {
+    layerIds: layers.map((layer) => layer.layerId),
+    baseLayerIds: layers.map((layer) => layer.baseLayerId),
   }
 }

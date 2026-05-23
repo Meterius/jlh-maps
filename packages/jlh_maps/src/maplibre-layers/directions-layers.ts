@@ -4,7 +4,7 @@ import { decodePolylineToPositions, type Trip } from 'valhalla_client'
 import type { FeatureCollection, LineString, Point, Position } from 'geojson'
 import { distance } from '@turf/turf'
 import { point as turfPoint } from '@turf/helpers'
-import { svgToImage } from '@/utils/svg-to-image.ts'
+import { svgToImage, type SvgRasterImage } from '@/utils/svg-to-image.ts'
 import mapPinIconSvg from 'lucide-static/icons/map-pin.svg?raw'
 import type { Map as MapLibreMap } from 'maplibre-gl'
 import { useGeoJsonSource, useImage, useLayer } from '@/composables/maplibre'
@@ -140,7 +140,7 @@ export function useDirectionsLayers(
     },
   )
 
-  const image = shallowRef<ImageData | null>(null)
+  const image = shallowRef<SvgRasterImage | null>(null)
 
   watch(image, (value) => {
     if (value === null) return

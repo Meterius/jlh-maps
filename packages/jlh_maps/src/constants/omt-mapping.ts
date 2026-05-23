@@ -1,4 +1,5 @@
 import type { PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
+import { makeLucideIconSvgLoader } from '@/utils/lucide-icon-svg.ts'
 
 // Values from the OpenMapTiles POI layer mapping in poi/mapping.yaml, plus SQL-derived values.
 export enum OmtPoiSubclass {
@@ -346,6 +347,12 @@ export enum OmtPoiSubclass {
   WinterSports = 'winter_sports',
   Yoga = 'yoga',
   Zoo = 'zoo',
+}
+
+export const OMT_DEFAULT_POI_METADATA: PoiDisplayMetadata = {
+  label: 'POI',
+  iconName: 'lucide:map-pin',
+  iconSvg: makeLucideIconSvgLoader('lucide:map-pin'),
 }
 
 const OMT_POI_SUBCLASS_ICONS: Record<OmtPoiSubclass, string> = {
@@ -707,7 +714,8 @@ export const OMT_POI_SUBCLASS_METADATA: Record<OmtPoiSubclass, PoiDisplayMetadat
       value,
       {
         label: formatOmtSubclassLabel(value),
-        icon: OMT_POI_SUBCLASS_ICONS[value],
+        iconName: OMT_POI_SUBCLASS_ICONS[value],
+        iconSvg: makeLucideIconSvgLoader(OMT_POI_SUBCLASS_ICONS[value]),
       },
     ]),
   ) as Record<OmtPoiSubclass, PoiDisplayMetadata>
