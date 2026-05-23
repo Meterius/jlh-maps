@@ -1,30 +1,20 @@
-import type {
-  ExpressionSpecification,
-  LayerSpecification,
-  Map as MapLibreMap,
-  MapStyleImageMissingEvent,
-} from 'maplibre-gl'
+import type { ExpressionSpecification, LayerSpecification, Map as MapLibreMap } from 'maplibre-gl'
 import { OMT_DEFAULT_POI_METADATA, OMT_POI_SUBCLASS_METADATA } from '@/constants/omt-mapping.ts'
 import { resolvePoiIconSvg, type PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
 import { onScopeDisposeLifo } from '@/composables/helper.ts'
-import { useLayer } from '@/composables/maplibre'
+import { useLayer, useOnDemandImageProvider } from '@/composables/maplibre'
 import { getUsableCssColor } from '@/utils/css-color.ts'
 import { makeStringPropertyMatchExpression, scaleStyleNumber } from '@/utils/maplibre.ts'
-import {
-  escapeSvgAttribute,
-  getSvgPresentationAttributes,
-  parseSvgElement,
-  SVG_NAMESPACE,
-} from '@/utils/svg.ts'
 import { svgToImage, type SvgRasterImage } from '@/utils/svg-to-image.ts'
+import { makeMarkerIcon } from '@/maplibre-layers/common/marker-icon.ts'
 
 type SymbolLayerSpecification = Extract<LayerSpecification, { type: 'symbol' }>
 type SymbolLayerLayout = NonNullable<SymbolLayerSpecification['layout']>
 type SymbolLayerPaint = NonNullable<SymbolLayerSpecification['paint']>
-type ParsedSvgContent = {
-  innerHtml: string
-  presentationAttributes: string
-  viewBox: string
+type PoiMarkerImageParams = {
+  imageId: string
+  metadata: PoiDisplayMetadata
+  marker: Required<PoiMarkerOptions>
 }
 
 type PoiMarkerOptions = {
@@ -44,8 +34,6 @@ type PoiMarkerOptions = {
 const DEFAULT_SOURCE_LAYER = 'poi'
 const POI_MARKER_LAYER_SUFFIX = '-poi-marker'
 const POI_MARKER_IMAGE_VERSION = 'v4'
-const DEFAULT_SVG_PRESENTATION =
-  'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
 
 const DEFAULT_MARKER_OPTIONS: Required<PoiMarkerOptions> = {
   width: 32,
@@ -62,7 +50,7 @@ const DEFAULT_MARKER_OPTIONS: Required<PoiMarkerOptions> = {
 }
 
 let poiIconMetadataCache: PoiDisplayMetadata[] | undefined
-const parsedPoiIconContentCache = new Map<string, Promise<ParsedSvgContent>>()
+const poiIconSvgCache = new Map<string, Promise<string | undefined>>()
 const poiMarkerImageCache = new Map<string, Promise<SvgRasterImage>>()
 
 const sanitizeImageIdPart = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '-')
@@ -109,87 +97,34 @@ const makeLayerMarkerOptions = (
   }
 }
 
-const parseSvgContent = (source: string | undefined): ParsedSvgContent => {
-  if (!source) {
-    return {
-      innerHtml: '',
-      presentationAttributes: DEFAULT_SVG_PRESENTATION,
-      viewBox: '0 0 24 24',
-    }
-  }
-
-  const svg = parseSvgElement(source)
-  if (!svg) {
-    return {
-      innerHtml: '',
-      presentationAttributes: DEFAULT_SVG_PRESENTATION,
-      viewBox: '0 0 24 24',
-    }
-  }
-
-  return {
-    innerHtml: svg.innerHTML,
-    presentationAttributes: getSvgPresentationAttributes(svg),
-    viewBox: svg.getAttribute('viewBox') ?? '0 0 24 24',
-  }
-}
-
-const getParsedPoiIconContent = (metadata: PoiDisplayMetadata) => {
-  const cached = parsedPoiIconContentCache.get(metadata.iconName)
+const getPoiIconSvg = (metadata: PoiDisplayMetadata) => {
+  const cached = poiIconSvgCache.get(metadata.iconName)
   if (cached) return cached
 
-  const parsedContent = (async () => {
-    const iconSvg =
-      (await resolvePoiIconSvg(metadata.iconSvg)) ??
-      (await resolvePoiIconSvg(OMT_DEFAULT_POI_METADATA.iconSvg))
+  const iconSvg = (async () =>
+    (await resolvePoiIconSvg(metadata.iconSvg)) ??
+    (await resolvePoiIconSvg(OMT_DEFAULT_POI_METADATA.iconSvg)))()
 
-    return parseSvgContent(iconSvg)
-  })()
+  poiIconSvgCache.set(metadata.iconName, iconSvg)
+  iconSvg.catch(() => poiIconSvgCache.delete(metadata.iconName))
 
-  parsedPoiIconContentCache.set(metadata.iconName, parsedContent)
-  parsedContent.catch(() => parsedPoiIconContentCache.delete(metadata.iconName))
-
-  return parsedContent
-}
-
-const formatSvgNumber = (value: number) => Number(value.toFixed(3)).toString()
-
-const getMarkerIconBounds = (marker: Required<PoiMarkerOptions>) => {
-  const iconSize = 14 * marker.iconScale
-  const iconPosition = 16 - iconSize / 2
-
-  return {
-    size: formatSvgNumber(iconSize),
-    x: formatSvgNumber(iconPosition),
-    y: formatSvgNumber(iconPosition),
-  }
-}
-
-const buildPoiMarkerSvg = (
-  { innerHtml, presentationAttributes, viewBox }: ParsedSvgContent,
-  marker: Required<PoiMarkerOptions>,
-) => {
-  const iconBounds = getMarkerIconBounds(marker)
-  const markerPath =
-    'M16 34C15.25 34 14.55 33.68 13.95 33.05C11.3 30.3 4 22.65 4 15.8C4 8.85 9.37 3.5 16 3.5C22.63 3.5 28 8.85 28 15.8C28 22.65 20.7 30.3 18.05 33.05C17.45 33.68 16.75 34 16 34Z'
-
-  return `
-<svg xmlns="${SVG_NAMESPACE}" width="${marker.width}" height="${marker.height}" viewBox="0 0 32 36">
-  <ellipse cx="16" cy="34.5" rx="7" ry="1.5" fill="${escapeSvgAttribute(marker.shadowColor)}"/>
-  <path d="${markerPath}" fill="${escapeSvgAttribute(marker.color)}"/>
-  <path d="${markerPath}" fill="none" stroke="${escapeSvgAttribute(marker.outlineColor)}" stroke-width="1"/>
-  <circle cx="16" cy="16" r="9" fill="${escapeSvgAttribute(marker.headColor)}"/>
-  <svg x="${iconBounds.x}" y="${iconBounds.y}" width="${iconBounds.size}" height="${iconBounds.size}" viewBox="${escapeSvgAttribute(viewBox)}" color="${escapeSvgAttribute(marker.iconColor)}" ${presentationAttributes}>
-    ${innerHtml}
-  </svg>
-</svg>`.trim()
+  return iconSvg
 }
 
 const loadPoiMarkerImage = async (
   metadata: PoiDisplayMetadata,
   marker: Required<PoiMarkerOptions>,
 ) => {
-  const markerSvg = buildPoiMarkerSvg(await getParsedPoiIconContent(metadata), marker)
+  const markerSvg = makeMarkerIcon(await getPoiIconSvg(metadata), {
+    width: marker.width,
+    height: marker.height,
+    color: marker.color,
+    iconColor: marker.iconColor,
+    headColor: marker.headColor,
+    outlineColor: marker.outlineColor,
+    shadowColor: marker.shadowColor,
+    iconScale: marker.iconScale,
+  })
 
   return svgToImage(markerSvg, {
     width: marker.width,
@@ -322,37 +257,27 @@ const registerPoiMarkerImages = (map: MapLibreMap, marker: Required<PoiMarkerOpt
       metadata,
     ]),
   )
-  const addedImageIds = new Set<string>()
-  let disposed = false
 
-  const handleStyleImageMissing = (event: MapStyleImageMissingEvent) => {
-    const metadata = metadataByImageId.get(event.id)
-    if (!metadata || disposed || map.hasImage(event.id)) return
+  useOnDemandImageProvider<PoiMarkerImageParams>(map, {
+    getParamsForImageId: (imageId) => {
+      const metadata = metadataByImageId.get(imageId)
+      if (!metadata) return null
 
-    map.addImage(event.id, makeEmptyPoiMarkerImage(marker), {
-      pixelRatio: marker.pixelRatio,
-    })
-    addedImageIds.add(event.id)
-
-    getCachedPoiMarkerImage(event.id, metadata, marker).then((image) => {
-      if (disposed || !map.hasImage(event.id)) return
-
-      map.updateImage(event.id, image)
-      map.triggerRepaint()
-    }, console.error)
-  }
-
-  map.on('styleimagemissing', handleStyleImageMissing)
-
-  onScopeDisposeLifo(() => {
-    disposed = true
-    map.off('styleimagemissing', handleStyleImageMissing)
-
-    addedImageIds.forEach((imageId) => {
-      if (map.hasImage(imageId)) {
-        map.removeImage(imageId)
+      return {
+        imageId,
+        metadata,
+        marker,
       }
-    })
+    },
+    getInitialImage: ({ marker }) => ({
+      image: makeEmptyPoiMarkerImage(marker),
+      options: {
+        pixelRatio: marker.pixelRatio,
+      },
+    }),
+    fetchImage: async ({ imageId, metadata, marker }) => ({
+      image: await getCachedPoiMarkerImage(imageId, metadata, marker),
+    }),
   })
 }
 

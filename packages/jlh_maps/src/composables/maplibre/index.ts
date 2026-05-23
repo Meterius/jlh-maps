@@ -298,3 +298,53 @@ export function useImage(
     map.removeImage(imageId)
   })
 }
+
+export type OnDemandImageProviderOptions<T> = {
+  getParamsForImageId: (imageId: string) => T | null
+  getInitialImage: (params: T) => {
+    image: MapLibreMapImageData
+    options?: Partial<StyleImageMetadata>
+  }
+  fetchImage: (params: T) => Promise<{
+    image: MapLibreMapImageData
+  }>
+}
+
+export function useOnDemandImageProvider<T>(
+  map: MapLibreMap,
+  options: OnDemandImageProviderOptions<T>,
+) {
+  let removed = false
+  const registeredImages = new Set<string>()
+
+  const missingSubscription = map.on('styleimagemissing', (event) => {
+    const imageId = event.id
+
+    if (registeredImages.has(imageId)) return
+
+    const params = options.getParamsForImageId(imageId)
+    if (params === null) return
+
+    registeredImages.add(imageId)
+
+    const initialImage = options.getInitialImage(params)
+    map.addImage(imageId, initialImage.image, initialImage.options)
+
+    options.fetchImage(params).then((image) => {
+      if (!removed) {
+        map.updateImage(imageId, image.image)
+        map.triggerRepaint()
+      }
+    }, console.error)
+  })
+
+  onScopeDisposeLifo(() => {
+    if (removed) return
+
+    removed = true
+    missingSubscription.unsubscribe()
+    registeredImages.forEach((imageId) => {
+      map.removeImage(imageId)
+    })
+  })
+}
