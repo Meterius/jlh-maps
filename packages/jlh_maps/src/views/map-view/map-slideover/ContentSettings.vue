@@ -25,19 +25,19 @@
         <h5 class="pb-2">Bevy</h5>
         <div class="grid gap-2">
           <label class="debug-toggle">
-            <input v-model="enableBuildings" type="checkbox" />
+            <input v-model="mapViewSettings.enable_buildings" type="checkbox" />
             <span>Buildings</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="enableWaters" type="checkbox" />
+            <input v-model="mapViewSettings.enable_waters" type="checkbox" />
             <span>Water</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="enableShadows" type="checkbox" />
+            <input v-model="mapViewSettings.enable_shadows" type="checkbox" />
             <span>Shadows</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="enableWindowCameras" type="checkbox" />
+            <input v-model="mapViewSettings.enable_window_cameras" type="checkbox" />
             <span>Debug canvas</span>
           </label>
         </div>
@@ -49,23 +49,23 @@
         <h5 class="pb-2">Camera</h5>
         <div class="grid gap-2">
           <label class="debug-toggle">
-            <input v-model="enableColorGrading" type="checkbox" />
+            <input v-model="mapViewCameraSettings.enable_color_grading" type="checkbox" />
             <span>Color grading</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="enableTonemapping" type="checkbox" />
+            <input v-model="mapViewCameraSettings.enable_tonemapping" type="checkbox" />
             <span>Tonemapping</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="enableMsaa" type="checkbox" />
+            <input v-model="mapViewCameraSettings.enable_msaa" type="checkbox" />
             <span>MSAA</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="enableSsao" type="checkbox" />
+            <input v-model="mapViewCameraSettings.enable_ssao" type="checkbox" />
             <span>SSAO</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="enableTaa" type="checkbox" />
+            <input v-model="mapViewCameraSettings.enable_taa" type="checkbox" />
             <span>TAA</span>
           </label>
         </div>
@@ -123,69 +123,6 @@ const showPadding = computed({
   set: (value: boolean) => {
     // eslint-disable-next-line vue/no-mutating-props
     props.map.showPadding = value
-  },
-})
-
-const enableBuildings = computed({
-  get: () => mapViewSettings.value.enable_buildings,
-  set: (value: boolean) => {
-    mapViewSettings.value.enable_buildings = value
-  },
-})
-
-const enableWaters = computed({
-  get: () => mapViewSettings.value.enable_waters,
-  set: (value: boolean) => {
-    mapViewSettings.value.enable_waters = value
-  },
-})
-
-const enableShadows = computed({
-  get: () => mapViewSettings.value.enable_shadows,
-  set: (value: boolean) => {
-    mapViewSettings.value.enable_shadows = value
-  },
-})
-
-const enableWindowCameras = computed({
-  get: () => mapViewSettings.value.enable_window_cameras,
-  set: (value: boolean) => {
-    mapViewSettings.value.enable_window_cameras = value
-  },
-})
-
-const enableColorGrading = computed({
-  get: () => mapViewCameraSettings.value.enable_color_grading,
-  set: (value: boolean) => {
-    mapViewCameraSettings.value.enable_color_grading = value
-  },
-})
-
-const enableTonemapping = computed({
-  get: () => mapViewCameraSettings.value.enable_tonemapping,
-  set: (value: boolean) => {
-    mapViewCameraSettings.value.enable_tonemapping = value
-  },
-})
-
-const enableSsao = computed({
-  get: () => mapViewCameraSettings.value.enable_ssao,
-  set: (value: boolean) => {
-    mapViewCameraSettings.value.enable_ssao = value
-  },
-})
-
-const enableTaa = computed({
-  get: () => mapViewCameraSettings.value.enable_taa,
-  set: (value: boolean) => {
-    mapViewCameraSettings.value.enable_taa = value
-  },
-})
-
-const enableMsaa = computed({
-  get: () => mapViewCameraSettings.value.enable_msaa,
-  set: (value: boolean) => {
-    mapViewCameraSettings.value.enable_msaa = value
   },
 })
 

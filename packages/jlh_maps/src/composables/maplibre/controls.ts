@@ -248,6 +248,7 @@ export function useGlobeControl(key?: symbol | string) {
     title,
     ariaPressed,
     trigger,
+    projection,
   }
 }
 
