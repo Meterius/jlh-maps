@@ -1,7 +1,7 @@
 <template>
   <div style="position: absolute; left: 0; right: 0; top: 0; bottom: 0">
     <div
-      :style="`position: absolute; width: 100%; height: ${bevyMapViewSettings.enable_window_cameras ? '50%' : '100%'}; top: 0`"
+      :style="`position: absolute; width: 100%; height: ${bevyMapViewSettings?.enable_window_cameras ? '50%' : '100%'}; top: 0`"
     >
       <mgl-map
         :map-key="mapKey"
@@ -120,15 +120,20 @@
           color="neutral"
           active-color="primary"
           variant="outline-solid"
-          :active="bevyMapViewSettings.enable_window_cameras"
+          :active="bevyMapViewSettings?.enable_window_cameras"
           size="xl"
           class="pointer-events-auto cursor-pointer"
           icon="lucide:bug"
           title="Show bevy"
           aria-label="Show bevy"
-          :aria-pressed="bevyMapViewSettings.enable_window_cameras"
+          :aria-pressed="bevyMapViewSettings?.enable_window_cameras"
+          :disabled="!bevyMapViewSettings"
           @click="
-            bevyMapViewSettings.enable_window_cameras = !bevyMapViewSettings.enable_window_cameras
+            () => {
+              if (bevyMapViewSettings)
+                bevyMapViewSettings.enable_window_cameras =
+                  !bevyMapViewSettings.enable_window_cameras
+            }
           "
         />
       </div>
@@ -154,17 +159,20 @@
 
           <template #content>
             <UCard :ui="{ body: '!p-2 grid w-72 max-w-[calc(100vw-1rem)] gap-2' }">
-              <div class="grid grid-cols-2 gap-1">
+              <div v-if="currentBaseStyleLayerSettings.bevyEnabled" class="grid grid-cols-2 gap-1">
                 <UButton
                   label="Shadows"
                   color="neutral"
                   active-color="primary"
                   variant="outline-solid"
-                  :active="bevyMapViewSettings.enable_shadows"
+                  :active="currentBaseStyleLayerSettings.shadowsEnabled"
                   size="md"
                   class="cursor-pointer"
                   icon="lucide:sunset"
-                  @click="bevyMapViewSettings.enable_shadows = !bevyMapViewSettings.enable_shadows"
+                  @click="
+                    currentBaseStyleLayerSettings.shadowsEnabled =
+                      !currentBaseStyleLayerSettings.shadowsEnabled
+                  "
                 />
 
                 <UButton
@@ -172,48 +180,52 @@
                   color="neutral"
                   active-color="primary"
                   variant="outline-solid"
-                  :active="bevyMapViewSettings.enable_buildings"
+                  :active="currentBaseStyleLayerSettings.buildingsEnabled"
                   size="md"
                   class="cursor-pointer"
                   icon="lucide:building"
                   @click="
-                    bevyMapViewSettings.enable_buildings = !bevyMapViewSettings.enable_buildings
+                    currentBaseStyleLayerSettings.buildingsEnabled =
+                      !currentBaseStyleLayerSettings.buildingsEnabled
                   "
-                />
-
-                <UButton
-                  label="Terrain"
-                  color="neutral"
-                  active-color="primary"
-                  variant="outline-solid"
-                  :active="currentBaseStyleLayerSettings.terrainEnabled"
-                  size="md"
-                  class="cursor-pointer"
-                  icon="lucide:mountain"
-                  @click="
-                    currentBaseStyleLayerSettings = {
-                      ...currentBaseStyleLayerSettings,
-                      terrainEnabled: !currentBaseStyleLayerSettings.terrainEnabled,
-                    }
-                  "
-                />
-
-                <UButton
-                  label="Dark Theme"
-                  color="neutral"
-                  active-color="primary"
-                  variant="outline-solid"
-                  :active="darkThemeEnabled"
-                  size="md"
-                  class="cursor-pointer"
-                  :icon="darkThemeEnabled ? 'lucide:moon' : 'lucide:sun'"
-                  @click="toggleDarkTheme"
                 />
               </div>
 
-              <USeparator />
+              <USeparator v-if="currentBaseStyleLayerSettings.bevyEnabled" />
 
               <div class="grid min-w-0 gap-1">
+                <div class="grid grid-cols-2 gap-1">
+                  <UButton
+                    label="Fancy"
+                    color="neutral"
+                    active-color="primary"
+                    variant="outline-solid"
+                    :active="currentBaseStyleLayerSettings.bevyEnabled"
+                    size="md"
+                    class="cursor-pointer"
+                    icon="lucide:star"
+                    @click="
+                      currentBaseStyleLayerSettings.bevyEnabled =
+                        !currentBaseStyleLayerSettings.bevyEnabled
+                    "
+                  />
+
+                  <UButton
+                    label="Terrain"
+                    color="neutral"
+                    active-color="primary"
+                    variant="outline-solid"
+                    :active="currentBaseStyleLayerSettings.terrainEnabled"
+                    size="md"
+                    class="cursor-pointer"
+                    icon="lucide:mountain"
+                    @click="
+                      currentBaseStyleLayerSettings.terrainEnabled =
+                        !currentBaseStyleLayerSettings.terrainEnabled
+                    "
+                  />
+                </div>
+
                 <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
                   <UButton
                     label="Rainfall"
@@ -255,6 +267,18 @@
                 :options="baseStyleTypeOptions"
                 :ui="{ root: 'min-w-0', button: 'py-2' }"
                 v-model="mapViewStore.baseStyleType"
+              />
+
+              <UButton
+                label="Dark Theme"
+                color="neutral"
+                active-color="primary"
+                variant="outline-solid"
+                :active="darkThemeEnabled"
+                size="md"
+                class="cursor-pointer"
+                :icon="darkThemeEnabled ? 'lucide:moon' : 'lucide:sun'"
+                @click="toggleDarkTheme"
               />
             </UCard>
           </template>
@@ -309,8 +333,8 @@
     </div>
 
     <div
-      v-show="bevyMapViewSettings.enable_window_cameras"
-      :style="`position: absolute; width: ${bevyMapViewSettings.enable_window_cameras ? '100%' : '10px'}; height: ${bevyMapViewSettings.enable_window_cameras ? '50%' : '1px'}; bottom: 0`"
+      v-show="bevyMapViewSettings?.enable_window_cameras"
+      :style="`position: absolute; width: ${bevyMapViewSettings?.enable_window_cameras ? '100%' : '10px'}; height: ${bevyMapViewSettings?.enable_window_cameras ? '50%' : '1px'}; bottom: 0`"
     >
       <canvas
         ref="bevyDebugCanvas"
@@ -335,7 +359,7 @@
       :details-osm-id="selected[0] ? selected[0].osmId : undefined"
       :details-feature="selected[0]?.feature"
       :map="mapInstance.map"
-      :bevy-instance-id="instanceId"
+      :bevy-instance-id="bevyMount?.mountBevyRet.instanceId"
       @update:drawer-direction="slideoverDirection = $event"
       @update:drawer-size="slideoverSize = $event"
       @update:open="
@@ -376,7 +400,11 @@ import {
   useGlobeControl,
   useNavigationControl,
 } from '@/composables/maplibre/controls'
-import { onScopeDisposeLifo, watchDefinedOnce } from '@/composables/helper.ts'
+import {
+  createToggledComposable,
+  onScopeDisposeLifo,
+  watchDefinedOnce,
+} from '@/composables/helper.ts'
 import { useMaplibreIntegration } from '@/bevy/maplibre-integration'
 import { mountBevy, useBevy } from '@/bevy'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
@@ -432,90 +460,112 @@ const rainfallRasterSourceProvider = useRainfallRasterProvider({
 const bevyCanvasId = `bevy-canvas-${mapKey}`
 const bevyDebugCanvas = ref<HTMLCanvasElement | null>(null)
 
-const { instanceId } = mountBevy(
-  () => bevyDebugCanvas.value ?? null,
-  () => mapInstance.map?.getCanvas() ?? null,
-)
-const { tick, textureOffscreenCanvas, mapViewSettings: bevyMapViewSettings } = useBevy(instanceId)
+const bevyMount = createToggledComposable(
+  () => currentBaseStyleLayerSettings.value.bevyEnabled,
+  () => {
+    const mountBevyRet = mountBevy(
+      () => bevyDebugCanvas.value ?? null,
+      () => mapInstance.map?.getCanvas() ?? null,
+    )
 
-const { syncOnRender } = useMaplibreIntegration(instanceId, mapKey, {
-  featureSourceLayers: [
-    { sourceId: 'openmaptiles', sourceLayer: 'building' },
-    { sourceId: 'openmaptiles', sourceLayer: 'water' },
-  ],
-})
+    const useBevyRet = useBevy(mountBevyRet.instanceId)
 
-watch(
-  () => bevyMapViewSettings.value.enable_window_cameras,
-  (value) => {
-    mapViewStore.value.bevyCanvasEnabled = value
+    const useMaplibreIntegrationRet = useMaplibreIntegration(mountBevyRet.instanceId, mapKey, {
+      featureSourceLayers: [
+        { sourceId: 'openmaptiles', sourceLayer: 'building' },
+        { sourceId: 'openmaptiles', sourceLayer: 'water' },
+      ],
+    })
+
+    syncRef(
+      computed({
+        get: () => mapViewStore.value.bevyCanvasEnabled,
+        set: (value) => {
+          mapViewStore.value.bevyCanvasEnabled = value
+        },
+      }),
+      computed({
+        get: () => useBevyRet.mapViewSettings.value.enable_window_cameras,
+        set: (value) => {
+          useBevyRet.mapViewSettings.value.enable_window_cameras = value
+        },
+      }),
+      { immediate: true },
+    )
+
+    syncRef(
+      computed({
+        get: () => currentBaseStyleLayerSettings.value.shadowsEnabled,
+        set: (value) => {
+          currentBaseStyleLayerSettings.value.shadowsEnabled = value
+        },
+      }),
+      computed({
+        get: () => useBevyRet.mapViewSettings.value.enable_shadows,
+        set: (value) => {
+          useBevyRet.mapViewSettings.value.enable_shadows = value
+        },
+      }),
+      { immediate: true },
+    )
+
+    syncRef(
+      computed({
+        get: () => currentBaseStyleLayerSettings.value.buildingsEnabled,
+        set: (value) => {
+          currentBaseStyleLayerSettings.value.buildingsEnabled = value
+        },
+      }),
+      computed({
+        get: () => useBevyRet.mapViewSettings.value.enable_buildings,
+        set: (value) => {
+          useBevyRet.mapViewSettings.value.enable_buildings = value
+        },
+      }),
+      { immediate: true },
+    )
+
+    syncRef(
+      computed({
+        get: () => mapViewStore.value.sun.azimuthDegrees,
+        set: (value) => {
+          mapViewStore.value.sun.azimuthDegrees = value
+        },
+      }),
+      computed({
+        get: () => useBevyRet.mapViewSettings.value.sun_azimuth_degrees,
+        set: (value) => {
+          useBevyRet.mapViewSettings.value.sun_azimuth_degrees = value
+        },
+      }),
+      { immediate: true },
+    )
+
+    syncRef(
+      computed({
+        get: () => mapViewStore.value.sun.elevationDegrees,
+        set: (value) => {
+          mapViewStore.value.sun.elevationDegrees = value
+        },
+      }),
+      computed({
+        get: () => useBevyRet.mapViewSettings.value.sun_elevation_degrees,
+        set: (value) => {
+          useBevyRet.mapViewSettings.value.sun_elevation_degrees = value
+        },
+      }),
+      { immediate: true },
+    )
+
+    return {
+      mountBevyRet,
+      useBevyRet,
+      useMaplibreIntegrationRet,
+    }
   },
-  { immediate: true },
 )
 
-syncRef(
-  computed({
-    get: () => currentBaseStyleLayerSettings.value.shadowsEnabled,
-    set: (value) => {
-      currentBaseStyleLayerSettings.value.shadowsEnabled = value
-    },
-  }),
-  computed({
-    get: () => bevyMapViewSettings.value.enable_shadows,
-    set: (value) => {
-      bevyMapViewSettings.value.enable_shadows = value
-    },
-  }),
-  { immediate: true },
-)
-
-syncRef(
-  computed({
-    get: () => currentBaseStyleLayerSettings.value.buildingsEnabled,
-    set: (value) => {
-      currentBaseStyleLayerSettings.value.buildingsEnabled = value
-    },
-  }),
-  computed({
-    get: () => bevyMapViewSettings.value.enable_buildings,
-    set: (value) => {
-      bevyMapViewSettings.value.enable_buildings = value
-    },
-  }),
-  { immediate: true },
-)
-
-syncRef(
-  computed({
-    get: () => mapViewStore.value.sun.azimuthDegrees,
-    set: (value) => {
-      mapViewStore.value.sun.azimuthDegrees = value
-    },
-  }),
-  computed({
-    get: () => bevyMapViewSettings.value.sun_azimuth_degrees,
-    set: (value) => {
-      bevyMapViewSettings.value.sun_azimuth_degrees = value
-    },
-  }),
-  { immediate: true },
-)
-
-syncRef(
-  computed({
-    get: () => mapViewStore.value.sun.elevationDegrees,
-    set: (value) => {
-      mapViewStore.value.sun.elevationDegrees = value
-    },
-  }),
-  computed({
-    get: () => bevyMapViewSettings.value.sun_elevation_degrees,
-    set: (value) => {
-      bevyMapViewSettings.value.sun_elevation_degrees = value
-    },
-  }),
-  { immediate: true },
-)
+const bevyMapViewSettings = computed(() => bevyMount.value?.useBevyRet.mapViewSettings.value)
 
 // Controls
 
@@ -565,12 +615,14 @@ const {
   zoomOutTitle,
 } = useNavigationControl(mapKey, { northRotationOffset: 135 })
 
-const sunAzimuthLabel = computed(
-  () => `${Math.round(bevyMapViewSettings.value.sun_azimuth_degrees)} deg`,
-)
-const sunElevationLabel = computed(
-  () => `${Math.round(bevyMapViewSettings.value.sun_elevation_degrees)} deg`,
-)
+const sunAzimuthLabel = computed(() => {
+  if (!bevyMapViewSettings.value) return 'N/A'
+  return `${Math.round(bevyMapViewSettings.value.sun_azimuth_degrees)} deg`
+})
+const sunElevationLabel = computed(() => {
+  if (!bevyMapViewSettings.value) return 'N/A'
+  return `${Math.round(bevyMapViewSettings.value.sun_elevation_degrees)} deg`
+})
 
 const rainfallRasterDataTime = rainfallRasterSourceProvider.rasterDataTime
 const rainfallRasterLoading = rainfallRasterSourceProvider.loading
@@ -976,24 +1028,22 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
     // Bevy
 
-    if (!useRaster) {
-      useLayer(
-        map,
-        new BevyLayer(textureOffscreenCanvas, {
-          id: 'bevy-texture',
-          tick: () => {
-            syncOnRender()
-            tick()
-          },
-        }),
-        { beforeId: 'Water labels' },
-      )
-      ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
-        if (map.getLayer(layerId)) {
-          map.moveLayer(layerId, 'bevy-texture')
-        }
-      })
-    }
+    useLayer(
+      map,
+      new BevyLayer(() => bevyMount.value?.useBevyRet.textureOffscreenCanvas.value ?? null, {
+        id: 'bevy-texture',
+        tick: () => {
+          bevyMount.value?.useMaplibreIntegrationRet.syncOnRender()
+          bevyMount.value?.useBevyRet.tick()
+        },
+      }),
+      { beforeId: 'Water labels' },
+    )
+    ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
+      if (map.getLayer(layerId)) {
+        map.moveLayer(layerId, 'bevy-texture')
+      }
+    })
 
     // Sky / Terrain / Hillshade
 
@@ -1081,6 +1131,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       tripPrimary: directionsTripPrimary,
       visible: computed(() => slideoverOpen.value === SlideoverTab.Directions),
     })
+
     // Selection
 
     useSelectedMarkerLayer(map, () => selected.value.map((item) => item.feature))

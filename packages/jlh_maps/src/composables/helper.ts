@@ -1,16 +1,20 @@
 import {
+  computed,
   effectScope,
   type EffectScope,
   getCurrentScope,
   getCurrentWatcher,
+  type MaybeRefOrGetter,
   onScopeDispose,
   onWatcherCleanup,
   type ReactiveEffect,
+  shallowRef,
   toValue,
   watch,
   type WatchSource,
 } from 'vue'
 import { isClient, tryOnScopeDispose } from '@vueuse/core'
+import { isEqual, cloneDeep } from 'lodash'
 
 export function watchDefinedOnce<T>(
   value: WatchSource<T | undefined>,
@@ -96,6 +100,86 @@ export function createKeyedSharedComposable<Params, Ret>(
 
     return sharedState.state!
   }
+}
+
+export function createToggledComposable<Ret>(
+  enabled: MaybeRefOrGetter<boolean>,
+  composable: () => NonNullable<Ret>,
+) {
+  const instance = shallowRef<{
+    scope: EffectScope
+    data: Ret
+  } | null>(null)
+
+  watch(
+    () => toValue(enabled),
+    (value) => {
+      if (value && !instance.value) {
+        const scope = effectScope(true)
+
+        let data: Ret | null = null
+        scope.run(() => {
+          data = composable()
+        })
+
+        if (data !== null) {
+          instance.value = { scope, data }
+        }
+      } else if (!value && instance.value) {
+        instance.value.scope.stop()
+        instance.value = null
+      }
+    },
+    { immediate: true },
+  )
+
+  onScopeDispose(() => {
+    instance.value?.scope.stop()
+    instance.value = null
+  })
+
+  return computed(() => instance.value?.data ?? null)
+}
+
+export function createDynamicComposable<Params, Ret>(
+  params: MaybeRefOrGetter<Params>,
+  composable: (params: Params) => Ret,
+) {
+  const instance = shallowRef<{
+    params: Params
+    scope: EffectScope
+    data: Ret
+  } | null>(null)
+
+  watch(
+    () => toValue(params),
+    (value) => {
+      if (!instance.value || !isEqual(value, instance.value?.params)) {
+        if (instance.value) {
+          instance.value.scope.stop()
+        }
+
+        const updatedParams = cloneDeep(value)
+
+        const scope = effectScope(true)
+
+        let data: Ret | null = null
+        scope.run(() => {
+          data = composable(updatedParams)
+        })
+
+        instance.value = { scope, data: data!, params: updatedParams }
+      }
+    },
+    { immediate: true },
+  )
+
+  onScopeDispose(() => {
+    instance.value?.scope.stop()
+    instance.value = null
+  })
+
+  return computed(() => instance.value!.data)
 }
 
 // LIFO Semantics For Effect Scope And Watcher Effect Cleanup

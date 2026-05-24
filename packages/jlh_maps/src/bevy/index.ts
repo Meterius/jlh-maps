@@ -69,6 +69,7 @@ interface BevyInstanceState {
 
 const bevyInstances = new Map<string, BevyInstanceState>()
 const attachedCanvasInstances = new WeakMap<HTMLCanvasElement, string>()
+const transferredDebugCanvases = new WeakMap<HTMLCanvasElement, OffscreenCanvas>()
 
 let bevyInstanceCounter = 0
 
@@ -264,10 +265,7 @@ function mountRegisteredBevyInstance(
 
   try {
     debugCanvas.tabIndex = 0
-    debugCanvas.width = debugSize.width
-    debugCanvas.height = debugSize.height
-
-    state.debugOffscreenCanvas.value = debugCanvas.transferControlToOffscreen()
+    state.debugOffscreenCanvas.value = getDebugOffscreenCanvas(debugCanvas, debugSize)
     state.textureOffscreenCanvas.value = new OffscreenCanvas(
       maplibreSize.width,
       maplibreSize.height,
@@ -293,6 +291,26 @@ function mountRegisteredBevyInstance(
     state.textureOffscreenCanvas.value = null
     throw error
   }
+}
+
+function getDebugOffscreenCanvas(
+  debugCanvas: HTMLCanvasElement,
+  debugSize: CanvasRenderSize,
+): OffscreenCanvas {
+  const transferredCanvas = transferredDebugCanvases.get(debugCanvas)
+
+  if (transferredCanvas) {
+    transferredCanvas.width = debugSize.width
+    transferredCanvas.height = debugSize.height
+    return transferredCanvas
+  }
+
+  debugCanvas.width = debugSize.width
+  debugCanvas.height = debugSize.height
+
+  const offscreenCanvas = debugCanvas.transferControlToOffscreen()
+  transferredDebugCanvases.set(debugCanvas, offscreenCanvas)
+  return offscreenCanvas
 }
 
 function resizeMountedBevyInstance(

@@ -22,6 +22,7 @@ export type MapViewStore = {
 }
 
 export type MapViewBaseStyleLayerSettings = {
+  bevyEnabled: boolean
   shadowsEnabled: boolean
   buildingsEnabled: boolean
   terrainEnabled: boolean
@@ -89,12 +90,16 @@ function createDefaultMapViewStore(): MapViewStore {
 function createDefaultMapViewBaseStyleLayerSettingsStore(): MapViewBaseStyleLayerSettingsStore {
   return {
     [MapViewBaseStyleType.Normal]: createDefaultMapViewBaseStyleLayerSettings(),
-    [MapViewBaseStyleType.Satellite]: createDefaultMapViewBaseStyleLayerSettings(),
+    [MapViewBaseStyleType.Satellite]: {
+      ...createDefaultMapViewBaseStyleLayerSettings(),
+      bevyEnabled: false,
+    },
   }
 }
 
 function createDefaultMapViewBaseStyleLayerSettings(): MapViewBaseStyleLayerSettings {
   return {
+    bevyEnabled: true,
     shadowsEnabled: true,
     buildingsEnabled: true,
     terrainEnabled: false,

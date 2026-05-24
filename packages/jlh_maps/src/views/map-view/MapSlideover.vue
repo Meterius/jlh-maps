@@ -122,7 +122,7 @@ const props = defineProps<{
   detailsOsmId?: OsmId
   detailsFeature?: GeoJSONFeature
   map?: MapLibreMap
-  bevyInstanceId: string
+  bevyInstanceId?: string
 }>()
 
 const emit = defineEmits<{

@@ -19,53 +19,62 @@
         </div>
       </div>
     </div>
-    <div class="row">
+    <div class="row" v-if="useBevyRet">
       <USeparator />
       <div class="row p-4">
         <h5 class="pb-2">Bevy</h5>
         <div class="grid gap-2">
           <label class="debug-toggle">
-            <input v-model="mapViewSettings.enable_buildings" type="checkbox" />
+            <input v-model="useBevyRet.mapViewSettings.value.enable_buildings" type="checkbox" />
             <span>Buildings</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="mapViewSettings.enable_waters" type="checkbox" />
+            <input v-model="useBevyRet.mapViewSettings.value.enable_waters" type="checkbox" />
             <span>Water</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="mapViewSettings.enable_shadows" type="checkbox" />
+            <input v-model="useBevyRet.mapViewSettings.value.enable_shadows" type="checkbox" />
             <span>Shadows</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="mapViewSettings.enable_window_cameras" type="checkbox" />
+            <input
+              v-model="useBevyRet.mapViewSettings.value.enable_window_cameras"
+              type="checkbox"
+            />
             <span>Debug canvas</span>
           </label>
         </div>
       </div>
     </div>
-    <div class="row">
+    <div class="row" v-if="useBevyRet">
       <USeparator />
       <div class="row p-4">
         <h5 class="pb-2">Camera</h5>
         <div class="grid gap-2">
           <label class="debug-toggle">
-            <input v-model="mapViewCameraSettings.enable_color_grading" type="checkbox" />
+            <input
+              v-model="useBevyRet.mapViewCameraSettings.value.enable_color_grading"
+              type="checkbox"
+            />
             <span>Color grading</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="mapViewCameraSettings.enable_tonemapping" type="checkbox" />
+            <input
+              v-model="useBevyRet.mapViewCameraSettings.value.enable_tonemapping"
+              type="checkbox"
+            />
             <span>Tonemapping</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="mapViewCameraSettings.enable_msaa" type="checkbox" />
+            <input v-model="useBevyRet.mapViewCameraSettings.value.enable_msaa" type="checkbox" />
             <span>MSAA</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="mapViewCameraSettings.enable_ssao" type="checkbox" />
+            <input v-model="useBevyRet.mapViewCameraSettings.value.enable_ssao" type="checkbox" />
             <span>SSAO</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="mapViewCameraSettings.enable_taa" type="checkbox" />
+            <input v-model="useBevyRet.mapViewCameraSettings.value.enable_taa" type="checkbox" />
             <span>TAA</span>
           </label>
         </div>
@@ -94,13 +103,17 @@ import { computed, shallowRef, useTemplateRef, watch } from 'vue'
 import type { TreeItem } from '@nuxt/ui'
 import { useSortable } from '@vueuse/integrations/useSortable'
 import { useBevy } from '@/bevy'
+import { createDynamicComposable } from '@/composables/helper.ts'
 
 const props = defineProps<{
   map: MapLibreMap
-  bevyInstanceId: string
+  bevyInstanceId?: string
 }>()
 
-const { mapViewCameraSettings, mapViewSettings } = useBevy(props.bevyInstanceId)
+const useBevyRet = createDynamicComposable(
+  () => props.bevyInstanceId,
+  (instanceId) => (instanceId !== undefined ? useBevy(instanceId) : null),
+)
 
 const showTileBoundaries = computed({
   get: () => props.map.showTileBoundaries,

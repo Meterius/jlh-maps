@@ -1,5 +1,5 @@
 import type { CustomLayerInterface, Map as MapLibreMap } from 'maplibre-gl'
-import { toValue, type WatchSource } from 'vue'
+import { toValue, watch, type WatchHandle, type WatchSource } from 'vue'
 
 interface BevyLayerOptions {
   id?: string
@@ -46,6 +46,7 @@ export class BevyLayer implements CustomLayerInterface {
   private uColorTexture: WebGLUniformLocation | null = null
   private uDepthRange: WebGLUniformLocation | null = null
   private readonly tickCallback: (() => void) | undefined
+  private stopTextureCanvasWatch: WatchHandle | undefined
   private tickFailed = false
 
   private textureWidth = 0
@@ -61,6 +62,12 @@ export class BevyLayer implements CustomLayerInterface {
 
   onAdd(map: MapLibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext): void {
     this.map = map
+    this.stopTextureCanvasWatch = watch(
+      () => toValue(this.textureCanvas),
+      () => this.map.triggerRepaint(),
+      { immediate: true },
+    )
+
     this.program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER)
     this.aPos = gl.getAttribLocation(this.program, 'a_pos')
     this.uColorTexture = gl.getUniformLocation(this.program, 'u_color_texture')
@@ -105,7 +112,11 @@ export class BevyLayer implements CustomLayerInterface {
 
     const textureCanvas = toValue(this.textureCanvas)
 
-    if (!this.program || !this.vertexBuffer || !this.texture || !textureCanvas) {
+    if (!textureCanvas) {
+      return
+    }
+
+    if (!this.program || !this.vertexBuffer || !this.texture) {
       this.map.triggerRepaint()
       return
     }
@@ -182,6 +193,9 @@ export class BevyLayer implements CustomLayerInterface {
   }
 
   onRemove(_map: MapLibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext): void {
+    this.stopTextureCanvasWatch?.()
+    this.stopTextureCanvasWatch = undefined
+
     if (this.vertexArray && isWebGL2(gl)) {
       gl.deleteVertexArray(this.vertexArray)
     }
