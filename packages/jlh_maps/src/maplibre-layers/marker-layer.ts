@@ -47,12 +47,12 @@ export type UseSharedMarkerImageProviderReturn = ReturnType<
 >
 
 const DEFAULT_MARKER_TEXT_COLOR = '#1f2937'
+let nextSharedMarkerImageProviderId = 1
 
 export function useMarkerImageSourceProvider(
   fetchMarkerHeadIcon: (iconName: string) => Promise<string>,
   markerHeadIconNames: string[],
 ) {
-  let nextSharedMarkerImageProviderId = 1
   const useSharedMarkerImageProvider = createKeyedSharedComposable(
     ({ map, markerOptions, pixelRatio }: UseSharedMarkerImageProviderParams) =>
       [getMapHashKey(map), JSON.stringify([markerOptions, pixelRatio])].join(':'),

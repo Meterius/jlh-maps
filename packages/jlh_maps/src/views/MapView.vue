@@ -314,8 +314,8 @@
       ref="mapSlideover"
       :open="slideoverOpen !== null"
       :active="slideoverOpen"
-      :details-osm-id="selection[0]?.osm_id"
-      :details-feature="selection[0]?.feature"
+      :details-osm-id="selected[0] ? selected[0].osmId : undefined"
+      :details-feature="selected[0]?.feature"
       :map="mapInstance.map"
       :bevy-instance-id="instanceId"
       @update:drawer-direction="slideoverDirection = $event"
@@ -340,12 +340,14 @@ import {
 } from '@/external/endpoints.ts'
 import {
   useHoverFeatureState,
+  useLayerFeatureIdExclusionFilter,
   makeUniqueMapKey,
   useLayer,
   useMapExtended,
-  useMapSelection,
   useRasterTilesBasedSource,
   useSource,
+  onMapLayerFeatureEvent,
+  onMapEvent,
 } from '@/composables/maplibre'
 import {
   useGeolocateControl,
@@ -359,14 +361,11 @@ import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
 import MapSlideover, { type MapSlideoverTab } from '@/views/map-view/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
 import type { ContextMenuItem } from '@nuxt/ui'
-import {
-  DIRECTION_STOPS_LAYER_ID,
-  useDirectionsLayers,
-} from '@/maplibre-layers/directions-layers.ts'
-import { useHighlightLayer } from '@/maplibre-layers/highlight-layer.ts'
+import { useDirectionsLayers } from '@/maplibre-layers/directions-layers.ts'
 import { usePoiLayer } from '@/maplibre-layers/poi-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { useRainfallRasterProvider } from '@/composables/rainfall-raster-provider.ts'
+import { useSelectedMarkerLayer } from '@/maplibre-layers/selected-marker-layer.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
 import {
   type MapStyleLifecycleConfig,
@@ -375,6 +374,7 @@ import {
 import { usePanProfiles } from '@/composables/maplibre/pan-profiles'
 import { provideMapDirectionStops } from '@/views/map-view/map-direction-stops.ts'
 import { provideMapCameraController } from '@/views/map-view/map-camera-controller.ts'
+import { provideMapSelection } from '@/views/map-view/map-selection.ts'
 
 const mapKey = makeUniqueMapKey()
 
@@ -607,7 +607,7 @@ const sunElevationLabel = computed(
 const onSlideoverClose = () => {
   switch (slideoverOpen.value) {
     case SlideoverTab.Details:
-      selection.value.splice(0)
+      clearSelection()
       break
   }
 
@@ -645,6 +645,12 @@ const setDirectionStop = (idx: number) => {
   slideoverOpen.value = SlideoverTab.Directions
 }
 
+// Selection
+
+const { selected, selectFeature, clearSelection } = provideMapSelection()
+
+// Context Menu
+
 const contextMenuItems = computed((): ContextMenuItem[] => [
   {
     label: contextMenuCoordinateLabel.value,
@@ -674,19 +680,10 @@ const contextMenuItems = computed((): ContextMenuItem[] => [
   },
 ])
 
-// Selection
-
-const selectableLayers = ref<string[]>([])
-
-const { selection } = useMapSelection({
-  key: mapKey,
-  targetLayers: selectableLayers,
-})
-
 watchEffect(() => {
-  if (selection.value.length === 1) {
+  if (selected.value.length === 1) {
     slideoverOpen.value = SlideoverTab.Details
-  } else if (selection.value.length !== 1 && slideoverOpen.value === SlideoverTab.Details) {
+  } else if (selected.value.length !== 1 && slideoverOpen.value === SlideoverTab.Details) {
     slideoverOpen.value = null
   }
 })
@@ -777,7 +774,19 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         const poiLayer = usePoiLayer(map, baseLayer, {
           hoverFeatureStateProperty: 'isHovered',
         })
+
         useHoverFeatureState(map, poiLayer.layerId, 'isHovered')
+        useLayerFeatureIdExclusionFilter(map, poiLayer.layerId, () =>
+          selected.value.map((item) => item.featureId),
+        )
+
+        onMapLayerFeatureEvent(map, 'click', poiLayer.layerId, ({ feature, originalEvent }) => {
+          // prevent default to avoid selection causing 'background' click to cause deselection
+          originalEvent.preventDefault()
+
+          selectFeature(feature)
+        })
+
         map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
       })
 
@@ -961,9 +970,9 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       { immediate: true },
     )
 
-    // Highlight
+    // Selection
 
-    useHighlightLayer(map, () => selection.value.map((item) => item.feature.geometry))
+    useSelectedMarkerLayer(map, () => selected.value.map((item) => item.feature))
 
     // Directions
 
@@ -979,20 +988,20 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
     //
 
-    selectableLayers.value = map
-      .getLayersOrder()
-      .filter(
-        (layer) => map.getLayer(layer)?.type === 'symbol' && layer !== DIRECTION_STOPS_LAYER_ID,
-      )
+    // needs to be registered after any layer click events to allow for prevent default to work
+    onMapEvent(map, 'click', (event) => {
+      // consider 'background' click as default behavior to allow for selection clicks to not cause deselection
+      if (event.defaultPrevented) return
 
-    onScopeDisposeLifo(() => {
-      selectableLayers.value = []
-    })
-    onScopeDisposeLifo(() => {
-      selection.value = []
+      clearSelection()
     })
 
     // Clean-Up
+
+    // need to clear selection on style transition due to features potentially being inexistent
+    onScopeDisposeLifo(() => {
+      clearSelection()
+    })
   },
 })
 

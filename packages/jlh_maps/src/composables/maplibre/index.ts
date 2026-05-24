@@ -3,10 +3,11 @@ import { extractOsmIdFromOmtFeatureId, type OsmId } from '@/utils/osm.ts'
 import {
   type AddLayerObject,
   type CanvasSourceSpecification,
+  type FilterSpecification,
   type GeoJSONFeature,
   type GeoJSONSource,
-  LngLat,
-  type MapGeoJSONFeature,
+  LngLat, type MapEventType,
+  type MapGeoJSONFeature, type MapLayerEventType,
   type MapLayerMouseEvent,
   type MapLibreMap,
   type MapMouseEvent,
@@ -43,165 +44,6 @@ let mapKeyCounter = 0
 export function makeUniqueMapKey() {
   mapKeyCounter += 1
   return `uniq-map-${mapKeyCounter}`
-}
-
-export function useMapSelection(options: {
-  key?: symbol | string
-  targetLayers: WatchSource<string[]>
-}) {
-  const mapInstance = useMap(options.key)
-
-  const selection = shallowRef<SelectionItem[]>([])
-  let lastTargetLayerClick: MapMouseEvent | undefined
-  let clearSelectionTimeout: ReturnType<typeof setTimeout> | undefined
-
-  const clicksMatch = (click: MapMouseEvent, targetLayerClick: MapMouseEvent | undefined) => {
-    if (!targetLayerClick) {
-      return false
-    }
-
-    return (
-      click.originalEvent === targetLayerClick.originalEvent ||
-      (click.originalEvent.timeStamp === targetLayerClick.originalEvent.timeStamp &&
-        click.point.x === targetLayerClick.point.x &&
-        click.point.y === targetLayerClick.point.y)
-    )
-  }
-
-  const makeOnClick = (targetLayers: string[]) => (e: MapLayerMouseEvent) => {
-    console.log('Click Event', e, e.features)
-    lastTargetLayerClick = e
-
-    const features = e.features?.filter((f) => targetLayers.includes(f.layer.id)) ?? []
-    const selectedFeature = features[0]
-
-    if (selectedFeature) {
-      selection.value = [
-        {
-          coords:
-            selectedFeature.geometry.type === 'Point'
-              ? new LngLat(
-                  selectedFeature.geometry.coordinates[0] ?? 0,
-                  selectedFeature.geometry.coordinates[1] ?? 0,
-                )
-              : e.lngLat,
-          feature: selectedFeature,
-          osm_id:
-            typeof selectedFeature.id === 'number'
-              ? (extractOsmIdFromOmtFeatureId(selectedFeature.id) ?? undefined)
-              : undefined,
-        },
-      ]
-    } else {
-      selection.value = []
-    }
-  }
-
-  const onMapClick = (e: MapMouseEvent) => {
-    if (clearSelectionTimeout) {
-      clearTimeout(clearSelectionTimeout)
-      clearSelectionTimeout = undefined
-    }
-
-    clearSelectionTimeout = setTimeout(() => {
-      clearSelectionTimeout = undefined
-
-      if (!clicksMatch(e, lastTargetLayerClick)) {
-        selection.value = []
-      }
-    }, CLICK_LAYER_SYNC_BUFFER_MS)
-  }
-
-  let onClickSubscription: Subscription | undefined
-  let onMapClickSubscription: Subscription | undefined
-  watch(
-    () => ({
-      map: mapInstance.map,
-      targetLayers: [...get(options.targetLayers)],
-    }),
-    ({ map, targetLayers }) => {
-      onClickSubscription?.unsubscribe()
-      onMapClickSubscription?.unsubscribe()
-      onClickSubscription = undefined
-      onMapClickSubscription = undefined
-      lastTargetLayerClick = undefined
-
-      if (map) {
-        onClickSubscription = map.on('click', targetLayers, makeOnClick(targetLayers))
-        onMapClickSubscription = map.on('click', onMapClick)
-      }
-    },
-    { immediate: true },
-  )
-
-  onUnmounted(() => {
-    if (clearSelectionTimeout) {
-      clearTimeout(clearSelectionTimeout)
-      clearSelectionTimeout = undefined
-    }
-
-    onClickSubscription?.unsubscribe()
-    onMapClickSubscription?.unsubscribe()
-    onClickSubscription = undefined
-    onMapClickSubscription = undefined
-  })
-
-  return {
-    selection,
-  }
-}
-
-export function useHoverFeatureState(
-  map: MapLibreMap,
-  layerId: string,
-  isHoveredPropertyName: string,
-) {
-  const layer = map.getLayer(layerId)
-  if (!layer) {
-    throw new Error(`Layer ${layerId} not found`)
-  }
-
-  let hoveredFeatureIds: (string | number)[] = []
-  const updateFeatureHoveredFeatureIds = (next: (string | number)[]) => {
-    hoveredFeatureIds.forEach((featureId) => {
-      map.removeFeatureState(getFeatureIdentifier(featureId), isHoveredPropertyName)
-    })
-
-    next.forEach((featureId) => {
-      map.setFeatureState(getFeatureIdentifier(featureId), {
-        [isHoveredPropertyName]: true,
-      })
-    })
-
-    hoveredFeatureIds = next
-  }
-
-  const extractLayerFeatureIds = (features: MapGeoJSONFeature[]) =>
-    features.flatMap((feature) =>
-      feature.layer.id === layerId && feature.id !== undefined ? [feature.id] : [],
-    )
-
-  const subscriptions = [
-    map.on('mousemove', layerId, (event) => {
-      updateFeatureHoveredFeatureIds(extractLayerFeatureIds(event.features ?? []))
-    }),
-    map.on('mouseleave', layerId, (event) => {
-      updateFeatureHoveredFeatureIds(extractLayerFeatureIds(event.features ?? []))
-    }),
-  ]
-
-  const getFeatureIdentifier = (featureId: string | number) => ({
-    id: featureId,
-    source: layer.source,
-    sourceLayer: layer.sourceLayer,
-  })
-
-  onScopeDisposeLifo(() => {
-    subscriptions.forEach((subscription) => {
-      subscription.unsubscribe()
-    })
-    updateFeatureHoveredFeatureIds([])
-  })
 }
 
 export function useMapExtended(key?: symbol | string) {
@@ -243,6 +85,10 @@ export function useMapExtended(key?: symbol | string) {
     mapInstance,
   }
 }
+
+export type MapFeatureId = string | number
+
+// Sources / Layers
 
 export type UseSourceSpecification = SourceSpecification | CanvasSourceSpecification
 
@@ -325,6 +171,44 @@ export function useLayer(map: MapLibreMap, layer: AddLayerObject, options: UseLa
   onScopeDisposeLifo(() => {
     if (map.getLayer(layer.id)) {
       map.removeLayer(layer.id)
+    }
+  })
+}
+
+export function useLayerFeatureIdExclusionFilter(
+  map: MapLibreMap,
+  layerId: string,
+  excludedFeatureIds: WatchSource<MapFeatureId[]>,
+) {
+  const originalFilter = map.getFilter(layerId)
+
+  const makeFilter = (featureIds: MapFeatureId[]): FilterSpecification | null => {
+    const uniqueFeatureIds = [...new Set(featureIds)]
+
+    if (uniqueFeatureIds.length === 0) {
+      return originalFilter ?? null
+    }
+
+    const exclusionFilter = ['!in', '$id', ...uniqueFeatureIds] as FilterSpecification
+
+    return originalFilter
+      ? (['all', originalFilter, exclusionFilter] as unknown as FilterSpecification)
+      : exclusionFilter
+  }
+
+  watch(
+    () => [...toValue(excludedFeatureIds)],
+    (featureIds) => {
+      if (map.getLayer(layerId)) {
+        map.setFilter(layerId, makeFilter(featureIds))
+      }
+    },
+    { immediate: true, flush: 'sync' },
+  )
+
+  onScopeDisposeLifo(() => {
+    if (map.getLayer(layerId)) {
+      map.setFilter(layerId, originalFilter ?? null)
     }
   })
 }
@@ -414,6 +298,115 @@ export function useOnDemandImageProvider<T>(
     })
   })
 }
+
+// Events
+
+export function onMapEvent<T extends keyof MapLayerEventType>(
+  map: MapLibreMap,
+  type: T,
+  listener: (ev: MapLayerEventType[T] & Object) => void,
+) {
+  const sub = map.on(type, listener)
+  onScopeDisposeLifo(() => {
+    sub.unsubscribe()
+  })
+}
+
+export function onMapLayerEvent<
+  T extends keyof MapLayerEventType
+>(
+  map: MapLibreMap,
+  type: T,
+  layer: string,
+  listener: (ev: MapLayerEventType[T] & Object) => void,
+) {
+  const sub = map.on(type, layer, listener)
+  onScopeDisposeLifo(() => {
+    sub.unsubscribe()
+  })
+}
+
+export type MapLayerFeatureEvent<T extends keyof MapLayerEventType> = {
+  originalEvent: MapLayerEventType[T] & Object,
+  feature: MapGeoJSONFeature,
+}
+
+export function onMapLayerFeatureEvent<
+  T extends keyof MapLayerEventType
+>(
+  map: MapLibreMap,
+  type: T,
+  layer: string,
+  listener: (ev: MapLayerFeatureEvent<T>) => void,
+) {
+  onMapLayerEvent(map, type, layer, (originalEvent) => {
+    (originalEvent.features ?? []).forEach((feature) => {
+      if (feature.layer.id === layer) {
+        listener({
+          originalEvent, feature,
+        })
+      }
+    })
+  })
+}
+
+//
+
+export function useHoverFeatureState(
+  map: MapLibreMap,
+  layerId: string,
+  isHoveredPropertyName: string,
+) {
+  const layer = map.getLayer(layerId)
+  if (!layer) {
+    throw new Error(`Layer ${layerId} not found`)
+  }
+
+  const hoveredFeatures = shallowRef<Record<MapFeatureId, MapGeoJSONFeature>>({})
+
+  const updateFeatureHoveredFeatureIds = (next: Record<MapFeatureId, MapGeoJSONFeature>) => {
+    Object.keys(hoveredFeatures.value).forEach((featureId) => {
+      map.removeFeatureState(getFeatureIdentifier(featureId), isHoveredPropertyName)
+    })
+
+    Object.keys(next).forEach((featureId) => {
+      map.setFeatureState(getFeatureIdentifier(featureId), {
+        [isHoveredPropertyName]: true,
+      })
+    })
+
+    hoveredFeatures.value = next
+  }
+
+  const getFeatureIdentifier = (featureId: string | number) => ({
+    id: featureId,
+    source: layer.source,
+    sourceLayer: layer.sourceLayer,
+  })
+
+  const onFeatures = (event: { features?: MapGeoJSONFeature[] }) => {
+    const nextHoveredFeatures = Object.fromEntries(
+      (event.features ?? []).flatMap(
+        (feature) => feature.id !== undefined ? [[feature.id, feature]] : []
+      )
+    )
+    updateFeatureHoveredFeatureIds(nextHoveredFeatures)
+  }
+
+  onMapLayerEvent(map, 'mousemove', layerId, onFeatures)
+  onMapLayerEvent(map, 'mouseleave', layerId, onFeatures)
+
+  onScopeDisposeLifo(() => {
+    updateFeatureHoveredFeatureIds({})
+  })
+
+  return {
+    hoveredFeatures
+  }
+}
+
+
+// Other
 
 const mapHashKeys = new WeakMap<MapLibreMap, number>()
 let mapHashKeyCounter = 0
