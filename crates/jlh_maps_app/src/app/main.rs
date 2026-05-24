@@ -69,7 +69,7 @@ impl ExtractResource for AppWindows {
 }
 
 thread_local! {
-    static INITIALIZED: RefCell<bool> = RefCell::new(false);
+    static INITIALIZED: RefCell<bool> = const { RefCell::new(false) };
 }
 
 #[wasm_bindgen]

@@ -1,5 +1,6 @@
 pub mod integration;
 pub mod interop;
+pub mod mvt;
 pub mod types;
 pub mod utils;
 

@@ -1,21 +1,14 @@
 import {
   create_map_integration,
-  remove_feature_tiles,
   remove_map_integration,
+  remove_source_tile,
   remove_terrain_tile_data,
   sync_terrain_active_tile_ids,
   sync_view,
-  update_feature_tiles,
+  update_source_tile,
   update_terrain_tile_data,
 } from 'jlh_maps_app'
-import type { Geometry } from 'geojson'
-import {
-  type GeoJSONFeature,
-  type Map as MapLibreMap,
-  type MapSourceDataEvent,
-  type QuerySourceFeatureOptions,
-  type Tile,
-} from 'maplibre-gl'
+import { type Map as MapLibreMap, type MapSourceDataEvent, type Tile } from 'maplibre-gl'
 import { shallowRef } from 'vue'
 import { onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import { useMap } from '@indoorequal/vue-maplibre-gl'
@@ -31,7 +24,7 @@ import { OverscaledTileID } from 'maplibre-gl/src/tile/tile_id'
 import { useBevy } from '@/bevy/index.ts'
 
 type TileKey = string
-type SourceLayerTileKey = string
+type SourceTileKey = string
 
 interface TileCoord {
   z: number
@@ -39,41 +32,16 @@ interface TileCoord {
   y: number
 }
 
-interface FeatureSourceLayer {
+interface SyncedSourceTileState {
   sourceId: string
-  sourceLayer: string
-}
-
-interface SyncedFeatureTileState {
-  source_id: string
-  source_layer_id: string
-  tile_key: TileCoord
-  feature_ids: Set<number>
-}
-
-interface SyncedFeature {
-  feature_id: number
-  geometry: Geometry
-  properties: Record<string, unknown>
-}
-
-interface SyncedFeatureTile {
-  source_id: string
-  source_layer_id: string
-  tile_key: TileCoord
-  features: SyncedFeature[]
-}
-
-interface RemovedFeatureTile {
-  source_id: string
-  source_layer_id: string
-  tile_key: TileCoord
-  feature_ids?: number[]
+  tileKey: TileCoord
 }
 
 interface MaplibreGlJsIntegrationOptions {
-  featureSourceLayers?: FeatureSourceLayer[]
+  featureSourceIds?: string[]
 }
+
+type RawTileData = ArrayBuffer | ArrayBufferView
 
 export function useMaplibreIntegration(
   instanceId: string,
@@ -93,7 +61,7 @@ export function useMaplibreIntegration(
         map,
         instanceId,
         mapIntegrationId,
-        options.featureSourceLayers ?? [],
+        options.featureSourceIds ?? [],
       )
       integration.start()
 
@@ -113,13 +81,13 @@ export function useMaplibreIntegration(
 
 class MaplibreGlJsIntegration {
   private readonly terrainDataHashes = new Map<TileKey, string>()
-  private readonly transmittedFeatureTiles = new Map<SourceLayerTileKey, SyncedFeatureTileState>()
-  private readonly pendingChangedFeatureTiles = new Map<
-    SourceLayerTileKey,
+  private readonly transmittedSourceTiles = new Map<SourceTileKey, SyncedSourceTileState>()
+  private readonly pendingChangedSourceTiles = new Map<
+    SourceTileKey,
     { sourceId: string; tileId: OverscaledTileID; tile: Tile }
   >()
   private readonly activeTerrainTileKeys = new Set<TileKey>()
-  private readonly featureTerrainTileKeys = new Set<TileKey>()
+  private readonly sourceTerrainTileKeys = new Set<TileKey>()
   private syncViewFrame: number | undefined
   private syncDataFrame: number | undefined
 
@@ -131,7 +99,7 @@ class MaplibreGlJsIntegration {
     private readonly map: MapLibreMap,
     private readonly instanceId: string,
     private readonly mapIntegrationId: number,
-    private readonly featureSourceLayers: FeatureSourceLayer[],
+    private readonly featureSourceIds: string[],
   ) {}
 
   start() {
@@ -145,7 +113,7 @@ class MaplibreGlJsIntegration {
   syncOnRender() {
     this.syncView()
     this.syncTerrain()
-    this.syncVisibleFeatureTiles()
+    this.syncVisibleSourceTiles()
   }
 
   stop() {
@@ -162,7 +130,7 @@ class MaplibreGlJsIntegration {
     }
 
     this.removeTerrainData([...this.terrainDataHashes.keys()])
-    this.removeTransmittedFeatureTiles([...this.transmittedFeatureTiles.keys()])
+    this.removeTransmittedSourceTiles([...this.transmittedSourceTiles.keys()])
     this.unsubscribeCallbacks.splice(0).forEach((unsubscribe) => unsubscribe())
   }
 
@@ -196,7 +164,7 @@ class MaplibreGlJsIntegration {
   }
 
   private syncData() {
-    this.syncFeatures()
+    this.syncSourceTiles()
   }
 
   private getMainMatrix(): Float64Array | undefined {
@@ -211,23 +179,23 @@ class MaplibreGlJsIntegration {
     return matrix instanceof Float64Array ? matrix : new Float64Array(matrix)
   }
 
-  private syncFeatures() {
-    if (this.featureSourceLayers.length === 0) {
-      this.removeTransmittedFeatureTiles([...this.transmittedFeatureTiles.keys()])
-      this.pendingChangedFeatureTiles.clear()
-      this.featureTerrainTileKeys.clear()
+  private syncSourceTiles() {
+    if (this.featureSourceIds.length === 0) {
+      this.removeTransmittedSourceTiles([...this.transmittedSourceTiles.keys()])
+      this.pendingChangedSourceTiles.clear()
+      this.sourceTerrainTileKeys.clear()
       this.pruneTerrainData()
       return
     }
 
-    const changedTiles = [...this.pendingChangedFeatureTiles.values()]
-    this.pendingChangedFeatureTiles.clear()
+    const changedTiles = [...this.pendingChangedSourceTiles.values()]
+    this.pendingChangedSourceTiles.clear()
 
     for (const { sourceId, tileId, tile } of changedTiles) {
-      this.syncChangedFeatureTile(sourceId, tileId, tile)
+      this.syncSourceTile(sourceId, tileId, tile)
     }
 
-    this.refreshFeatureTerrainTileKeys()
+    this.refreshSourceTerrainTileKeys()
     this.pruneTerrainData()
   }
 
@@ -235,121 +203,81 @@ class MaplibreGlJsIntegration {
     if (event.dataType !== 'source') return
 
     const sourceId = event.sourceId
-    if (!sourceId || !this.featureSourceLayers.some((layer) => layer.sourceId === sourceId)) {
+    if (!sourceId || !this.featureSourceIds.includes(sourceId)) {
       return
     }
 
     const eventTile = event.tile as Tile | undefined
     if (eventTile?.tileID) {
-      this.pendingChangedFeatureTiles.set(this.getSourceTileKey(sourceId, eventTile.tileID), {
-        sourceId,
-        tileId: eventTile.tileID,
-        tile: eventTile,
-      })
+      this.pendingChangedSourceTiles.set(
+        this.getSourceTileKey(sourceId, eventTile.tileID.canonical),
+        {
+          sourceId,
+          tileId: eventTile.tileID,
+          tile: eventTile,
+        },
+      )
       this.scheduleSyncData()
-      return
     }
   }
 
-  private syncChangedFeatureTile(sourceId: string, tileId: OverscaledTileID, tile: Tile) {
-    const sourceLayers = this.featureSourceLayers.filter((layer) => layer.sourceId === sourceId)
-    for (const { sourceLayer } of sourceLayers) {
-      this.syncFeatureTile(sourceId, sourceLayer, tileId, tile)
-    }
-  }
-
-  private syncVisibleFeatureTiles() {
-    const visibleTiles = this.getVisibleFeatureTiles()
-    const visibleTileKeys = new Set(visibleTiles.map((tile) => tile.sourceLayerTileKey))
-    const removedTileKeys = [...this.transmittedFeatureTiles.keys()].filter(
+  private syncVisibleSourceTiles() {
+    const visibleTiles = this.getVisibleSourceTiles()
+    const visibleTileKeys = new Set(visibleTiles.map((tile) => tile.sourceTileKey))
+    const removedTileKeys = [...this.transmittedSourceTiles.keys()].filter(
       (tileKey) => !visibleTileKeys.has(tileKey),
     )
-    this.removeTransmittedFeatureTiles(removedTileKeys)
+    this.removeTransmittedSourceTiles(removedTileKeys)
 
-    for (const { sourceId, sourceLayer, tileId, tile, sourceLayerTileKey } of visibleTiles) {
-      if (this.transmittedFeatureTiles.has(sourceLayerTileKey)) continue
-      this.syncFeatureTile(sourceId, sourceLayer, tileId, tile)
+    for (const { sourceId, tileId, tile, sourceTileKey } of visibleTiles) {
+      if (this.transmittedSourceTiles.has(sourceTileKey)) continue
+      this.syncSourceTile(sourceId, tileId, tile)
     }
+
+    this.refreshSourceTerrainTileKeys()
+    this.pruneTerrainData()
   }
 
-  private syncFeatureTile(
-    sourceId: string,
-    sourceLayer: string,
-    tileId: OverscaledTileID,
-    tile: Tile,
-  ) {
+  private syncSourceTile(sourceId: string, tileId: OverscaledTileID, tile: Tile) {
     const tileCoord = this.getTileCoord(tileId.canonical)
-    const sourceLayerTileKey = this.getSourceLayerTileKey(sourceId, sourceLayer, tileId.canonical)
-    const previousTile = this.transmittedFeatureTiles.get(sourceLayerTileKey)
-    const features = this.queryTileSourceFeatures(tile, sourceLayer)
-    const syncedFeatures = new Map<number, SyncedFeature | null>()
+    const sourceTileKey = this.getSourceTileKey(sourceId, tileId.canonical)
+    const rawTileData = this.getTileRawData(tile)
 
-    for (const feature of features) {
-      const featureId = this.getFeatureId(feature, sourceId, sourceLayer, tileCoord)
-      if (featureId === undefined) continue
-
-      if (syncedFeatures.has(featureId)) {
-        console.warn('Skipping duplicate MapLibre feature id in source-layer tile', {
-          sourceId,
-          sourceLayer,
-          tileKey: tileCoord,
-          featureId,
-        })
-        continue
-      }
-
-      if (previousTile?.feature_ids.has(featureId)) {
-        syncedFeatures.set(featureId, null)
-        continue
-      }
-
-      const geometry = feature.geometry
-      if (!geometry) continue
-
-      syncedFeatures.set(featureId, {
-        feature_id: featureId,
-        geometry,
-        properties: feature.properties ?? {},
-      })
+    if (!rawTileData) {
+      this.removeTransmittedSourceTiles([sourceTileKey])
+      return
     }
 
-    const featureIds = new Set(syncedFeatures.keys())
-    const removedFeatureIds = previousTile
-      ? [...previousTile.feature_ids].filter((featureId) => !featureIds.has(featureId))
-      : []
-    const newFeatures = [...syncedFeatures.values()].filter(
-      (feature): feature is SyncedFeature => feature !== null,
+    update_source_tile(
+      this.instanceId,
+      this.mapIntegrationId,
+      sourceId,
+      tileCoord.z,
+      tileCoord.x,
+      tileCoord.y,
+      rawTileData,
     )
-
-    if (removedFeatureIds.length !== 0) {
-      this.removeTransmittedTileFeatureIds(previousTile, removedFeatureIds)
-    }
-
-    if (newFeatures.length !== 0) {
-      this.syncTerrainDataForTileCoords([tileCoord])
-
-      const featureTile: SyncedFeatureTile = {
-        source_id: sourceId,
-        source_layer_id: sourceLayer,
-        tile_key: tileCoord,
-        features: newFeatures,
-      }
-      update_feature_tiles(this.instanceId, this.mapIntegrationId, [featureTile])
-    }
-
-    this.transmittedFeatureTiles.set(sourceLayerTileKey, {
-      source_id: sourceId,
-      source_layer_id: sourceLayer,
-      tile_key: tileCoord,
-      feature_ids: featureIds,
+    this.syncTerrainDataForTileCoords([tileCoord])
+    this.transmittedSourceTiles.set(sourceTileKey, {
+      sourceId,
+      tileKey: tileCoord,
     })
   }
 
-  private queryTileSourceFeatures(tile: Tile, sourceLayer: string) {
-    const features: GeoJSONFeature[] = []
-    const params: QuerySourceFeatureOptions = { sourceLayer, validate: false }
-    tile.querySourceFeatures(features, params)
-    return features
+  private getTileRawData(tile: Tile): Uint8Array | undefined {
+    const rawTileData = (tile as Tile & { latestRawTileData?: RawTileData }).latestRawTileData
+    if (!rawTileData) return undefined
+
+    if (ArrayBuffer.isView(rawTileData)) {
+      return new Uint8Array(
+        rawTileData.buffer.slice(
+          rawTileData.byteOffset,
+          rawTileData.byteOffset + rawTileData.byteLength,
+        ),
+      )
+    }
+
+    return new Uint8Array(rawTileData.slice(0))
   }
 
   private get terrain(): Terrain | null {
@@ -446,44 +374,21 @@ class MaplibreGlJsIntegration {
     this.terrainDataHashes.set(tileKey, hash)
   }
 
-  private removeTransmittedFeatureTiles(tileKeys: SourceLayerTileKey[]) {
-    if (tileKeys.length === 0) return
-
-    const removedFeatureTiles: RemovedFeatureTile[] = tileKeys.flatMap((tileKey) => {
-      const tile = this.transmittedFeatureTiles.get(tileKey)
-      if (!tile) return []
-
-      return [
-        {
-          source_id: tile.source_id,
-          source_layer_id: tile.source_layer_id,
-          tile_key: tile.tile_key,
-        },
-      ]
-    })
-    if (removedFeatureTiles.length !== 0) {
-      remove_feature_tiles(this.instanceId, this.mapIntegrationId, removedFeatureTiles)
-    }
-
+  private removeTransmittedSourceTiles(tileKeys: SourceTileKey[]) {
     for (const tileKey of tileKeys) {
-      this.transmittedFeatureTiles.delete(tileKey)
+      const tile = this.transmittedSourceTiles.get(tileKey)
+      if (tile) {
+        remove_source_tile(
+          this.instanceId,
+          this.mapIntegrationId,
+          tile.sourceId,
+          tile.tileKey.z,
+          tile.tileKey.x,
+          tile.tileKey.y,
+        )
+      }
+      this.transmittedSourceTiles.delete(tileKey)
     }
-  }
-
-  private removeTransmittedTileFeatureIds(
-    tile: SyncedFeatureTileState | undefined,
-    featureIds: number[],
-  ) {
-    if (!tile || featureIds.length === 0) return
-
-    remove_feature_tiles(this.instanceId, this.mapIntegrationId, [
-      {
-        source_id: tile.source_id,
-        source_layer_id: tile.source_layer_id,
-        tile_key: tile.tile_key,
-        feature_ids: featureIds,
-      },
-    ])
   }
 
   private removeTerrainData(tileKeys: string[]) {
@@ -496,7 +401,7 @@ class MaplibreGlJsIntegration {
   private pruneTerrainData() {
     this.removeTerrainData(
       [...this.terrainDataHashes.keys()].filter(
-        (key) => !this.activeTerrainTileKeys.has(key) && !this.featureTerrainTileKeys.has(key),
+        (key) => !this.activeTerrainTileKeys.has(key) && !this.sourceTerrainTileKeys.has(key),
       ),
     )
   }
@@ -541,26 +446,8 @@ class MaplibreGlJsIntegration {
     }
   }
 
-  private getFeatureId(
-    feature: GeoJSONFeature,
-    _sourceId: string,
-    _sourceLayer: string,
-    _tileKey: TileCoord,
-  ): number | undefined {
-    const id = feature.id
-    if (typeof id === 'number' && Number.isSafeInteger(id) && id >= 0) return id
-
-    // console.warn('Skipping MapLibre feature without a numeric id', {
-    //   sourceId,
-    //   sourceLayer,
-    //   tileKey,
-    //   id,
-    // })
-    return undefined
-  }
-
-  private getVisibleFeatureTiles() {
-    return this.featureSourceLayers.flatMap(({ sourceId, sourceLayer }) => {
+  private getVisibleSourceTiles() {
+    return this.featureSourceIds.flatMap((sourceId) => {
       const tileManager = this.getTileManager(sourceId)
       if (!tileManager) return []
 
@@ -571,14 +458,9 @@ class MaplibreGlJsIntegration {
         return [
           {
             sourceId,
-            sourceLayer,
             tileId: tile.tileID,
             tile,
-            sourceLayerTileKey: this.getSourceLayerTileKey(
-              sourceId,
-              sourceLayer,
-              tile.tileID.canonical,
-            ),
+            sourceTileKey: this.getSourceTileKey(sourceId, tile.tileID.canonical),
           },
         ]
       })
@@ -590,20 +472,14 @@ class MaplibreGlJsIntegration {
     return (map.styleManager ?? map.style)?.tileManagers?.[sourceId]
   }
 
-  private getSourceTileKey(sourceId: string, tileId: OverscaledTileID) {
-    return `${sourceId}/${this.getTileKey(tileId.canonical)}`
+  private getSourceTileKey(sourceId: string, tileId: CanonicalTileID) {
+    return `${sourceId}/${this.getTileKey(tileId)}`
   }
 
-  private getSourceLayerTileKey(sourceId: string, sourceLayer: string, tileId: CanonicalTileID) {
-    return `${sourceId}/${sourceLayer}/${this.getTileKey(tileId)}`
-  }
-
-  private refreshFeatureTerrainTileKeys() {
-    this.featureTerrainTileKeys.clear()
-    for (const tile of this.transmittedFeatureTiles.values()) {
-      if (tile.feature_ids.size !== 0) {
-        this.featureTerrainTileKeys.add(this.getTileCoordKey(tile.tile_key))
-      }
+  private refreshSourceTerrainTileKeys() {
+    this.sourceTerrainTileKeys.clear()
+    for (const tile of this.transmittedSourceTiles.values()) {
+      this.sourceTerrainTileKeys.add(this.getTileCoordKey(tile.tileKey))
     }
   }
 

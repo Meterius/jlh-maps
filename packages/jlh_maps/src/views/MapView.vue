@@ -471,10 +471,7 @@ const bevyMount = createToggledComposable(
     const useBevyRet = useBevy(mountBevyRet.instanceId)
 
     const useMaplibreIntegrationRet = useMaplibreIntegration(mountBevyRet.instanceId, mapKey, {
-      featureSourceLayers: [
-        { sourceId: 'openmaptiles', sourceLayer: 'building' },
-        { sourceId: 'openmaptiles', sourceLayer: 'water' },
-      ],
+      featureSourceIds: ['openmaptiles'],
     })
 
     syncRef(

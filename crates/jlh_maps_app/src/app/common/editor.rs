@@ -33,7 +33,11 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, handle_keyboard_input)
             .add_systems(
                 EguiPrimaryContextPass,
-                show_ui_system.run_if(|state: Res<UiState>| state.editor_active),
+                show_ui_system.run_if(
+                    |state: Res<UiState>, cams: Query<&Camera, With<PrimaryEguiContext>>| {
+                        state.editor_active && cams.iter().any(|cam| cam.is_active)
+                    },
+                ),
             )
             .add_systems(
                 PostUpdate,

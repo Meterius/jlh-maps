@@ -1,5 +1,5 @@
 use crate::app::maplibre_gl_js::types::{
-    MaplibreFeatureData, MaplibreMapViewData, MaplibreTerrainData,
+    MaplibreMapViewData, MaplibreSourceData, MaplibreTerrainData,
 };
 use bevy::prelude::*;
 use std::cell::Cell;
@@ -13,7 +13,7 @@ pub struct MaplibreMapIntegration {
     pub id: u32,
     pub view: MaplibreMapViewData,
     pub terrain: MaplibreTerrainData,
-    pub features: MaplibreFeatureData,
+    pub sources: MaplibreSourceData,
 }
 
 pub(super) fn with_map_data_mut(

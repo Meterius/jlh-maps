@@ -3,84 +3,15 @@ use crate::app::maplibre_gl_js::integration::{
     MaplibreMapIntegration, NEXT_INTEGRATION_ID, find_map_integration, with_map_data_mut,
 };
 use crate::app::maplibre_gl_js::types::{
-    CanonicalTileId, MaplibreMapViewData, MaplibreTerrainTileData, SourceLayerFeature,
+    CanonicalTileId, MaplibreMapViewData, MaplibreTerrainTileData,
 };
 use crate::app::maplibre_gl_js::utils::dem_data::DEMData;
 use crate::app::maplibre_gl_js::utils::terrain::TerrainData;
 use anyhow::anyhow;
 use bevy::math::DMat4;
 use bevy::prelude::{Name, default};
-use geojson::Geometry;
-use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
-use wasm_bindgen::prelude::{JsValue, wasm_bindgen};
-
-#[derive(Deserialize)]
-struct EncodedTileFeature {
-    feature_id: u64,
-    geometry: Geometry,
-    #[serde(default)]
-    properties: HashMap<String, serde_json::Value>,
-}
-
-#[derive(Deserialize)]
-struct EncodedFeatureTile {
-    source_id: String,
-    source_layer_id: String,
-    tile_key: CanonicalTileId,
-    #[serde(default)]
-    features: Vec<EncodedTileFeature>,
-}
-
-struct ParsedFeatureTile {
-    source_id: String,
-    source_layer_id: String,
-    tile_id: CanonicalTileId,
-    features: Vec<SourceLayerFeature>,
-}
-
-#[derive(Deserialize)]
-struct EncodedFeatureTileRemoval {
-    source_id: String,
-    source_layer_id: String,
-    tile_key: CanonicalTileId,
-    #[serde(default)]
-    feature_ids: Vec<u64>,
-}
-
-fn parse_feature_tiles(feature_tiles: JsValue) -> Result<Vec<ParsedFeatureTile>, String> {
-    Ok(
-        serde_wasm_bindgen::from_value::<Vec<EncodedFeatureTile>>(feature_tiles)
-            .map_err(|err| format!("Failed to parse feature tiles: {err}"))?
-            .into_iter()
-            .map(|tile| {
-                let tile_id = tile.tile_key;
-                ParsedFeatureTile {
-                    source_id: tile.source_id,
-                    source_layer_id: tile.source_layer_id,
-                    tile_id,
-                    features: tile
-                        .features
-                        .into_iter()
-                        .map(|feature| SourceLayerFeature {
-                            tile_id,
-                            id: feature.feature_id,
-                            geometry: feature.geometry,
-                            properties: feature.properties,
-                        })
-                        .collect(),
-                }
-            })
-            .collect(),
-    )
-}
-
-fn parse_feature_tile_removals(
-    feature_tiles: JsValue,
-) -> Result<Vec<EncodedFeatureTileRemoval>, String> {
-    serde_wasm_bindgen::from_value(feature_tiles)
-        .map_err(|err| format!("Failed to parse removed feature tiles: {err}"))
-}
+use std::collections::HashSet;
+use wasm_bindgen::prelude::wasm_bindgen;
 
 fn parse_tile_key(tile: &str) -> anyhow::Result<CanonicalTileId> {
     let mut parts = tile.split('/');
@@ -243,46 +174,39 @@ pub fn remove_terrain_tile_data(
 }
 
 #[wasm_bindgen]
-pub fn update_feature_tiles(
+pub fn update_source_tile(
     instance_id: String,
     integration_id: u32,
-    feature_tiles: JsValue,
+    source_id: String,
+    z: u32,
+    x: u32,
+    y: u32,
+    data: Vec<u8>,
 ) -> Result<(), String> {
-    let feature_tiles = parse_feature_tiles(feature_tiles)?;
+    let tile_id = CanonicalTileId { z, x, y };
 
     enqueue_instance_command(&instance_id, move |world| {
         with_map_data_mut(world, integration_id, |map_data| {
-            for feature_tile in feature_tiles {
-                map_data.features.insert_tile_features(
-                    feature_tile.source_id,
-                    feature_tile.source_layer_id,
-                    feature_tile.tile_id,
-                    feature_tile.features,
-                );
-            }
+            map_data.sources.update_tile(source_id, tile_id, data);
         });
     })
     .map_err(|err| err.to_string())
 }
 
 #[wasm_bindgen]
-pub fn remove_feature_tiles(
+pub fn remove_source_tile(
     instance_id: String,
     integration_id: u32,
-    feature_tiles: JsValue,
+    source_id: String,
+    z: u32,
+    x: u32,
+    y: u32,
 ) -> Result<(), String> {
-    let feature_tiles = parse_feature_tile_removals(feature_tiles)?;
+    let tile_id = CanonicalTileId { z, x, y };
 
     enqueue_instance_command(&instance_id, move |world| {
         with_map_data_mut(world, integration_id, |map_data| {
-            for feature_tile in feature_tiles {
-                map_data.features.remove_tile_features(
-                    &feature_tile.source_id,
-                    &feature_tile.source_layer_id,
-                    &feature_tile.tile_key,
-                    &feature_tile.feature_ids,
-                );
-            }
+            map_data.sources.remove_tile(&source_id, &tile_id);
         });
     })
     .map_err(|err| err.to_string())

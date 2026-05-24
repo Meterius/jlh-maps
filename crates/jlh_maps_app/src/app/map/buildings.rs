@@ -170,12 +170,8 @@ fn sync_spawned_building_buckets(
             continue;
         }
 
-        for (source_id, source) in &map_int.features.sources {
-            let Some(building_layer) = source.source_layers.get(BUILDING_SOURCE_LAYER) else {
-                continue;
-            };
-
-            for tile_id in building_layer.tiles.keys() {
+        for (source_id, source) in &map_int.sources.sources {
+            for tile_id in source.tiles.keys() {
                 let spawned_source = manager
                     .spawned_buildings
                     .entry(source_id.clone())
@@ -208,17 +204,13 @@ fn remove_stale_building_buckets(
     remove_all: bool,
 ) {
     spawned_buildings.retain(|source_id, spawned_source| {
-        let building_layer = (!remove_all).then_some(map_int).and_then(|map_int| {
-            map_int
-                .features
-                .sources
-                .get(source_id)
-                .and_then(|source| source.source_layers.get(BUILDING_SOURCE_LAYER))
-        });
+        let source = (!remove_all)
+            .then_some(map_int)
+            .and_then(|map_int| map_int.sources.sources.get(source_id));
 
         spawned_source.tiles.retain(|tile_id, bucket_entity| {
-            if building_layer
-                .and_then(|layer| layer.tiles.get(tile_id))
+            if source
+                .and_then(|source| source.tiles.get(tile_id))
                 .is_none()
             {
                 commands.entity(*bucket_entity).despawn();
