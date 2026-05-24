@@ -17,7 +17,9 @@ const SELECTED_MARKER_ICON_NAME = 'selected-marker'
 const SELECTED_MARKER_LABEL_PROPERTY = 'name'
 
 const useSelectedMarkerImageProvider = createSharedComposable(() =>
-  useMarkerImageSourceProvider(async () => '', [SELECTED_MARKER_ICON_NAME]),
+  useMarkerImageSourceProvider(async () => '', [SELECTED_MARKER_ICON_NAME], {
+    prefetch: true,
+  }),
 )
 
 const makeSelectedFeatureCollection = (features: MapGeoJSONFeature[]): FeatureCollection => ({

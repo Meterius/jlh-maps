@@ -7,9 +7,11 @@ import { createKeyedSharedComposable } from '@/composables/helper.ts'
 import {
   getMapHashKey,
   type MapLibreMapImageData,
+  useImage,
   useLayer,
   type UseLayerOptions,
   useOnDemandImageProvider,
+  type UseImageOptions,
 } from '@/composables/maplibre'
 import { svgToImage } from '@/utils/svg-to-image.ts'
 import {
@@ -52,6 +54,7 @@ let nextSharedMarkerImageProviderId = 1
 export function useMarkerImageSourceProvider(
   fetchMarkerHeadIcon: (iconName: string) => Promise<string>,
   markerHeadIconNames: string[],
+  options?: { prefetch: boolean },
 ) {
   const useSharedMarkerImageProvider = createKeyedSharedComposable(
     ({ map, markerOptions, pixelRatio }: UseSharedMarkerImageProviderParams) =>
@@ -63,38 +66,45 @@ export function useMarkerImageSourceProvider(
       const getIconNameForImageId = (imageId: string) =>
         imageId.startsWith(imageIdPrefix) ? imageId.slice(imageIdPrefix.length) : undefined
 
-      useOnDemandImageProvider(map, {
-        getParamsForImageId: (imageId) => {
-          const iconName = getIconNameForImageId(imageId)
-          if (!iconName) return null
+      const fetchImage = async (iconName: string) => {
+        const markerSvg = makeMarkerIcon(await fetchMarkerHeadIcon(iconName), markerOptions)
+        return svgToImage(markerSvg, {
+          width: markerOptions.width,
+          height: markerOptions.height,
+          pixelRatio,
+        })
+      }
 
-          return {
-            iconName,
-            markerIconOptions: markerOptions,
-            pixelRatio,
-          }
-        },
-        getInitialImage: ({ markerIconOptions, pixelRatio }) => ({
-          image: makeEmptyPoiMarkerImage(markerIconOptions, pixelRatio),
-          options: {
-            pixelRatio,
-          },
-        }),
-        fetchImage: async ({ iconName, markerIconOptions, pixelRatio }) => {
-          const markerSvg = makeMarkerIcon(await fetchMarkerHeadIcon(iconName), markerIconOptions)
-
-          const image = await svgToImage(markerSvg, {
-            width: markerIconOptions.width,
-            height: markerIconOptions.height,
-            pixelRatio,
-          })
-
-          return { image }
+      const imageProviderOptions: UseImageOptions = {
+        options: {
+          pixelRatio,
         },
         onImageAdded: (image) => {
           if (image instanceof ImageBitmap) image.close()
         },
-      })
+      }
+
+      if (options?.prefetch) {
+        markerHeadIconNames.forEach((iconName) => {
+          useImage(map, getImageId(iconName), fetchImage(iconName), imageProviderOptions)
+        })
+      } else {
+        useOnDemandImageProvider(map, {
+          getParamsForImageId: (imageId) => {
+            const iconName = getIconNameForImageId(imageId)
+            if (!iconName) return null
+            return { iconName }
+          },
+          getInitialImage: () => ({
+            image: makeEmptyPoiMarkerImage(markerOptions, pixelRatio),
+            options: imageProviderOptions.options,
+          }),
+          fetchImage: async ({ iconName }) => {
+            return { image: await fetchImage(iconName) }
+          },
+          onImageAdded: imageProviderOptions.onImageAdded,
+        })
+      }
 
       const markerHeadIconNameToImageIdFlatEntries = markerHeadIconNames.flatMap((iconName) => [
         iconName,

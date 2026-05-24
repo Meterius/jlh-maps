@@ -28,7 +28,9 @@ const DIRECTION_STOP_ICON_NAME = 'map-pin'
 const DIRECTION_STOP_ICON_COLOR = '#2563eb'
 
 const useDirectionStopMarkerImageProvider = createSharedComposable(() =>
-  useMarkerImageSourceProvider(async () => mapPinIconSvg, [DIRECTION_STOP_ICON_NAME]),
+  useMarkerImageSourceProvider(async () => mapPinIconSvg, [DIRECTION_STOP_ICON_NAME], {
+    prefetch: true,
+  }),
 )
 
 const makeDirectionStopMarkerLayer = (): MarkerLayerSpecification => ({

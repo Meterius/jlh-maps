@@ -204,23 +204,40 @@ export type MapLibreMapImageData =
 
 type ImageAddedCallback = (image: MapLibreMapImageData, imageId: string) => void
 
+export type UseImageOptions = {
+  options?: Partial<StyleImageMetadata>
+  onImageAdded?: ImageAddedCallback
+}
+
 export function useImage(
   map: MapLibreMap,
   imageId: string,
-  image: MapLibreMapImageData,
-  {
-    options,
-    onImageAdded,
-  }: {
-    options?: Partial<StyleImageMetadata>
-    onImageAdded?: ImageAddedCallback
-  },
+  image: MapLibreMapImageData | Promise<MapLibreMapImageData>,
+  { options, onImageAdded }: UseImageOptions = {},
 ) {
-  map.addImage(imageId, image, options)
-  onImageAdded?.(image, imageId)
+  let removed = false
+  let added = false
+
+  if (image instanceof Promise) {
+    image.then((resolvedImage) => {
+      if (!removed) {
+        map.addImage(imageId, resolvedImage, options)
+        added = true
+        onImageAdded?.(resolvedImage, imageId)
+      }
+    })
+  } else {
+    map.addImage(imageId, image, options)
+    added = true
+    onImageAdded?.(image, imageId)
+  }
 
   onScopeDisposeLifo(() => {
-    map.removeImage(imageId)
+    removed = true
+    if (added) {
+      added = false
+      map.removeImage(imageId)
+    }
   })
 }
 
