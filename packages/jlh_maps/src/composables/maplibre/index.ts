@@ -1,43 +1,21 @@
 import { useMap } from '@indoorequal/vue-maplibre-gl'
-import { extractOsmIdFromOmtFeatureId, type OsmId } from '@/utils/osm.ts'
 import {
   type AddLayerObject,
   type CanvasSourceSpecification,
   type FilterSpecification,
-  type GeoJSONFeature,
   type GeoJSONSource,
-  LngLat, type MapEventType,
-  type MapGeoJSONFeature, type MapLayerEventType,
-  type MapLayerMouseEvent,
+  type MapGeoJSONFeature,
+  type MapLayerEventType,
   type MapLibreMap,
-  type MapMouseEvent,
   type RasterSourceSpecification,
   type RasterTileSource,
   type SourceSpecification,
   type StyleImageInterface,
   type StyleImageMetadata,
-  type Subscription,
 } from 'maplibre-gl'
-import {
-  type MaybeRefOrGetter,
-  onUnmounted,
-  ref,
-  shallowRef,
-  toValue,
-  watch,
-  type WatchSource,
-} from 'vue'
-import { get } from '@vueuse/core'
+import { type MaybeRefOrGetter, ref, shallowRef, toValue, watch, type WatchSource } from 'vue'
 import { onScopeDisposeLifo, onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import type { GeoJSON } from 'geojson'
-
-const CLICK_LAYER_SYNC_BUFFER_MS = 50
-
-export interface SelectionItem {
-  osm_id?: OsmId
-  coords: LngLat
-  feature: GeoJSONFeature
-}
 
 let mapKeyCounter = 0
 
@@ -304,7 +282,7 @@ export function useOnDemandImageProvider<T>(
 export function onMapEvent<T extends keyof MapLayerEventType>(
   map: MapLibreMap,
   type: T,
-  listener: (ev: MapLayerEventType[T] & Object) => void,
+  listener: (ev: MapLayerEventType[T] & object) => void,
 ) {
   const sub = map.on(type, listener)
   onScopeDisposeLifo(() => {
@@ -312,13 +290,11 @@ export function onMapEvent<T extends keyof MapLayerEventType>(
   })
 }
 
-export function onMapLayerEvent<
-  T extends keyof MapLayerEventType
->(
+export function onMapLayerEvent<T extends keyof MapLayerEventType>(
   map: MapLibreMap,
   type: T,
   layer: string,
-  listener: (ev: MapLayerEventType[T] & Object) => void,
+  listener: (ev: MapLayerEventType[T] & object) => void,
 ) {
   const sub = map.on(type, layer, listener)
   onScopeDisposeLifo(() => {
@@ -327,23 +303,22 @@ export function onMapLayerEvent<
 }
 
 export type MapLayerFeatureEvent<T extends keyof MapLayerEventType> = {
-  originalEvent: MapLayerEventType[T] & Object,
-  feature: MapGeoJSONFeature,
+  originalEvent: MapLayerEventType[T] & object
+  feature: MapGeoJSONFeature
 }
 
-export function onMapLayerFeatureEvent<
-  T extends keyof MapLayerEventType
->(
+export function onMapLayerFeatureEvent<T extends keyof MapLayerEventType>(
   map: MapLibreMap,
   type: T,
   layer: string,
   listener: (ev: MapLayerFeatureEvent<T>) => void,
 ) {
   onMapLayerEvent(map, type, layer, (originalEvent) => {
-    (originalEvent.features ?? []).forEach((feature) => {
+    ;(originalEvent.features ?? []).forEach((feature) => {
       if (feature.layer.id === layer) {
         listener({
-          originalEvent, feature,
+          originalEvent,
+          feature,
         })
       }
     })
@@ -386,9 +361,9 @@ export function useHoverFeatureState(
 
   const onFeatures = (event: { features?: MapGeoJSONFeature[] }) => {
     const nextHoveredFeatures = Object.fromEntries(
-      (event.features ?? []).flatMap(
-        (feature) => feature.id !== undefined ? [[feature.id, feature]] : []
-      )
+      (event.features ?? []).flatMap((feature) =>
+        feature.id !== undefined ? [[feature.id, feature]] : [],
+      ),
     )
     updateFeatureHoveredFeatureIds(nextHoveredFeatures)
   }
@@ -401,10 +376,9 @@ export function useHoverFeatureState(
   })
 
   return {
-    hoveredFeatures
+    hoveredFeatures,
   }
 }
-
 
 // Other
 

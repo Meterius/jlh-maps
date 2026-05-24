@@ -1,8 +1,4 @@
-import type {
-  ExpressionSpecification,
-  Map as MapLibreMap,
-  MapGeoJSONFeature,
-} from 'maplibre-gl'
+import type { ExpressionSpecification, Map as MapLibreMap, MapGeoJSONFeature } from 'maplibre-gl'
 import { toValue, type WatchSource } from 'vue'
 import { createSharedComposable } from '@vueuse/core'
 import type { FeatureCollection } from 'geojson'
@@ -23,9 +19,7 @@ const useSelectedMarkerImageProvider = createSharedComposable(() =>
   useMarkerImageSourceProvider(async () => '', [SELECTED_MARKER_ICON_NAME]),
 )
 
-const makeSelectedFeatureCollection = (
-  features: MapGeoJSONFeature[],
-): FeatureCollection => ({
+const makeSelectedFeatureCollection = (features: MapGeoJSONFeature[]): FeatureCollection => ({
   type: 'FeatureCollection',
   features: features.map((feature) => ({
     type: 'Feature',

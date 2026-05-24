@@ -6,9 +6,9 @@ import type { MapFeatureId } from '@/composables/maplibre'
 import { extractOsmIdFromOmtFeatureId, type OsmId } from '@/utils/osm.ts'
 
 export type SelectionItem = {
-  feature: MapGeoJSONFeature,
-  featureId: MapFeatureId,
-  osmId?: OsmId,
+  feature: MapGeoJSONFeature
+  featureId: MapFeatureId
+  osmId?: OsmId
 }
 
 const [provideMapSelection, useMapSelection] = createInjectionState(() => {
@@ -17,17 +17,23 @@ const [provideMapSelection, useMapSelection] = createInjectionState(() => {
   return {
     selected: computed(() => Object.values(selectedMap.value)),
     selectFeature: (feature: MapGeoJSONFeature) => {
-      selectedMap.value = feature.id !== undefined ? {
-        [feature.id]: {
-          feature,
-          featureId: feature.id,
-          osmId: typeof feature.id === 'number' ? extractOsmIdFromOmtFeatureId(feature.id) ?? undefined : undefined,
-        }
-      } : {}
+      selectedMap.value =
+        feature.id !== undefined
+          ? {
+              [feature.id]: {
+                feature,
+                featureId: feature.id,
+                osmId:
+                  typeof feature.id === 'number'
+                    ? (extractOsmIdFromOmtFeatureId(feature.id) ?? undefined)
+                    : undefined,
+              },
+            }
+          : {}
     },
     clearSelection: () => {
       selectedMap.value = {}
-    }
+    },
   }
 })
 

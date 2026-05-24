@@ -377,17 +377,53 @@ import { provideMapCameraController } from '@/views/map-view/map-camera-controll
 import { provideMapSelection } from '@/views/map-view/map-selection.ts'
 
 const mapKey = makeUniqueMapKey()
+const { mapInstance, loaded, zoom } = useMapExtended(mapKey)
+
+usePanProfiles(mapKey)
+
+watchDefinedOnce(
+  () => (loaded.value ? mapInstance.map : undefined),
+  (map) => {
+    map.setMaxPitch(85)
+  },
+)
+
+const rainfallRasterSourceProvider = useRainfallRasterProvider({
+  onLoadError: (error) => {
+    console.warn('Failed to load RainViewer rainfall layer', error)
+    rainfallEnabled.value = false
+  },
+})
+
+// Bevy
 
 const bevyCanvasId = `bevy-canvas-${mapKey}`
 const bevyDebugCanvas = ref<HTMLCanvasElement | null>(null)
-
-const { mapInstance, loaded, zoom } = useMapExtended(mapKey)
 
 const { instanceId } = mountBevy(
   () => bevyDebugCanvas.value ?? null,
   () => mapInstance.map?.getCanvas() ?? null,
 )
 const { tick, textureOffscreenCanvas, mapViewSettings } = useBevy(instanceId)
+
+const { syncOnRender } = useMaplibreIntegration(instanceId, mapKey, {
+  featureSourceLayers: [
+    { sourceId: 'openmaptiles', sourceLayer: 'building' },
+    { sourceId: 'openmaptiles', sourceLayer: 'water' },
+  ],
+})
+
+const showBevyCanvas = ref(false)
+
+watch(
+  showBevyCanvas,
+  (value) => {
+    mapViewSettings.value.enable_window_cameras = value
+  },
+  { immediate: true },
+)
+
+// Controls
 
 const {
   active: globeActive,
@@ -423,11 +459,45 @@ const {
   zoomOutTitle,
 } = useNavigationControl(mapKey, { northRotationOffset: 135 })
 
-const { syncOnRender } = useMaplibreIntegration(instanceId, mapKey, {
-  featureSourceLayers: [
-    { sourceId: 'openmaptiles', sourceLayer: 'building' },
-    { sourceId: 'openmaptiles', sourceLayer: 'water' },
-  ],
+const sunAzimuthLabel = computed(
+  () => `${Math.round(mapViewSettings.value.sun_azimuth_degrees)} deg`,
+)
+const sunElevationLabel = computed(
+  () => `${Math.round(mapViewSettings.value.sun_elevation_degrees)} deg`,
+)
+
+const terrainEnabled = ref(false)
+
+const rainfallEnabled = ref(false)
+
+const rainfallRasterDataTime = rainfallRasterSourceProvider.rasterDataTime
+const rainfallRasterLoading = rainfallRasterSourceProvider.loading
+
+const rainfallRasterDataTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
+const rainfallRasterDataTimeLabel = computed(() => {
+  const dataTime = rainfallRasterDataTime.value
+
+  if (!dataTime) return 'Radar frame not loaded'
+
+  return `At ${rainfallRasterDataTimeFormatter.format(dataTime)}`
+})
+
+const refreshRainfallRasterData = () => {
+  rainfallRasterSourceProvider.refreshData().catch(() => {
+    // The provider reports load failures through onLoadError.
+  })
+}
+
+watch(rainfallEnabled, (value) => {
+  if (value) {
+    refreshRainfallRasterData()
+  }
 })
 
 // Base Style
@@ -450,7 +520,7 @@ const baseStyleTypeOptions: ModeSelectorOption<BaseStyleDefinitionType>[] = [
 
 const baseStyleType = shallowRef(BaseStyleDefinitionType.Normal)
 
-//
+// Theme
 
 const darkThemeEnabled = useDark()
 
@@ -552,8 +622,6 @@ const registerTouchContextMenu = (map: NonNullable<typeof mapInstance.map>) => {
         document.removeEventListener('touchend', onTouchEnd, true)
       }, 5000)
 
-      //
-
       const canvasBounds = canvas.getBoundingClientRect()
       const lngLat = map.unproject([
         event.clientX - canvasBounds.left,
@@ -578,6 +646,35 @@ const registerTouchContextMenu = (map: NonNullable<typeof mapInstance.map>) => {
   }
 }
 
+const contextMenuItems = computed((): ContextMenuItem[] => [
+  {
+    label: contextMenuCoordinateLabel.value,
+    type: 'label',
+    icon: 'material-symbols:location-on-outline-rounded',
+  },
+  {
+    type: 'separator',
+  },
+  {
+    label: 'Directions From Here',
+    icon: 'material-symbols:line-end-circle-outline-rounded',
+    ui: {
+      itemLeadingIcon: '-rotate-90',
+    } as unknown as ContextMenuItem['ui'],
+    onSelect: () => setDirectionStop(0),
+    disabled: directionStops.value.length < 1,
+  },
+  {
+    label: 'Directions To Here',
+    icon: 'material-symbols:line-end-circle-outline-rounded',
+    ui: {
+      itemLeadingIcon: 'rotate-90',
+    } as unknown as ContextMenuItem['ui'],
+    onSelect: () => setDirectionStop(directionStops.value.length - 1),
+    disabled: directionStops.value.length < 2,
+  },
+])
+
 // Slideover
 
 const SlideoverTab = {
@@ -597,12 +694,9 @@ const layersControlStyle = computed(() => ({
   left: slideoverDirection.value === 'left' ? `${slideoverSize.value.width}px` : '0px',
 }))
 
-const sunAzimuthLabel = computed(
-  () => `${Math.round(mapViewSettings.value.sun_azimuth_degrees)} deg`,
-)
-const sunElevationLabel = computed(
-  () => `${Math.round(mapViewSettings.value.sun_elevation_degrees)} deg`,
-)
+// Selection
+
+const { selected, selectFeature, clearSelection } = provideMapSelection()
 
 const onSlideoverClose = () => {
   switch (slideoverOpen.value) {
@@ -613,6 +707,14 @@ const onSlideoverClose = () => {
 
   slideoverOpen.value = null
 }
+
+watchEffect(() => {
+  if (selected.value.length === 1) {
+    slideoverOpen.value = SlideoverTab.Details
+  } else if (selected.value.length !== 1 && slideoverOpen.value === SlideoverTab.Details) {
+    slideoverOpen.value = null
+  }
+})
 
 // Camera
 
@@ -645,117 +747,17 @@ const setDirectionStop = (idx: number) => {
   slideoverOpen.value = SlideoverTab.Directions
 }
 
-// Selection
-
-const { selected, selectFeature, clearSelection } = provideMapSelection()
-
-// Context Menu
-
-const contextMenuItems = computed((): ContextMenuItem[] => [
-  {
-    label: contextMenuCoordinateLabel.value,
-    type: 'label',
-    icon: 'material-symbols:location-on-outline-rounded',
-  },
-  {
-    type: 'separator',
-  },
-  {
-    label: 'Directions From Here',
-    icon: 'material-symbols:line-end-circle-outline-rounded',
-    ui: {
-      itemLeadingIcon: '-rotate-90',
-    } as unknown as ContextMenuItem['ui'],
-    onSelect: () => setDirectionStop(0),
-    disabled: directionStops.value.length < 1,
-  },
-  {
-    label: 'Directions To Here',
-    icon: 'material-symbols:line-end-circle-outline-rounded',
-    ui: {
-      itemLeadingIcon: 'rotate-90',
-    } as unknown as ContextMenuItem['ui'],
-    onSelect: () => setDirectionStop(directionStops.value.length - 1),
-    disabled: directionStops.value.length < 2,
-  },
-])
-
-watchEffect(() => {
-  if (selected.value.length === 1) {
-    slideoverOpen.value = SlideoverTab.Details
-  } else if (selected.value.length !== 1 && slideoverOpen.value === SlideoverTab.Details) {
-    slideoverOpen.value = null
-  }
-})
-
-const showBevyCanvas = ref(false)
-
-watch(
-  showBevyCanvas,
-  (value) => {
-    mapViewSettings.value.enable_window_cameras = value
-  },
-  { immediate: true },
-)
-
-const terrainEnabled = ref(false)
-const rainfallEnabled = ref(false)
-
-const rainfallRasterSourceProvider = useRainfallRasterProvider({
-  onLoadError: (error) => {
-    console.warn('Failed to load RainViewer rainfall layer', error)
-    rainfallEnabled.value = false
-  },
-})
-
-const rainfallRasterDataTime = rainfallRasterSourceProvider.rasterDataTime
-const rainfallRasterLoading = rainfallRasterSourceProvider.loading
-
-const rainfallRasterDataTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-})
-
-const rainfallRasterDataTimeLabel = computed(() => {
-  const dataTime = rainfallRasterDataTime.value
-
-  if (!dataTime) return 'Radar frame not loaded'
-
-  return `At ${rainfallRasterDataTimeFormatter.format(dataTime)}`
-})
-
-const refreshRainfallRasterData = () => {
-  rainfallRasterSourceProvider.refreshData().catch(() => {
-    // The provider reports load failures through onLoadError.
-  })
-}
-
-watch(rainfallEnabled, (value) => {
-  if (value) {
-    refreshRainfallRasterData()
-  }
-})
-
-// Controls
-
-watchDefinedOnce(
-  () => (loaded.value ? mapInstance.map : undefined),
-  (map) => {
-    map.setMaxPitch(85)
-  },
-)
-
-usePanProfiles(mapKey)
-
 // Base Styles
 
 const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
   source: TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString(),
   options: { diff: false },
   instantiate: (map) => {
+    // Context Menu
+
     onScopeDisposeLifo(registerTouchContextMenu(map))
+
+    // Rainfall
 
     useRainfallRasterLayer(
       map,
@@ -765,6 +767,8 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       },
       'Water labels',
     )
+
+    // POI
     ;(map.getStyle().layers ?? [])
       .filter(
         (layer: LayerSpecification): layer is SymbolLayerSpecification => layer.type === 'symbol',
@@ -789,6 +793,8 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
         map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
       })
+
+    // Raster Base
 
     if (useRaster) {
       useRasterTilesBasedSource(map, 'raster-sen2', {
@@ -986,7 +992,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       'Other border',
     )
 
-    //
+    // Background Click
 
     // needs to be registered after any layer click events to allow for prevent default to work
     onMapEvent(map, 'click', (event) => {
