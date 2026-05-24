@@ -1,21 +1,20 @@
-import { computed, effectScope, shallowRef, toValue, watch, type WatchSource } from 'vue'
+import { computed, toValue, type WatchSource } from 'vue'
 import type { GeoLocation } from '@/components/types.ts'
 import { decodePolylineToPositions, type Trip } from 'valhalla_client'
 import type { FeatureCollection, LineString, Point, Position } from 'geojson'
 import { distance } from '@turf/turf'
 import { point as turfPoint } from '@turf/helpers'
-import { svgToImage } from '@/utils/svg-to-image.ts'
 import mapPinIconSvg from 'lucide-static/icons/map-pin.svg?raw'
+import { createSharedComposable } from '@vueuse/core'
 import type { Map as MapLibreMap } from 'maplibre-gl'
-import { useGeoJsonSource, useImage, useLayer } from '@/composables/maplibre'
-import { onWatcherCleanupLifo } from '@/composables/helper.ts'
+import type { ExpressionSpecification } from 'maplibre-gl'
+import { useGeoJsonSource, useLayer } from '@/composables/maplibre'
 import {
-  escapeSvgAttribute,
-  getSvgPresentationAttributes,
-  parseSvgElementOrThrow,
-  parseSvgViewBox,
-  SVG_NAMESPACE,
-} from '@/utils/svg.ts'
+  type MarkerLayerSpecification,
+  useMarkerImageSourceProvider,
+  useMarkerLayer,
+} from '@/maplibre-layers/marker-layer.ts'
+import { SORT_KEY_DIRECTION_STOP_MARKER } from '@/maplibre-layers/constants.ts'
 
 const DIRECTION_TRIP_PRIMARY_SOURCE_ID = 'direction-trip-primary'
 const DIRECTION_TRIP_PRIMARY_LAYER_ID = 'direction-trip-primary'
@@ -24,22 +23,41 @@ const DIRECTION_TRIP_PRIMARY_CONNECTOR_LAYER_ID = 'direction-trip-primary-connec
 const DIRECTION_TRIP_ENDPOINT_CONNECTOR_THRESHOLD_METERS = 20
 
 const DIRECTION_STOPS_SOURCE_ID = 'direction-stops'
-const DIRECTION_STOPS_SHADOW_LAYER_ID = 'direction-stops-shadow'
 export const DIRECTION_STOPS_LAYER_ID = 'direction-stops'
-const DIRECTION_STOP_ICON_ID = 'lucide:map-pin'
+const DIRECTION_STOP_ICON_NAME = 'map-pin'
 const DIRECTION_STOP_ICON_COLOR = '#2563eb'
 
-const makeRenderableSvgIcon = (
-  svgSource: string,
-  { width, height = width, color }: { width: number; height?: number; color: string },
-) => {
-  const svg = parseSvgElementOrThrow(svgSource)
+const useDirectionStopMarkerImageProvider = createSharedComposable(() =>
+  useMarkerImageSourceProvider(async () => mapPinIconSvg, [DIRECTION_STOP_ICON_NAME]),
+)
 
-  return `
-<svg xmlns="${SVG_NAMESPACE}" width="${width}" height="${height}" viewBox="${parseSvgViewBox(svg)}" color="${escapeSvgAttribute(color)}">
-  <g ${getSvgPresentationAttributes(svg)}>${svg.innerHTML}</g>
-</svg>`.trim()
-}
+const makeDirectionStopMarkerLayer = (): MarkerLayerSpecification => ({
+  id: DIRECTION_STOPS_LAYER_ID,
+  type: 'symbol',
+  source: DIRECTION_STOPS_SOURCE_ID,
+  markerOptions: {
+    color: DIRECTION_STOP_ICON_COLOR,
+    iconColor: DIRECTION_STOP_ICON_COLOR,
+  },
+  marker: {
+    scale: 1,
+    textSize: 16,
+    headIconName: ['literal', DIRECTION_STOP_ICON_NAME] as ExpressionSpecification,
+  },
+  layout: {
+    'icon-allow-overlap': false,
+    'icon-ignore-placement': false,
+    'text-allow-overlap': false,
+    'text-ignore-placement': false,
+    'text-field': ['get', 'label'],
+    'symbol-sort-key': SORT_KEY_DIRECTION_STOP_MARKER,
+  },
+  paint: {
+    'text-color': DIRECTION_STOP_ICON_COLOR,
+    'text-halo-color': '#ffffff',
+    'text-halo-width': 2,
+  },
+})
 
 export function useDirectionsLayers(
   map: MapLibreMap,
@@ -52,7 +70,6 @@ export function useDirectionsLayers(
     tripPrimary: WatchSource<Trip | null>
     visible?: WatchSource<boolean>
   },
-  beforeLayerId?: string,
 ) {
   const getTripLineCoordinates = (trip: Trip | null): Position[] =>
     trip?.legs.flatMap((leg) => {
@@ -126,7 +143,6 @@ export function useDirectionsLayers(
 
   type DirectionStopProperties = {
     label: string
-    sortKey: number
   }
 
   const directionStopsGeoJsonData = computed(
@@ -150,8 +166,7 @@ export function useDirectionsLayers(
                 coordinates: [stop.coords.lng, stop.coords.lat],
               },
               properties: {
-                label: isStart ? 'S' : isEnd ? 'E' : String(idx),
-                sortKey: idx,
+                label: isStart ? 'Start' : isEnd ? 'End' : String(idx),
               },
             },
           ]
@@ -159,33 +174,6 @@ export function useDirectionsLayers(
       }
     },
   )
-
-  const image = shallowRef<ImageBitmap | null>(null)
-
-  watch(image, (value) => {
-    if (value === null) return
-
-    const scope = effectScope()
-    scope.run(() => {
-      useImage(map, DIRECTION_STOP_ICON_ID, value, {
-        options: { pixelRatio: 2 },
-        onImageAdded: (image) => {
-          if (image instanceof ImageBitmap) image.close()
-        },
-      })
-    })
-    onWatcherCleanupLifo(() => scope.stop())
-  })
-
-  svgToImage(
-    makeRenderableSvgIcon(mapPinIconSvg, { width: 24, color: DIRECTION_STOP_ICON_COLOR }),
-    {
-      width: 24,
-      pixelRatio: 2,
-    },
-  ).then((value) => {
-    image.value = value
-  }, console.error)
 
   useGeoJsonSource(map, DIRECTION_TRIP_PRIMARY_SOURCE_ID, directionsTripPrimaryGeoJsonData)
 
@@ -206,7 +194,6 @@ export function useDirectionsLayers(
       },
     },
     {
-      beforeId: beforeLayerId,
       visible,
     },
   )
@@ -242,51 +229,7 @@ export function useDirectionsLayers(
 
   useGeoJsonSource(map, DIRECTION_STOPS_SOURCE_ID, directionStopsGeoJsonData)
 
-  useLayer(
-    map,
-    {
-      id: DIRECTION_STOPS_SHADOW_LAYER_ID,
-      source: DIRECTION_STOPS_SOURCE_ID,
-      type: 'circle',
-      paint: {
-        'circle-radius': 16,
-        'circle-blur': 0.4,
-        'circle-color': '#000000',
-        'circle-opacity': 0.3,
-        'circle-translate': [0, 0],
-        'circle-translate-anchor': 'viewport',
-        'circle-pitch-alignment': 'map',
-      },
-    },
-    { visible },
-  )
-
-  useLayer(
-    map,
-    {
-      id: DIRECTION_STOPS_LAYER_ID,
-      source: DIRECTION_STOPS_SOURCE_ID,
-      type: 'symbol',
-      layout: {
-        'icon-image': DIRECTION_STOP_ICON_ID,
-        'icon-size': 1.5,
-        'icon-anchor': 'bottom',
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
-        'text-field': ['get', 'label'],
-        'text-anchor': 'bottom',
-        'text-offset': [0, -2.25],
-        'text-size': 16,
-        'text-allow-overlap': true,
-        'text-ignore-placement': true,
-        'symbol-sort-key': ['get', 'sortKey'],
-      },
-      paint: {
-        'text-color': '#111827',
-        'text-halo-color': '#ffffff',
-        'text-halo-width': 2,
-      },
-    },
-    { visible },
-  )
+  useMarkerLayer(map, makeDirectionStopMarkerLayer(), useDirectionStopMarkerImageProvider(), {
+    visible,
+  })
 }

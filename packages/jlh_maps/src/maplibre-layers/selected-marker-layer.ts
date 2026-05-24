@@ -8,6 +8,7 @@ import {
   useMarkerImageSourceProvider,
   useMarkerLayer,
 } from '@/maplibre-layers/marker-layer.ts'
+import { SORT_KEY_SELECTION_MARKER } from '@/maplibre-layers/constants.ts'
 
 const SELECTED_MARKER_SOURCE_ID = 'selected-marker'
 const SELECTED_MARKER_LAYER_ID = 'selected-marker'
@@ -43,12 +44,12 @@ const makeSelectedMarkerLayer = (): MarkerLayerSpecification => ({
     headIconName: ['literal', SELECTED_MARKER_ICON_NAME] as ExpressionSpecification,
   },
   layout: {
-    'icon-allow-overlap': true,
+    'icon-allow-overlap': false,
     'icon-ignore-placement': false,
-    'text-allow-overlap': true,
+    'text-allow-overlap': false,
     'text-ignore-placement': false,
     'text-field': ['get', SELECTED_MARKER_LABEL_PROPERTY],
-    'symbol-sort-key': -100000.0,
+    'symbol-sort-key': SORT_KEY_SELECTION_MARKER,
   },
   paint: {
     'icon-opacity-transition': { duration: 0, delay: 0 },

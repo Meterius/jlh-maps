@@ -141,7 +141,7 @@ const makeSymbolLayerForMarkerLayer = (
       'icon-anchor': 'bottom',
       'icon-offset': [0, 0],
       'text-anchor': 'top',
-      'text-offset': [0, 0.55],
+      'text-offset': [0, 0.4],
       'text-size': markerLayerSpecification.marker.textSize,
       'text-optional': false,
       'icon-optional': false,

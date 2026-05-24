@@ -23,17 +23,36 @@
               readonly
               :model-value="formatStop(stop)"
               :placeholder="getStopPlaceholder(idx)"
+              @focusin="stopFocused[idx] = true"
+              @focusout="stopFocused[idx] = false"
             >
-              <template v-if="stop" #trailing>
-                <UButton
-                  color="neutral"
-                  variant="link"
-                  size="sm"
-                  icon="i-lucide-circle-x"
-                  aria-label="Clear"
-                  class="cursor-pointer"
-                  @click="clearStop(idx)"
-                />
+              <template v-if="stopFocused[idx] || !stop" #trailing>
+                <div class="flex items-center gap-1">
+                  <UButton
+                    color="neutral"
+                    variant="link"
+                    size="sm"
+                    icon="i-lucide-locate-fixed"
+                    aria-label="Use current location"
+                    title="Use current location"
+                    class="cursor-pointer"
+                    :loading="locatingStopIdx === idx"
+                    :disabled="locatingStopIdx !== null && locatingStopIdx !== idx"
+                    @pointerdown.prevent
+                    @click.stop="fillStopWithCurrentLocation(idx)"
+                  />
+
+                  <UButton
+                    v-if="stop"
+                    color="neutral"
+                    variant="link"
+                    size="sm"
+                    icon="i-lucide-circle-x"
+                    aria-label="Clear"
+                    class="cursor-pointer"
+                    @click="clearStop(idx)"
+                  />
+                </div>
               </template>
             </UInput>
           </div>
@@ -75,7 +94,7 @@
 
 <script setup lang="ts">
 import ModeSelector from '@/components/ModeSelector.vue'
-import { RouteMode, type GeoLocation } from '@/components/types.ts'
+import { GeoLocationType, RouteMode, type GeoLocation } from '@/components/types.ts'
 import ValhallaTripLegCard from '@/components/directions/ValhallaTripLegCard.vue'
 import ValhallaTripLegCardSkeleton from '@/components/directions/ValhallaTripLegCardSkeleton.vue'
 import { useAsyncReactiveRequest } from '@/composables/async-reactive-request.ts'
@@ -102,6 +121,9 @@ const routeModeDefinitions = [
 ] as const satisfies readonly { value: RouteMode; label: string; icon: string }[]
 
 const routeMode = ref<RouteMode>(RouteMode.Car)
+
+const stopFocused = ref<Record<number, boolean>>({})
+const locatingStopIdx = ref<number | null>(null)
 
 const getRouteCosting = (mode: RouteMode) => {
   switch (mode) {
@@ -258,10 +280,56 @@ const formatStop = (stop: GeoLocation | null) => {
   return `${stop.coords.lat.toFixed(6)}, ${stop.coords.lng.toFixed(6)}`
 }
 
-const clearStop = (idx: number) => {
+const setStop = (idx: number, location: GeoLocation | null) => {
   const nextStops = [...stops.value]
-  nextStops[idx] = null
+  nextStops[idx] = location
   stops.value = nextStops
+}
+
+const clearStop = (idx: number) => {
+  setStop(idx, null)
+}
+
+const getCurrentLocation = () =>
+  new Promise<GeoLocation>((resolve, reject) => {
+    if (typeof window === 'undefined' || !window.navigator.geolocation) {
+      reject(new Error('Geolocation is not available in this browser.'))
+      return
+    }
+
+    window.navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          type: GeoLocationType.Coords,
+          coords: {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          },
+        })
+      },
+      reject,
+      {
+        enableHighAccuracy: true,
+        maximumAge: 30_000,
+        timeout: 10_000,
+      },
+    )
+  })
+
+const fillStopWithCurrentLocation = async (idx: number) => {
+  if (locatingStopIdx.value !== null) return
+
+  locatingStopIdx.value = idx
+
+  try {
+    setStop(idx, await getCurrentLocation())
+  } catch (error) {
+    console.error('Failed to use current location as direction stop', error)
+  } finally {
+    if (locatingStopIdx.value === idx) {
+      locatingStopIdx.value = null
+    }
+  }
 }
 
 watchEffect(() => {

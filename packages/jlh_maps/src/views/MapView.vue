@@ -1074,21 +1074,16 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       { immediate: true },
     )
 
+    // Directions
+
+    useDirectionsLayers(map, {
+      stops: directionStops,
+      tripPrimary: directionsTripPrimary,
+      visible: computed(() => slideoverOpen.value === SlideoverTab.Directions),
+    })
     // Selection
 
     useSelectedMarkerLayer(map, () => selected.value.map((item) => item.feature))
-
-    // Directions
-
-    useDirectionsLayers(
-      map,
-      {
-        stops: directionStops,
-        tripPrimary: directionsTripPrimary,
-        visible: computed(() => slideoverOpen.value === SlideoverTab.Directions),
-      },
-      'Other border',
-    )
 
     // Background Click
 
