@@ -60,6 +60,7 @@ fn handle_keyboard_input(mut state: ResMut<UiState>, mut keyboard: MessageReader
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn sync_egui_camera_active(
     ui_state: Res<UiState>,
     game_view_cams: Query<

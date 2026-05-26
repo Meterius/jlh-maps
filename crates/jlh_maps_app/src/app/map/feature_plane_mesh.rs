@@ -546,6 +546,7 @@ pub fn tile_flat_bounds_world(tile_id: CanonicalTileId) -> (DVec3, Vec2) {
     ((min + max) * 0.5, size.xy().as_vec2() * 0.5)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_polygon_mesh(
     polygon: &[Vec<Vec<f64>>],
     center: DVec3,
@@ -675,6 +676,7 @@ struct ExtrusionVertex {
     base_altitude: f64,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_extrusion_wall_mesh(
     ring_positions: &[ExtrusionVertex],
     is_hole: bool,

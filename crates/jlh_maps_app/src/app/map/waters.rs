@@ -167,6 +167,7 @@ fn remove_stale_water_buckets(
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_water_bucket(
     commands: &mut Commands,
     manager_id: Entity,
