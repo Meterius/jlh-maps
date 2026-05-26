@@ -9,6 +9,10 @@ wasm-opt = ["-O1"]
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = []
+profile = ["bevy/trace_chrome"]
+
 [dependencies]
 bevy = { version = "0.18.1", features = ["webgpu"] }
 bevy_winit = "0.18.1"
