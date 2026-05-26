@@ -3,7 +3,7 @@ use crate::app::common::editor::EditorPlugin;
 use crate::app::common::materials::MaterialsPlugin;
 use crate::app::common::settings::SettingsPlugin;
 use crate::app::instance_management::InstanceManagementPlugin;
-use crate::app::instance_management::instance::{register_instance, unregister_instance};
+use crate::app::instance_management::commands::InstanceCommandQueue;
 use crate::app::map::MapPlugin;
 use crate::app::map::core::spawn_map_view;
 use crate::app::maplibre_gl_js::MaplibreGlJsPlugin;
@@ -31,19 +31,22 @@ use bevy_inspector_egui::bevy_egui::{EguiGlobalSettings, EguiPlugin};
 use bevy_winit::WinitPlugin;
 use big_space::plugin::BigSpaceDefaultPlugins;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use tracing::info;
 use wasm_bindgen::prelude::wasm_bindgen;
 use web_sys::OffscreenCanvas;
 
-thread_local! {
-    static BEVY_APPS: RefCell<HashMap<String, SharedBevyApp>> = RefCell::new(HashMap::new());
+#[wasm_bindgen]
+pub struct BevyInstance {
+    inner: Rc<BevyInstanceInner>,
 }
 
-pub(crate) type SharedBevyApp = Rc<RefCell<ManagedBevyApp>>;
+pub(crate) struct BevyInstanceInner {
+    managed_app: RefCell<ManagedBevyApp>,
+    command_queue: InstanceCommandQueue,
+}
 
-pub(crate) struct ManagedBevyApp {
+struct ManagedBevyApp {
     pub app: Option<App>,
     plugins_cleaned: bool,
 }
@@ -96,91 +99,98 @@ pub fn initialize() {
 }
 
 #[wasm_bindgen]
-pub fn mount(instance_id: String, debug_canvas: OffscreenCanvas, texture_canvas: OffscreenCanvas) {
-    initialize();
-    register_instance(instance_id.clone());
+impl BevyInstance {
+    #[wasm_bindgen(constructor)]
+    pub fn new(debug_canvas: OffscreenCanvas, texture_canvas: OffscreenCanvas) -> Self {
+        initialize();
 
-    let mut app = App::new();
-    app.add_plugins((
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    canvas: None,
-                    title: "Debug Offscreen Window".to_string(),
-                    resolution: WindowResolution::new(debug_canvas.width(), debug_canvas.height()),
-                    present_mode: PresentMode::AutoNoVsync,
-                    transparent: true,
-                    composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
+        let command_queue = InstanceCommandQueue::default();
+        let mut app = App::new();
+        app.add_plugins((
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        canvas: None,
+                        title: "Debug Offscreen Window".to_string(),
+                        resolution: WindowResolution::new(
+                            debug_canvas.width(),
+                            debug_canvas.height(),
+                        ),
+                        present_mode: PresentMode::AutoNoVsync,
+                        transparent: true,
+                        composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
+                        ..default()
+                    }),
+                    exit_condition: ExitCondition::DontExit,
                     ..default()
-                }),
-                exit_condition: ExitCondition::DontExit,
-                ..default()
-            })
-            .set(RenderPlugin {
-                render_creation: RenderCreation::Automatic(WgpuSettings {
-                    features: WgpuFeatures::default(),
-                    backends: Some(Backends::BROWSER_WEBGPU),
+                })
+                .set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        features: WgpuFeatures::default(),
+                        backends: Some(Backends::BROWSER_WEBGPU),
+                        ..default()
+                    }),
                     ..default()
-                }),
-                ..default()
-            })
-            .disable::<LogPlugin>()
-            .disable::<WinitPlugin>()
-            .disable::<TransformPlugin>(),
-        MaterialsPlugin,
-        BigSpaceDefaultPlugins,
-        EguiPlugin::default(),
-        SettingsPlugin {},
-        DebugGizmosPlugin,
-        EditorPlugin {},
-        MaplibreGlJsPlugin,
-        MapPlugin,
-        InstanceManagementPlugin {
-            id: instance_id.clone(),
-        },
-        ExtractResourcePlugin::<AppWindows>::default(),
-    ));
+                })
+                .disable::<LogPlugin>()
+                .disable::<WinitPlugin>()
+                .disable::<TransformPlugin>(),
+            MaterialsPlugin,
+            BigSpaceDefaultPlugins,
+            EguiPlugin::default(),
+            SettingsPlugin {},
+            DebugGizmosPlugin,
+            EditorPlugin {},
+            MaplibreGlJsPlugin,
+            MapPlugin,
+            InstanceManagementPlugin {
+                command_queue: command_queue.clone(),
+            },
+            ExtractResourcePlugin::<AppWindows>::default(),
+        ));
 
-    if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-        render_app.add_systems(
-            Render,
-            release_inactive_debug_window_surface
-                .in_set(RenderSystems::Render)
-                .after(bevy::render::renderer::render_system),
-        );
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.add_systems(
+                Render,
+                release_inactive_debug_window_surface
+                    .in_set(RenderSystems::Render)
+                    .after(bevy::render::renderer::render_system),
+            );
+        }
+
+        app.insert_resource(ClearColor(Color::NONE));
+
+        app.insert_resource(DirectionalLightShadowMap { size: 4096 });
+
+        app.insert_resource(EguiGlobalSettings {
+            // requires winit which is disabled as windows need manual management
+            enable_ime: false,
+            ..default()
+        });
+
+        app.insert_resource(AppWindows {
+            debug: None,
+            texture: None,
+        });
+
+        app.insert_non_send_resource(OffscreenCanvases {
+            debug: debug_canvas,
+            texture: texture_canvas,
+        });
+
+        app.add_systems(PreStartup, setup_offscreen_windows);
+        app.add_systems(PreUpdate, setup_map_for_integration);
+
+        Self {
+            inner: Rc::new(BevyInstanceInner {
+                managed_app: RefCell::new(ManagedBevyApp {
+                    app: Some(app),
+                    plugins_cleaned: false,
+                }),
+                command_queue,
+            }),
+        }
     }
-
-    app.insert_resource(ClearColor(Color::NONE));
-
-    app.insert_resource(DirectionalLightShadowMap { size: 4096 });
-
-    app.insert_resource(EguiGlobalSettings {
-        // requires winit which is disabled as windows need manual management
-        enable_ime: false,
-        ..default()
-    });
-
-    app.insert_resource(AppWindows {
-        debug: None,
-        texture: None,
-    });
-
-    app.insert_non_send_resource(OffscreenCanvases {
-        debug: debug_canvas,
-        texture: texture_canvas,
-    });
-
-    app.add_systems(PreStartup, setup_offscreen_windows);
-    app.add_systems(PreUpdate, setup_map_for_integration);
-
-    let shared_app = Rc::new(RefCell::new(ManagedBevyApp {
-        app: Some(app),
-        plugins_cleaned: false,
-    }));
-
-    BEVY_APPS.with(|apps| {
-        apps.borrow_mut().insert(instance_id, shared_app);
-    });
 }
 
 fn raw_handle(canvas: &OffscreenCanvas) -> RawHandleWrapper {
@@ -244,17 +254,13 @@ fn release_inactive_debug_window_surface(
 }
 
 #[wasm_bindgen]
-pub fn tick(instance_id: String) -> Result<(), String> {
-    BEVY_APPS.with(|apps| {
-        let apps = apps.borrow();
-        let Some(managed_app) = apps.get(&instance_id) else {
-            return Err(format!("Instance {instance_id} is not mounted"));
-        };
-        let mut managed_app = managed_app.borrow_mut();
+impl BevyInstance {
+    pub fn tick(&self) -> Result<(), String> {
+        let mut managed_app = self.inner.managed_app.borrow_mut();
 
         if !managed_app.plugins_cleaned {
             let Some(app) = managed_app.app.as_mut() else {
-                return Err(format!("Instance {instance_id} is not mounted"));
+                return Err("Bevy instance is not mounted".to_string());
             };
             if !finish_app_plugins_if_ready(app) {
                 return Ok(());
@@ -263,170 +269,144 @@ pub fn tick(instance_id: String) -> Result<(), String> {
         }
 
         let Some(app) = managed_app.app.as_mut() else {
-            return Err(format!("Instance {instance_id} is not mounted"));
+            return Err("Bevy instance is not mounted".to_string());
         };
         app.update();
         Ok(())
-    })
-}
+    }
 
-#[wasm_bindgen]
-pub fn resize(
-    instance_id: String,
-    debug_width: u32,
-    debug_height: u32,
-    map_width: u32,
-    map_height: u32,
-    scale_factor: f32,
-) -> Result<(), String> {
-    with_app_world(&instance_id, |world| {
-        let app_windows = world.resource::<AppWindows>().clone();
-        let (Some(debug), Some(texture)) = (app_windows.debug, app_windows.texture) else {
-            return;
-        };
-        resize_window(world, debug, debug_width, debug_height, scale_factor);
-        resize_window(world, texture, map_width, map_height, scale_factor);
-    })
-}
+    pub fn resize(
+        &self,
+        debug_width: u32,
+        debug_height: u32,
+        map_width: u32,
+        map_height: u32,
+        scale_factor: f32,
+    ) -> Result<(), String> {
+        self.with_app_world(|world| {
+            let app_windows = world.resource::<AppWindows>().clone();
+            let (Some(debug), Some(texture)) = (app_windows.debug, app_windows.texture) else {
+                return;
+            };
+            resize_window(world, debug, debug_width, debug_height, scale_factor);
+            resize_window(world, texture, map_width, map_height, scale_factor);
+        })
+    }
 
-#[wasm_bindgen]
-pub fn forward_focus(instance_id: String, focused: bool) -> Result<(), String> {
-    with_debug_window(&instance_id, |world, window| {
-        let event = WindowFocused { window, focused };
-        world.write_message(event.clone());
-        world.write_message(BevyWindowEvent::WindowFocused(event));
-    })
-}
+    pub fn forward_focus(&self, focused: bool) -> Result<(), String> {
+        self.with_debug_window(|world, window| {
+            let event = WindowFocused { window, focused };
+            world.write_message(event.clone());
+            world.write_message(BevyWindowEvent::WindowFocused(event));
+        })
+    }
 
-#[wasm_bindgen]
-pub fn forward_cursor_entered(instance_id: String) -> Result<(), String> {
-    with_debug_window(&instance_id, |world, window| {
-        let event = CursorEntered { window };
-        world.write_message(event.clone());
-        world.write_message(BevyWindowEvent::CursorEntered(event));
-    })
-}
+    pub fn forward_cursor_entered(&self) -> Result<(), String> {
+        self.with_debug_window(|world, window| {
+            let event = CursorEntered { window };
+            world.write_message(event.clone());
+            world.write_message(BevyWindowEvent::CursorEntered(event));
+        })
+    }
 
-#[wasm_bindgen]
-pub fn forward_cursor_left(instance_id: String) -> Result<(), String> {
-    with_debug_window(&instance_id, |world, window| {
-        if let Some(mut window_component) = world.get_mut::<Window>(window) {
-            window_component.set_cursor_position(None);
-        }
+    pub fn forward_cursor_left(&self) -> Result<(), String> {
+        self.with_debug_window(|world, window| {
+            if let Some(mut window_component) = world.get_mut::<Window>(window) {
+                window_component.set_cursor_position(None);
+            }
 
-        let event = CursorLeft { window };
-        world.write_message(event.clone());
-        world.write_message(BevyWindowEvent::CursorLeft(event));
-    })
-}
+            let event = CursorLeft { window };
+            world.write_message(event.clone());
+            world.write_message(BevyWindowEvent::CursorLeft(event));
+        })
+    }
 
-#[wasm_bindgen]
-pub fn forward_cursor_moved(
-    instance_id: String,
-    x: f32,
-    y: f32,
-    delta_x: f32,
-    delta_y: f32,
-) -> Result<(), String> {
-    with_debug_window(&instance_id, |world, window| {
-        let position = Vec2::new(x, y);
-        let delta = Vec2::new(delta_x, delta_y);
+    pub fn forward_cursor_moved(
+        &self,
+        x: f32,
+        y: f32,
+        delta_x: f32,
+        delta_y: f32,
+    ) -> Result<(), String> {
+        self.with_debug_window(|world, window| {
+            let position = Vec2::new(x, y);
+            let delta = Vec2::new(delta_x, delta_y);
 
-        if let Some(mut window_component) = world.get_mut::<Window>(window) {
-            window_component.set_cursor_position(Some(position));
-        }
+            if let Some(mut window_component) = world.get_mut::<Window>(window) {
+                window_component.set_cursor_position(Some(position));
+            }
 
-        let event = CursorMoved {
-            window,
-            position,
-            delta: Some(delta),
-        };
-        world.write_message(event.clone());
-        world.write_message(BevyWindowEvent::CursorMoved(event));
-        world.write_message(MouseMotion { delta });
-        world.write_message(BevyWindowEvent::MouseMotion(MouseMotion { delta }));
-    })
-}
+            let event = CursorMoved {
+                window,
+                position,
+                delta: Some(delta),
+            };
+            world.write_message(event.clone());
+            world.write_message(BevyWindowEvent::CursorMoved(event));
+            world.write_message(MouseMotion { delta });
+            world.write_message(BevyWindowEvent::MouseMotion(MouseMotion { delta }));
+        })
+    }
 
-#[wasm_bindgen]
-pub fn forward_mouse_button(instance_id: String, button: i16, pressed: bool) -> Result<(), String> {
-    with_debug_window(&instance_id, |world, window| {
-        let event = MouseButtonInput {
-            button: web_mouse_button(button),
-            state: button_state(pressed),
-            window,
-        };
-        world.write_message(event);
-        world.write_message(BevyWindowEvent::MouseButtonInput(event));
-    })
-}
+    pub fn forward_mouse_button(&self, button: i16, pressed: bool) -> Result<(), String> {
+        self.with_debug_window(|world, window| {
+            let event = MouseButtonInput {
+                button: web_mouse_button(button),
+                state: button_state(pressed),
+                window,
+            };
+            world.write_message(event);
+            world.write_message(BevyWindowEvent::MouseButtonInput(event));
+        })
+    }
 
-#[wasm_bindgen]
-pub fn forward_mouse_wheel(
-    instance_id: String,
-    delta_x: f32,
-    delta_y: f32,
-    delta_mode: u32,
-) -> Result<(), String> {
-    with_debug_window(&instance_id, |world, window| {
-        let event = MouseWheel {
-            unit: if delta_mode == 1 {
-                MouseScrollUnit::Line
-            } else {
-                MouseScrollUnit::Pixel
-            },
-            x: delta_x,
-            y: -delta_y,
-            window,
-        };
-        world.write_message(event);
-        world.write_message(BevyWindowEvent::MouseWheel(event));
-    })
-}
+    pub fn forward_mouse_wheel(
+        &self,
+        delta_x: f32,
+        delta_y: f32,
+        delta_mode: u32,
+    ) -> Result<(), String> {
+        self.with_debug_window(|world, window| {
+            let event = MouseWheel {
+                unit: if delta_mode == 1 {
+                    MouseScrollUnit::Line
+                } else {
+                    MouseScrollUnit::Pixel
+                },
+                x: delta_x,
+                y: -delta_y,
+                window,
+            };
+            world.write_message(event);
+            world.write_message(BevyWindowEvent::MouseWheel(event));
+        })
+    }
 
-#[wasm_bindgen]
-pub fn forward_keyboard_input(
-    instance_id: String,
-    code: String,
-    key: String,
-    pressed: bool,
-    repeat: bool,
-) -> Result<(), String> {
-    with_debug_window(&instance_id, |world, window| {
-        let logical_key = web_logical_key(&key);
-        let text = match (&logical_key, pressed) {
-            (Key::Character(text), true) => Some(text.clone()),
-            _ => None,
-        };
-        let event = KeyboardInput {
-            key_code: web_key_code(&code),
-            logical_key,
-            state: button_state(pressed),
-            text,
-            repeat,
-            window,
-        };
-        world.write_message(event.clone());
-        world.write_message(BevyWindowEvent::KeyboardInput(event));
-    })
-}
-
-pub fn unmount_instance(instance_id: &str) -> Result<(), String> {
-    BEVY_APPS.with(|apps| {
-        let removed = apps
-            .borrow_mut()
-            .remove(instance_id)
-            .map(|app| app.borrow_mut().app.take().is_some())
-            .unwrap_or(false);
-        unregister_instance(instance_id);
-
-        if removed {
-            info!("Unmounted Bevy instance {}", instance_id);
-            Ok(())
-        } else {
-            Err(format!("Instance {instance_id} is not mounted"))
-        }
-    })
+    pub fn forward_keyboard_input(
+        &self,
+        code: String,
+        key: String,
+        pressed: bool,
+        repeat: bool,
+    ) -> Result<(), String> {
+        self.with_debug_window(|world, window| {
+            let logical_key = web_logical_key(&key);
+            let text = match (&logical_key, pressed) {
+                (Key::Character(text), true) => Some(text.clone()),
+                _ => None,
+            };
+            let event = KeyboardInput {
+                key_code: web_key_code(&code),
+                logical_key,
+                state: button_state(pressed),
+                text,
+                repeat,
+                window,
+            };
+            world.write_message(event.clone());
+            world.write_message(BevyWindowEvent::KeyboardInput(event));
+        })
+    }
 }
 
 fn finish_app_plugins_if_ready(app: &mut App) -> bool {
@@ -462,27 +442,60 @@ fn setup_map_for_integration(
     }
 }
 
-fn with_app_world(instance_id: &str, f: impl FnOnce(&mut World)) -> Result<(), String> {
-    BEVY_APPS.with(|apps| {
-        let apps = apps.borrow();
-        let Some(managed_app) = apps.get(instance_id) else {
-            return Err(format!("Instance {instance_id} is not mounted"));
-        };
-        let mut managed_app = managed_app.borrow_mut();
+impl BevyInstance {
+    pub(crate) fn enqueue(
+        &self,
+        command: impl FnOnce(&mut World) + Send + 'static,
+    ) -> Result<(), String> {
+        self.inner.enqueue(command)
+    }
+
+    pub(crate) fn weak_inner(&self) -> Weak<BevyInstanceInner> {
+        Rc::downgrade(&self.inner)
+    }
+
+    fn with_app_world(&self, f: impl FnOnce(&mut World)) -> Result<(), String> {
+        self.inner.with_app_world(f)
+    }
+
+    fn with_debug_window(&self, f: impl FnOnce(&mut World, Entity)) -> Result<(), String> {
+        self.with_app_world(|world| {
+            if let Some(debug) = world.resource::<AppWindows>().debug {
+                f(world, debug);
+            }
+        })
+    }
+}
+
+impl BevyInstanceInner {
+    pub(crate) fn enqueue(
+        &self,
+        command: impl FnOnce(&mut World) + Send + 'static,
+    ) -> Result<(), String> {
+        if self.managed_app.borrow().app.is_none() {
+            return Err("Bevy instance is not mounted".to_string());
+        }
+
+        self.command_queue.enqueue(command);
+        Ok(())
+    }
+
+    fn with_app_world(&self, f: impl FnOnce(&mut World)) -> Result<(), String> {
+        let mut managed_app = self.managed_app.borrow_mut();
         let Some(app) = managed_app.app.as_mut() else {
-            return Err(format!("Instance {instance_id} is not mounted"));
+            return Err("Bevy instance is not mounted".to_string());
         };
         f(app.world_mut());
         Ok(())
-    })
+    }
 }
 
-fn with_debug_window(instance_id: &str, f: impl FnOnce(&mut World, Entity)) -> Result<(), String> {
-    with_app_world(instance_id, |world| {
-        if let Some(debug) = world.resource::<AppWindows>().debug {
-            f(world, debug);
-        }
-    })
+impl Drop for BevyInstance {
+    fn drop(&mut self) {
+        self.inner.managed_app.borrow_mut().app.take();
+        self.inner.command_queue.clear();
+        info!("Dropped Bevy instance");
+    }
 }
 
 fn resize_window(world: &mut World, entity: Entity, width: u32, height: u32, scale_factor: f32) {

@@ -1,4 +1,4 @@
-use crate::app::instance_management::commands::enqueue_instance_command;
+use crate::app::main::{BevyInstance, BevyInstanceInner};
 use crate::app::maplibre_gl_js::integration::{
     MaplibreMapIntegration, NEXT_INTEGRATION_ID, find_map_integration, with_map_data_mut,
 };
@@ -7,9 +7,18 @@ use crate::app::maplibre_gl_js::utils::dem_data::DEMData;
 use crate::app::maplibre_gl_js::utils::terrain::TerrainData;
 use anyhow::anyhow;
 use bevy::math::DMat4;
-use bevy::prelude::{Name, default};
+use bevy::prelude::{Name, World, default};
+use std::cell::Cell;
 use std::collections::HashSet;
+use std::rc::Weak;
 use wasm_bindgen::prelude::wasm_bindgen;
+
+#[wasm_bindgen]
+pub struct MaplibreIntegration {
+    instance: Weak<BevyInstanceInner>,
+    integration_id: u32,
+    removed: Cell<bool>,
+}
 
 fn parse_tile_key(tile: &str) -> anyhow::Result<CanonicalTileId> {
     let mut parts = tile.split('/');
@@ -39,198 +48,215 @@ fn parse_terrain_matrix(encoded: &str) -> anyhow::Result<DMat4> {
 }
 
 #[wasm_bindgen]
-pub fn create_map_integration(instance_id: String) -> Result<u32, String> {
-    let id = NEXT_INTEGRATION_ID.with(|next| {
-        let id = next.get();
-        next.set(id.saturating_add(1).max(1));
-        id
-    });
+impl BevyInstance {
+    pub fn create_map_integration(&self) -> Result<MaplibreIntegration, String> {
+        let id = NEXT_INTEGRATION_ID.with(|next| {
+            let id = next.get();
+            next.set(id.saturating_add(1).max(1));
+            id
+        });
 
-    enqueue_instance_command(&instance_id, move |world| {
-        world.spawn((
-            MaplibreMapIntegration { id, ..default() },
-            Name::new(format!("MapLibre map integration {id}")),
-        ));
-    })
-    .map_err(|err| err.to_string())?;
+        self.enqueue(move |world| {
+            world.spawn((
+                MaplibreMapIntegration { id, ..default() },
+                Name::new(format!("MapLibre map integration {id}")),
+            ));
+        })?;
 
-    Ok(id)
+        Ok(MaplibreIntegration {
+            instance: self.weak_inner(),
+            integration_id: id,
+            removed: Cell::new(false),
+        })
+    }
 }
 
 #[wasm_bindgen]
-pub fn remove_map_integration(instance_id: String, integration_id: u32) -> Result<(), String> {
-    enqueue_instance_command(&instance_id, move |world| {
-        if let Some(entity) = find_map_integration(world, integration_id) {
-            world.despawn(entity);
+impl MaplibreIntegration {
+    #[allow(clippy::too_many_arguments)]
+    pub fn sync_view(
+        &self,
+        width: f64,
+        height: f64,
+        zoom: f64,
+        pitch: f64,
+        bearing: f64,
+        center_lng: f64,
+        center_lat: f64,
+        main_matrix: Vec<f64>,
+    ) -> Result<(), String> {
+        if main_matrix.len() != 16 {
+            return Err(format!(
+                "Expected 16 main matrix values, got {}",
+                main_matrix.len()
+            ));
         }
-    })
-    .map_err(|err| err.to_string())
-}
 
-#[allow(clippy::too_many_arguments)]
-#[wasm_bindgen]
-pub fn sync_view(
-    instance_id: String,
-    integration_id: u32,
-    width: f64,
-    height: f64,
-    zoom: f64,
-    pitch: f64,
-    bearing: f64,
-    center_lng: f64,
-    center_lat: f64,
-    main_matrix: Vec<f64>,
-) -> Result<(), String> {
-    if main_matrix.len() != 16 {
-        return Err(format!(
-            "Expected 16 main matrix values, got {}",
-            main_matrix.len()
-        ));
+        let view = MlView {
+            width,
+            height,
+            zoom,
+            pitch,
+            bearing,
+            center_lng,
+            center_lat,
+            main_matrix,
+        };
+        let integration_id = self.integration_id;
+
+        self.enqueue(move |world| {
+            with_map_data_mut(world, integration_id, |map_data| {
+                map_data.view = view;
+            });
+        })
     }
 
-    let view = MlView {
-        width,
-        height,
-        zoom,
-        pitch,
-        bearing,
-        center_lng,
-        center_lat,
-        main_matrix,
-    };
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_terrain_tile_data(
+        &self,
+        tile_key: String,
+        hash: String,
+        stride: u32,
+        dim: u32,
+        min: f64,
+        max: f64,
+        red_factor: f64,
+        green_factor: f64,
+        blue_factor: f64,
+        base_shift: f64,
+        terrain_matrix_json: String,
+        data: Vec<u32>,
+    ) -> Result<(), String> {
+        let tile_key = parse_tile_key(&tile_key).map_err(|err| err.to_string())?;
+        let terrain_matrix =
+            parse_terrain_matrix(&terrain_matrix_json).map_err(|err| err.to_string())?;
 
-    enqueue_instance_command(&instance_id, move |world| {
-        with_map_data_mut(world, integration_id, |map_data| {
-            map_data.view = view;
-        });
-    })
-    .map_err(|err| err.to_string())
-}
-
-#[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
-pub fn update_terrain_tile_data(
-    instance_id: String,
-    integration_id: u32,
-    tile_key: String,
-    hash: String,
-    stride: u32,
-    dim: u32,
-    min: f64,
-    max: f64,
-    red_factor: f64,
-    green_factor: f64,
-    blue_factor: f64,
-    base_shift: f64,
-    terrain_matrix_json: String,
-    data: Vec<u32>,
-) -> Result<(), String> {
-    let tile_key = parse_tile_key(&tile_key).map_err(|err| err.to_string())?;
-    let terrain_matrix =
-        parse_terrain_matrix(&terrain_matrix_json).map_err(|err| err.to_string())?;
-
-    let tile_data = MlTerrainTile {
-        id: tile_key,
-        hash,
-        terrain_data: TerrainData {
-            dem_data: DEMData {
-                data,
-                stride,
-                dim,
-                min,
-                max,
-                red_factor,
-                green_factor,
-                blue_factor,
-                base_shift,
+        let tile_data = MlTerrainTile {
+            id: tile_key,
+            hash,
+            terrain_data: TerrainData {
+                dem_data: DEMData {
+                    data,
+                    stride,
+                    dim,
+                    min,
+                    max,
+                    red_factor,
+                    green_factor,
+                    blue_factor,
+                    base_shift,
+                },
+                terrain_matrix,
             },
-            terrain_matrix,
-        },
-    };
+        };
+        let integration_id = self.integration_id;
 
-    enqueue_instance_command(&instance_id, move |world| {
-        with_map_data_mut(world, integration_id, |map_data| {
-            map_data.terrain.tiles.insert(tile_key, tile_data);
-        });
-    })
-    .map_err(|err| err.to_string())
+        self.enqueue(move |world| {
+            with_map_data_mut(world, integration_id, |map_data| {
+                map_data.terrain.tiles.insert(tile_key, tile_data);
+            });
+        })
+    }
+
+    pub fn remove_terrain_tile_data(&self, tile_key: String) -> Result<(), String> {
+        let tile_key = parse_tile_key(&tile_key).map_err(|err| err.to_string())?;
+        let integration_id = self.integration_id;
+
+        self.enqueue(move |world| {
+            with_map_data_mut(world, integration_id, |map_data| {
+                map_data.terrain.tiles.remove(&tile_key);
+            });
+        })
+    }
+
+    pub fn update_source_tile(
+        &self,
+        source_id: String,
+        z: u32,
+        x: u32,
+        y: u32,
+        data: Vec<u8>,
+    ) -> Result<(), String> {
+        let tile_id = CanonicalTileId { z, x, y };
+        let integration_id = self.integration_id;
+
+        self.enqueue(move |world| {
+            with_map_data_mut(world, integration_id, |map_data| {
+                if let Err(err) = map_data.data.update_tile(source_id.clone(), tile_id, data) {
+                    tracing::warn!(
+                        "Failed to parse MapLibre source tile {source_id}/{tile_id:?}: {err}"
+                    );
+                }
+            });
+        })
+    }
+
+    pub fn remove_source_tile(
+        &self,
+        source_id: String,
+        z: u32,
+        x: u32,
+        y: u32,
+    ) -> Result<(), String> {
+        let tile_id = CanonicalTileId { z, x, y };
+        let integration_id = self.integration_id;
+
+        self.enqueue(move |world| {
+            with_map_data_mut(world, integration_id, |map_data| {
+                map_data.data.remove_tile(&source_id, &tile_id);
+            });
+        })
+    }
+
+    pub fn sync_terrain_active_tile_ids(&self, active_tile_ids: Vec<String>) -> Result<(), String> {
+        let active_tile_ids = active_tile_ids
+            .into_iter()
+            .map(|v| parse_tile_key(&v))
+            .collect::<Result<HashSet<_>, _>>()
+            .map_err(|err| err.to_string())?;
+        let integration_id = self.integration_id;
+
+        self.enqueue(move |world| {
+            with_map_data_mut(world, integration_id, |map_data| {
+                map_data.terrain.active_tile_ids = active_tile_ids;
+            });
+        })
+    }
 }
 
-#[wasm_bindgen]
-pub fn remove_terrain_tile_data(
-    instance_id: String,
-    integration_id: u32,
-    tile_key: String,
-) -> Result<(), String> {
-    let tile_key = parse_tile_key(&tile_key).map_err(|err| err.to_string())?;
+impl MaplibreIntegration {
+    fn enqueue(&self, command: impl FnOnce(&mut World) + Send + 'static) -> Result<(), String> {
+        if self.removed.get() {
+            return Err("MapLibre integration has been removed".to_string());
+        }
 
-    enqueue_instance_command(&instance_id, move |world| {
-        with_map_data_mut(world, integration_id, |map_data| {
-            map_data.terrain.tiles.remove(&tile_key);
-        });
-    })
-    .map_err(|err| err.to_string())
-}
+        let Some(instance) = self.instance.upgrade() else {
+            return Err("Bevy instance is not mounted".to_string());
+        };
 
-#[wasm_bindgen]
-pub fn update_source_tile(
-    instance_id: String,
-    integration_id: u32,
-    source_id: String,
-    z: u32,
-    x: u32,
-    y: u32,
-    data: Vec<u8>,
-) -> Result<(), String> {
-    let tile_id = CanonicalTileId { z, x, y };
+        instance.enqueue(command)
+    }
 
-    enqueue_instance_command(&instance_id, move |world| {
-        with_map_data_mut(world, integration_id, |map_data| {
-            if let Err(err) = map_data.data.update_tile(source_id.clone(), tile_id, data) {
-                tracing::warn!(
-                    "Failed to parse MapLibre source tile {source_id}/{tile_id:?}: {err}"
-                );
+    fn remove_from_world(&self) {
+        if self.removed.replace(true) {
+            return;
+        }
+
+        let Some(instance) = self.instance.upgrade() else {
+            return;
+        };
+        let integration_id = self.integration_id;
+
+        let _ = instance.enqueue(move |world| {
+            if let Some(entity) = find_map_integration(world, integration_id) {
+                world.despawn(entity);
             }
         });
-    })
-    .map_err(|err| err.to_string())
+    }
 }
 
-#[wasm_bindgen]
-pub fn remove_source_tile(
-    instance_id: String,
-    integration_id: u32,
-    source_id: String,
-    z: u32,
-    x: u32,
-    y: u32,
-) -> Result<(), String> {
-    let tile_id = CanonicalTileId { z, x, y };
-
-    enqueue_instance_command(&instance_id, move |world| {
-        with_map_data_mut(world, integration_id, |map_data| {
-            map_data.data.remove_tile(&source_id, &tile_id);
-        });
-    })
-    .map_err(|err| err.to_string())
-}
-
-#[wasm_bindgen]
-pub fn sync_terrain_active_tile_ids(
-    instance_id: String,
-    integration_id: u32,
-    active_tile_ids: Vec<String>,
-) -> Result<(), String> {
-    let active_tile_ids = active_tile_ids
-        .into_iter()
-        .map(|v| parse_tile_key(&v))
-        .collect::<Result<HashSet<_>, _>>()
-        .map_err(|err| err.to_string())?;
-
-    enqueue_instance_command(&instance_id, move |world| {
-        with_map_data_mut(world, integration_id, |map_data| {
-            map_data.terrain.active_tile_ids = active_tile_ids;
-        });
-    })
-    .map_err(|err| err.to_string())
+impl Drop for MaplibreIntegration {
+    fn drop(&mut self) {
+        self.remove_from_world();
+    }
 }

@@ -1,4 +1,4 @@
-use crate::app::instance_management::commands::enqueue_instance_command;
+use crate::app::main::BevyInstance;
 use crate::app::map::camera::MapViewCameraSettings as MapViewCameraSettingsBevy;
 use crate::app::map::core::MapViewSettings as MapViewSettingsBevy;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -49,14 +49,6 @@ impl From<MapViewSettings> for MapViewSettingsBevy {
 }
 
 #[wasm_bindgen]
-pub fn set_map_view_settings(instance_id: String, settings: MapViewSettings) -> Result<(), String> {
-    enqueue_instance_command(&instance_id, move |world| {
-        *world.get_resource_mut::<MapViewSettingsBevy>().unwrap() = settings.into();
-    })
-    .map_err(|err| err.to_string())
-}
-
-#[wasm_bindgen]
 pub struct MapViewCameraSettings {
     pub enable_color_grading: bool,
     pub enable_tonemapping: bool,
@@ -98,14 +90,21 @@ impl From<MapViewCameraSettings> for MapViewCameraSettingsBevy {
 }
 
 #[wasm_bindgen]
-pub fn set_map_view_camera_settings(
-    instance_id: String,
-    settings: MapViewCameraSettings,
-) -> Result<(), String> {
-    enqueue_instance_command(&instance_id, move |world| {
-        *world
-            .get_resource_mut::<MapViewCameraSettingsBevy>()
-            .unwrap() = settings.into();
-    })
-    .map_err(|err| err.to_string())
+impl BevyInstance {
+    pub fn set_map_view_settings(&self, settings: MapViewSettings) -> Result<(), String> {
+        self.enqueue(move |world| {
+            *world.get_resource_mut::<MapViewSettingsBevy>().unwrap() = settings.into();
+        })
+    }
+
+    pub fn set_map_view_camera_settings(
+        &self,
+        settings: MapViewCameraSettings,
+    ) -> Result<(), String> {
+        self.enqueue(move |world| {
+            *world
+                .get_resource_mut::<MapViewCameraSettingsBevy>()
+                .unwrap() = settings.into();
+        })
+    }
 }

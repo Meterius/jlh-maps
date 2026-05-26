@@ -8,21 +8,9 @@ import {
   type ShallowRef,
 } from 'vue'
 import {
+  BevyInstance as BevyInstanceBevy,
   MapViewCameraSettings as MapViewCameraSettingsBevy,
   MapViewSettings as MapViewSettingsBevy,
-  forward_cursor_entered,
-  forward_cursor_left,
-  forward_cursor_moved,
-  forward_focus,
-  forward_keyboard_input,
-  forward_mouse_button,
-  forward_mouse_wheel,
-  mount as mountBevyInstance,
-  resize,
-  set_map_view_camera_settings,
-  set_map_view_settings,
-  tick as tickBevyInstance,
-  unmount as unmountBevyInstance,
 } from 'jlh_maps_app'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import { onScopeDisposeLifo } from '@/composables/helper.ts'
@@ -62,6 +50,7 @@ interface BevyInstanceState {
 
   debugOffscreenCanvas: ShallowRef<OffscreenCanvas | null>
   textureOffscreenCanvas: ShallowRef<OffscreenCanvas | null>
+  bevyInstance: ShallowRef<BevyInstanceBevy | null>
 
   mapViewSettings: Ref<BevyMapViewSettings>
   mapViewCameraSettings: Ref<BevyMapViewCameraSettings>
@@ -89,6 +78,7 @@ export function mountBevy(
     maplibreCanvas: shallowRef(null),
     debugOffscreenCanvas: shallowRef(null),
     textureOffscreenCanvas: shallowRef(null),
+    bevyInstance: shallowRef(null),
     mapViewSettings: ref({
       enable_window_cameras: false,
       enable_buildings: true,
@@ -164,19 +154,20 @@ export function mountBevy(
   watchEffect(() => {
     if (!state.isMounted.value) return
 
-    set_map_view_settings(instanceId, createMapViewSettingsSnapshot(state.mapViewSettings.value))
+    state.bevyInstance.value?.set_map_view_settings(
+      createMapViewSettingsSnapshot(state.mapViewSettings.value),
+    )
   })
 
   watchEffect(() => {
     if (!state.isMounted.value) return
 
-    set_map_view_camera_settings(
-      instanceId,
+    state.bevyInstance.value?.set_map_view_camera_settings(
       createMapViewCameraSettingsSnapshot(state.mapViewCameraSettings.value),
     )
   })
 
-  useForwardDebugCanvasEvents(state.debugCanvas, state.isMounted, instanceId)
+  useForwardDebugCanvasEvents(state.debugCanvas, state.isMounted, state.bevyInstance)
 
   onScopeDisposeLifo(() => {
     disposeBevyInstance(instanceId)
@@ -196,12 +187,14 @@ export function useBevy(instanceId: string) {
     textureCanvas: state.maplibreCanvas,
     debugOffscreenCanvas: state.debugOffscreenCanvas,
     textureOffscreenCanvas: state.textureOffscreenCanvas,
+    bevyInstance: state.bevyInstance,
     mapViewSettings: state.mapViewSettings,
     mapViewCameraSettings: state.mapViewCameraSettings,
     tick: () => {
-      if (!state.isMounted.value) return false
+      const bevyInstance = state.bevyInstance.value
+      if (!state.isMounted.value || !bevyInstance) return false
 
-      tickBevyInstance(instanceId)
+      bevyInstance.tick()
       return true
     },
   }
@@ -271,8 +264,7 @@ function mountRegisteredBevyInstance(
       maplibreSize.height,
     )
 
-    mountBevyInstance(
-      state.instanceId,
+    state.bevyInstance.value = new BevyInstanceBevy(
       state.debugOffscreenCanvas.value,
       state.textureOffscreenCanvas.value,
     )
@@ -280,11 +272,13 @@ function mountRegisteredBevyInstance(
 
     resizeMountedBevyInstance(state, debugSize, maplibreSize)
   } catch (error) {
-    const prevIsMounted = state.isMounted.value
     state.isMounted.value = false
 
-    if (prevIsMounted) {
-      unmountBevyInstance(state.instanceId)
+    const bevyInstance = state.bevyInstance.value
+    state.bevyInstance.value = null
+
+    if (bevyInstance) {
+      bevyInstance.free()
     }
 
     state.debugOffscreenCanvas.value = null
@@ -318,7 +312,8 @@ function resizeMountedBevyInstance(
   debugSize: CanvasRenderSize | null,
   maplibreSize: CanvasRenderSize | null,
 ) {
-  if (!state.isMounted.value || !debugSize || !maplibreSize) return
+  const bevyInstance = state.bevyInstance.value
+  if (!state.isMounted.value || !debugSize || !maplibreSize || !bevyInstance) return
 
   if (
     state.debugOffscreenCanvas.value &&
@@ -338,8 +333,7 @@ function resizeMountedBevyInstance(
     state.textureOffscreenCanvas.value.height = maplibreSize.height
   }
 
-  resize(
-    state.instanceId,
+  bevyInstance.resize(
     debugSize.width,
     debugSize.height,
     maplibreSize.width,
@@ -355,11 +349,13 @@ function disposeBevyInstance(instanceId: string) {
 
   bevyInstances.delete(instanceId)
 
-  const wasMounted = state.isMounted.value
   state.isMounted.value = false
 
-  if (wasMounted) {
-    unmountBevyInstance(instanceId)
+  const bevyInstance = state.bevyInstance.value
+  state.bevyInstance.value = null
+
+  if (bevyInstance) {
+    bevyInstance.free()
   }
 
   releaseAttachedCanvas(state.debugCanvas.value, instanceId)
@@ -415,7 +411,7 @@ function createMapViewCameraSettingsSnapshot(settings: BevyMapViewCameraSettings
 function useForwardDebugCanvasEvents(
   canvas: ShallowRef<HTMLCanvasElement | null>,
   isMounted: Ref<boolean>,
-  instanceId: string,
+  bevyInstance: ShallowRef<BevyInstanceBevy | null>,
 ) {
   const canvasPosition = (event: MouseEvent | PointerEvent) => {
     const currentCanvas = canvas.value
@@ -428,51 +424,60 @@ function useForwardDebugCanvasEvents(
     }
   }
 
-  const onlyMounted = (callback: () => void) => {
-    if (!isMounted.value) return
+  const onlyMounted = (callback: (bevyInstance: BevyInstanceBevy) => void) => {
+    const mountedBevyInstance = bevyInstance.value
+    if (!isMounted.value || !mountedBevyInstance) return
 
-    callback()
+    callback(mountedBevyInstance)
   }
 
   useEventListener(canvas, 'pointerenter', () => {
-    onlyMounted(() => forward_cursor_entered(instanceId))
+    onlyMounted((bevyInstance) => bevyInstance.forward_cursor_entered())
   })
 
   useEventListener(canvas, 'pointerleave', () => {
-    onlyMounted(() => forward_cursor_left(instanceId))
+    onlyMounted((bevyInstance) => bevyInstance.forward_cursor_left())
   })
 
   useEventListener(canvas, 'pointermove', (event) => {
-    if (!isMounted.value) return
+    const mountedBevyInstance = bevyInstance.value
+    if (!isMounted.value || !mountedBevyInstance) return
 
     event.preventDefault()
     const position = canvasPosition(event)
     if (!position) return
 
-    forward_cursor_moved(instanceId, position.x, position.y, event.movementX, event.movementY)
+    mountedBevyInstance.forward_cursor_moved(
+      position.x,
+      position.y,
+      event.movementX,
+      event.movementY,
+    )
   })
 
   useEventListener(canvas, 'pointerdown', (event) => {
     const currentCanvas = canvas.value
-    if (!isMounted.value || !currentCanvas) return
+    const mountedBevyInstance = bevyInstance.value
+    if (!isMounted.value || !currentCanvas || !mountedBevyInstance) return
 
     event.preventDefault()
     currentCanvas.focus({ preventScroll: true })
     if (!currentCanvas.hasPointerCapture(event.pointerId)) {
       currentCanvas.setPointerCapture(event.pointerId)
     }
-    forward_mouse_button(instanceId, event.button, true)
+    mountedBevyInstance.forward_mouse_button(event.button, true)
   })
 
   useEventListener(canvas, 'pointerup', (event) => {
     const currentCanvas = canvas.value
-    if (!isMounted.value || !currentCanvas) return
+    const mountedBevyInstance = bevyInstance.value
+    if (!isMounted.value || !currentCanvas || !mountedBevyInstance) return
 
     event.preventDefault()
     if (currentCanvas.hasPointerCapture(event.pointerId)) {
       currentCanvas.releasePointerCapture(event.pointerId)
     }
-    forward_mouse_button(instanceId, event.button, false)
+    mountedBevyInstance.forward_mouse_button(event.button, false)
   })
 
   useEventListener(canvas, 'pointercancel', (event) => {
@@ -488,29 +493,32 @@ function useForwardDebugCanvasEvents(
     canvas,
     'wheel',
     (event) => {
-      if (!isMounted.value) return
+      const mountedBevyInstance = bevyInstance.value
+      if (!isMounted.value || !mountedBevyInstance) return
 
       event.preventDefault()
-      forward_mouse_wheel(instanceId, event.deltaX, event.deltaY, event.deltaMode)
+      mountedBevyInstance.forward_mouse_wheel(event.deltaX, event.deltaY, event.deltaMode)
     },
     { passive: false },
   )
 
   useEventListener(canvas, 'focus', () => {
-    onlyMounted(() => forward_focus(instanceId, true))
+    onlyMounted((bevyInstance) => bevyInstance.forward_focus(true))
   })
 
   useEventListener(canvas, 'blur', () => {
-    onlyMounted(() => forward_focus(instanceId, false))
+    onlyMounted((bevyInstance) => bevyInstance.forward_focus(false))
   })
 
   useEventListener(canvas, 'keydown', (event) => {
-    onlyMounted(() => forward_keyboard_input(instanceId, event.code, event.key, true, event.repeat))
+    onlyMounted((bevyInstance) =>
+      bevyInstance.forward_keyboard_input(event.code, event.key, true, event.repeat),
+    )
   })
 
   useEventListener(canvas, 'keyup', (event) => {
-    onlyMounted(() =>
-      forward_keyboard_input(instanceId, event.code, event.key, false, event.repeat),
+    onlyMounted((bevyInstance) =>
+      bevyInstance.forward_keyboard_input(event.code, event.key, false, event.repeat),
     )
   })
 }

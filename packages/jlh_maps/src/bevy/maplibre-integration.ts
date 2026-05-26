@@ -1,13 +1,4 @@
-import {
-  create_map_integration,
-  remove_map_integration,
-  remove_source_tile,
-  remove_terrain_tile_data,
-  sync_terrain_active_tile_ids,
-  sync_view,
-  update_source_tile,
-  update_terrain_tile_data,
-} from 'jlh_maps_app'
+import type { MaplibreIntegration as BevyMaplibreIntegration } from 'jlh_maps_app'
 import { type Map as MapLibreMap, type MapSourceDataEvent, type Tile } from 'maplibre-gl'
 import { shallowRef } from 'vue'
 import { onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
@@ -56,11 +47,13 @@ export function useMaplibreIntegration(
   watchDefinedOnce(
     () => (bevyInstance.isMounted.value ? mapInstance.map : undefined),
     (map) => {
-      const mapIntegrationId = create_map_integration(instanceId)
+      const mountedBevyInstance = bevyInstance.bevyInstance.value
+      if (!mountedBevyInstance) return
+
+      const bevyMapIntegration = mountedBevyInstance.create_map_integration()
       const integration = new MaplibreGlJsIntegration(
         map,
-        instanceId,
-        mapIntegrationId,
+        bevyMapIntegration,
         options.featureSourceIds ?? [],
       )
       integration.start()
@@ -69,7 +62,9 @@ export function useMaplibreIntegration(
 
       onWatcherCleanupLifo(() => {
         integration.stop()
-        remove_map_integration(instanceId, mapIntegrationId)
+        if (mapIntegration.value === integration) {
+          mapIntegration.value = null
+        }
       })
     },
   )
@@ -97,8 +92,7 @@ class MaplibreGlJsIntegration {
 
   constructor(
     private readonly map: MapLibreMap,
-    private readonly instanceId: string,
-    private readonly mapIntegrationId: number,
+    private readonly bevyMapIntegration: BevyMaplibreIntegration,
     private readonly featureSourceIds: string[],
   ) {}
 
@@ -111,6 +105,8 @@ class MaplibreGlJsIntegration {
   }
 
   syncOnRender() {
+    if (this.stopped) return
+
     this.syncView()
     this.syncTerrain()
     this.syncVisibleSourceTiles()
@@ -120,18 +116,25 @@ class MaplibreGlJsIntegration {
     if (this.stopped) return
     this.stopped = true
 
-    if (this.syncViewFrame !== undefined) {
-      cancelAnimationFrame(this.syncViewFrame)
-      this.syncViewFrame = undefined
-    }
-    if (this.syncDataFrame !== undefined) {
-      cancelAnimationFrame(this.syncDataFrame)
-      this.syncDataFrame = undefined
-    }
+    try {
+      if (this.syncViewFrame !== undefined) {
+        cancelAnimationFrame(this.syncViewFrame)
+        this.syncViewFrame = undefined
+      }
+      if (this.syncDataFrame !== undefined) {
+        cancelAnimationFrame(this.syncDataFrame)
+        this.syncDataFrame = undefined
+      }
 
-    this.removeTerrainData([...this.terrainDataHashes.keys()])
-    this.removeTransmittedSourceTiles([...this.transmittedSourceTiles.keys()])
-    this.unsubscribeCallbacks.splice(0).forEach((unsubscribe) => unsubscribe())
+      this.unsubscribeCallbacks.splice(0).forEach((unsubscribe) => unsubscribe())
+      this.terrainDataHashes.clear()
+      this.transmittedSourceTiles.clear()
+      this.pendingChangedSourceTiles.clear()
+      this.activeTerrainTileKeys.clear()
+      this.sourceTerrainTileKeys.clear()
+    } finally {
+      this.bevyMapIntegration.free()
+    }
   }
 
   private scheduleSyncData() {
@@ -149,9 +152,7 @@ class MaplibreGlJsIntegration {
     const mainMatrix = this.getMainMatrix()
     if (!mainMatrix) return
 
-    sync_view(
-      this.instanceId,
-      this.mapIntegrationId,
+    this.bevyMapIntegration.sync_view(
       canvas.width,
       canvas.height,
       this.map.getZoom(),
@@ -248,9 +249,7 @@ class MaplibreGlJsIntegration {
       return
     }
 
-    update_source_tile(
-      this.instanceId,
-      this.mapIntegrationId,
+    this.bevyMapIntegration.update_source_tile(
       sourceId,
       tileCoord.z,
       tileCoord.x,
@@ -300,9 +299,7 @@ class MaplibreGlJsIntegration {
 
       this.pruneTerrainData()
 
-      sync_terrain_active_tile_ids(this.instanceId, this.mapIntegrationId, [
-        ...activeTerrainTileIds,
-      ])
+      this.bevyMapIntegration.sync_terrain_active_tile_ids([...activeTerrainTileIds])
 
       for (const tile of activeTerrainTiles) {
         const key = this.getTileKey(tile.tileID.canonical)
@@ -324,9 +321,7 @@ class MaplibreGlJsIntegration {
           .map((tileId) => this.getTileKey(tileId.canonical)),
       )
 
-      sync_terrain_active_tile_ids(this.instanceId, this.mapIntegrationId, [
-        ...activeTerrainTileIds,
-      ])
+      this.bevyMapIntegration.sync_terrain_active_tile_ids([...activeTerrainTileIds])
     }
   }
 
@@ -355,9 +350,7 @@ class MaplibreGlJsIntegration {
     const hash = this.getTerrainDataHash(tileKey, renderTile ?? terrainData.tile, dem)
     if (this.terrainDataHashes.get(tileKey) === hash) return
 
-    update_terrain_tile_data(
-      this.instanceId,
-      this.mapIntegrationId,
+    this.bevyMapIntegration.update_terrain_tile_data(
       tileKey,
       hash,
       dem.stride,
@@ -378,9 +371,7 @@ class MaplibreGlJsIntegration {
     for (const tileKey of tileKeys) {
       const tile = this.transmittedSourceTiles.get(tileKey)
       if (tile) {
-        remove_source_tile(
-          this.instanceId,
-          this.mapIntegrationId,
+        this.bevyMapIntegration.remove_source_tile(
           tile.sourceId,
           tile.tileKey.z,
           tile.tileKey.x,
@@ -393,7 +384,7 @@ class MaplibreGlJsIntegration {
 
   private removeTerrainData(tileKeys: string[]) {
     for (const tileKey of tileKeys) {
-      remove_terrain_tile_data(this.instanceId, this.mapIntegrationId, tileKey)
+      this.bevyMapIntegration.remove_terrain_tile_data(tileKey)
       this.terrainDataHashes.delete(tileKey)
     }
   }
