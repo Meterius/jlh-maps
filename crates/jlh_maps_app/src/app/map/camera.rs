@@ -1,7 +1,7 @@
 use crate::app::map::transform;
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
-use crate::app::maplibre_gl_js::types::MaplibreMapViewData;
+use crate::app::maplibre_gl_js::types::MlView;
 use crate::utils::debug::SoftExpect;
 use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera::CameraProjection;
@@ -105,7 +105,7 @@ pub fn maplibre_camera_to_center_distance_world(height: f64, zoom: f64) -> f64 {
     camera_to_center_pixels / world_size_pixels * MERCATOR_WORLD_SIZE
 }
 
-fn maplibre_semantic_camera_transform(state: &MaplibreMapViewData) -> SemanticCameraTransform {
+fn maplibre_semantic_camera_transform(state: &MlView) -> SemanticCameraTransform {
     let center = transform::lng_lat_to_world(state.center_lng, state.center_lat, 0.0);
     let pitch = state.pitch.to_radians();
     let bearing = state.bearing.to_radians();

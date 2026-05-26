@@ -1,9 +1,6 @@
 use crate::app::map::transform::{MERCATOR_WORLD_SIZE, lng_lat_to_world};
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
-use crate::app::maplibre_gl_js::mvt::parse_source_layer_features;
-use crate::app::maplibre_gl_js::types::{
-    CanonicalTileId, MaplibreTerrainTileData, MaplibreTileData, SourceLayerFeature,
-};
+use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile, MlTile, MlTileFeature};
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{LngLat, MercatorCoordinate};
 use crate::app::maplibre_gl_js::utils::terrain::get_dem_elevation;
 use crate::app::maplibre_gl_js::utils::tile::get_tile_lnglat_bounds;
@@ -192,13 +189,13 @@ fn setup_feature_tile_bucket_plane_mesh(
     meshes: &mut Assets<Mesh>,
     config: FeatureTileBucketPlaneMeshConfig,
 ) {
-    let Some(tile_data) = feature_tile_data(map_int, bucket) else {
+    let Some(tile) = feature_layer_tile(map_int, bucket) else {
         return;
     };
 
-    if plane_mesh.tile_revision != Some(tile_data.revision) {
+    if plane_mesh.tile_revision != Some(tile.revision) {
         plane_mesh.clear_mesh_data();
-        plane_mesh.tile_revision = Some(tile_data.revision);
+        plane_mesh.tile_revision = Some(tile.revision);
     }
 
     let terrain_data = map_int.terrain.tiles.get(&bucket.tile_id);
@@ -212,23 +209,8 @@ fn setup_feature_tile_bucket_plane_mesh(
         return;
     }
 
-    let features =
-        match parse_source_layer_features(bucket.tile_id, tile_data, &bucket.source_layer_id) {
-            Ok(features) => features,
-            Err(err) => {
-                warn!(
-                    "Failed to parse MapLibre source tile {}/{} {:?}: {}",
-                    bucket.source_id, bucket.source_layer_id, bucket.tile_id, err
-                );
-                commands.entity(bucket_entity).try_remove::<Mesh3d>();
-                plane_mesh.mesh_handle = None;
-                plane_mesh.mesh_dirty = false;
-                return;
-            }
-        };
-
     let bounds = get_tile_lnglat_bounds(bucket.tile_id);
-    for feature in features.values() {
+    for feature in tile.features.values() {
         if append_feature_plane_mesh(
             feature,
             bucket.tile_id,
@@ -270,34 +252,21 @@ fn setup_feature_tile_bucket_edge_distance_texture(
     edge_texture: &mut FeatureTileBucketEdgeDistanceTexture,
     images: &mut Assets<Image>,
 ) {
-    let Some(tile_data) = feature_tile_data(map_int, bucket) else {
+    let Some(tile) = feature_layer_tile(map_int, bucket) else {
         return;
     };
 
-    if edge_texture.tile_revision != Some(tile_data.revision) {
+    if edge_texture.tile_revision != Some(tile.revision) {
         edge_texture.clear_raster_data();
-        edge_texture.tile_revision = Some(tile_data.revision);
+        edge_texture.tile_revision = Some(tile.revision);
     }
 
     if !edge_texture.dirty {
         return;
     }
 
-    let features =
-        match parse_source_layer_features(bucket.tile_id, tile_data, &bucket.source_layer_id) {
-            Ok(features) => features,
-            Err(err) => {
-                warn!(
-                    "Failed to parse MapLibre source tile {}/{} {:?}: {}",
-                    bucket.source_id, bucket.source_layer_id, bucket.tile_id, err
-                );
-                edge_texture.dirty = false;
-                return;
-            }
-        };
-
     let bounds = get_tile_lnglat_bounds(bucket.tile_id);
-    calculate_edge_distance_texture(bounds, &features, edge_texture);
+    calculate_edge_distance_texture(bounds, &tile.features, edge_texture);
     if let Some(image) = images.get_mut(&edge_texture.texture) {
         *image = edge_distance_image(edge_texture.resolution, &edge_texture.data);
     }
@@ -316,7 +285,7 @@ fn handle_removed_source_tile_data(
         return false;
     };
 
-    if feature_tile_data(map_int, bucket).is_some() {
+    if feature_layer_tile(map_int, bucket).is_some() {
         return true;
     }
 
@@ -352,15 +321,16 @@ fn handle_removed_feature_tile_bucket_data(
     }
 }
 
-fn feature_tile_data<'a>(
+fn feature_layer_tile<'a>(
     map_int: &'a MaplibreMapIntegration,
     bucket: &FeatureTileBucket,
-) -> Option<&'a MaplibreTileData> {
+) -> Option<&'a MlTile> {
     map_int
-        .sources
+        .data
         .sources
         .get(&bucket.source_id)
-        .and_then(|source| source.tiles.get(&bucket.tile_id))
+        .and_then(|source| source.layers.get(&bucket.source_layer_id))
+        .and_then(|layer| layer.tiles.get(&bucket.tile_id))
 }
 
 fn setup_feature_tile_bucket_plane_meshes(
@@ -419,11 +389,11 @@ fn setup_feature_tile_bucket_edge_distance_textures(
 }
 
 fn append_feature_plane_mesh(
-    feature: &SourceLayerFeature,
+    feature: &MlTileFeature,
     tile_id: CanonicalTileId,
     center: DVec3,
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
-    terrain_data: Option<&MaplibreTerrainTileData>,
+    terrain_data: Option<&MlTerrainTile>,
     altitude_config: &FeatureTileBucketPlaneMeshConfig,
     buffers: &mut FeaturePlaneMeshBuffers,
 ) -> bool {
@@ -509,11 +479,11 @@ fn json_value_as_f64(value: &JsonValue) -> Option<f64> {
 
 struct TerrainElevationTile<'a> {
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
-    terrain_data: &'a MaplibreTerrainTileData,
+    terrain_data: &'a MlTerrainTile,
 }
 
 impl<'a> TerrainElevationTile<'a> {
-    fn new(tile_id: CanonicalTileId, terrain_data: &'a MaplibreTerrainTileData) -> Self {
+    fn new(tile_id: CanonicalTileId, terrain_data: &'a MlTerrainTile) -> Self {
         Self {
             bounds: get_tile_lnglat_bounds(tile_id),
             terrain_data,
@@ -583,7 +553,7 @@ fn push_polygon_mesh(
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
     base_altitude: f64,
     top_altitude: Option<f64>,
-    terrain_data: Option<&MaplibreTerrainTileData>,
+    terrain_data: Option<&MlTerrainTile>,
     wall_normal_smooth_angle: Option<f32>,
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
@@ -878,7 +848,7 @@ fn edge_distance_image(resolution: UVec2, data: &[f32]) -> Image {
 
 fn calculate_edge_distance_texture(
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
-    features: &HashMap<u64, SourceLayerFeature>,
+    features: &HashMap<u64, MlTileFeature>,
     edge_texture: &mut FeatureTileBucketEdgeDistanceTexture,
 ) {
     let edges = edge_segments_uv(bounds, features);
@@ -893,7 +863,7 @@ fn calculate_edge_distance_texture(
 
 fn edge_segments_uv(
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
-    features: &HashMap<u64, SourceLayerFeature>,
+    features: &HashMap<u64, MlTileFeature>,
 ) -> Vec<f32> {
     let mut edges = Vec::new();
     for feature in features.values() {

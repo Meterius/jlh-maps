@@ -1,6 +1,4 @@
-use crate::app::maplibre_gl_js::types::{
-    MaplibreMapViewData, MaplibreSourceData, MaplibreTerrainData,
-};
+use crate::app::maplibre_gl_js::types::{MlData, MlTerrain, MlView};
 use bevy::prelude::*;
 use std::cell::Cell;
 
@@ -11,9 +9,9 @@ thread_local! {
 #[derive(Component, Default)]
 pub struct MaplibreMapIntegration {
     pub id: u32,
-    pub view: MaplibreMapViewData,
-    pub terrain: MaplibreTerrainData,
-    pub sources: MaplibreSourceData,
+    pub view: MlView,
+    pub terrain: MlTerrain,
+    pub data: MlData,
 }
 
 pub(super) fn with_map_data_mut(

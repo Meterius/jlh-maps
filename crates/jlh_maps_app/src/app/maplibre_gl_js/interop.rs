@@ -2,9 +2,7 @@ use crate::app::instance_management::commands::enqueue_instance_command;
 use crate::app::maplibre_gl_js::integration::{
     MaplibreMapIntegration, NEXT_INTEGRATION_ID, find_map_integration, with_map_data_mut,
 };
-use crate::app::maplibre_gl_js::types::{
-    CanonicalTileId, MaplibreMapViewData, MaplibreTerrainTileData,
-};
+use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile, MlView};
 use crate::app::maplibre_gl_js::utils::dem_data::DEMData;
 use crate::app::maplibre_gl_js::utils::terrain::TerrainData;
 use anyhow::anyhow;
@@ -90,7 +88,7 @@ pub fn sync_view(
         ));
     }
 
-    let view = MaplibreMapViewData {
+    let view = MlView {
         width,
         height,
         zoom,
@@ -131,7 +129,8 @@ pub fn update_terrain_tile_data(
     let terrain_matrix =
         parse_terrain_matrix(&terrain_matrix_json).map_err(|err| err.to_string())?;
 
-    let tile_data = MaplibreTerrainTileData {
+    let tile_data = MlTerrainTile {
+        id: tile_key,
         hash,
         terrain_data: TerrainData {
             dem_data: DEMData {
@@ -187,7 +186,11 @@ pub fn update_source_tile(
 
     enqueue_instance_command(&instance_id, move |world| {
         with_map_data_mut(world, integration_id, |map_data| {
-            map_data.sources.update_tile(source_id, tile_id, data);
+            if let Err(err) = map_data.data.update_tile(source_id.clone(), tile_id, data) {
+                tracing::warn!(
+                    "Failed to parse MapLibre source tile {source_id}/{tile_id:?}: {err}"
+                );
+            }
         });
     })
     .map_err(|err| err.to_string())
@@ -206,7 +209,7 @@ pub fn remove_source_tile(
 
     enqueue_instance_command(&instance_id, move |world| {
         with_map_data_mut(world, integration_id, |map_data| {
-            map_data.sources.remove_tile(&source_id, &tile_id);
+            map_data.data.remove_tile(&source_id, &tile_id);
         });
     })
     .map_err(|err| err.to_string())

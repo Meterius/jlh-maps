@@ -1,4 +1,4 @@
-use crate::app::maplibre_gl_js::types::{CanonicalTileId, MaplibreTileData, SourceLayerFeature};
+use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTile, MlTileFeature};
 use geo_types::{
     Coord, Geometry as GeoGeometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point,
     Polygon,
@@ -11,53 +11,58 @@ use std::f64::consts::PI;
 
 const GENERATED_FEATURE_ID_BIT: u64 = 1 << 63;
 
-pub fn parse_source_layer_features(
+pub fn parse_tile_layers(
     tile_id: CanonicalTileId,
-    tile_data: &MaplibreTileData,
-    source_layer_id: &str,
-) -> Result<HashMap<u64, SourceLayerFeature>, String> {
-    let reader = Reader::new(tile_data.data.clone())
-        .map_err(|err| format!("Failed to decode MVT tile: {err:?}"))?;
+    tile_data: Vec<u8>,
+    revision: u64,
+) -> Result<HashMap<String, MlTile>, String> {
+    let reader =
+        Reader::new(tile_data).map_err(|err| format!("Failed to decode MVT tile: {err:?}"))?;
     let layer_metadata = reader
         .get_layer_metadata()
         .map_err(|err| format!("Failed to read MVT layer metadata: {err:?}"))?;
-    let Some(layer) = layer_metadata
-        .iter()
-        .find(|layer| layer.name == source_layer_id)
-    else {
-        return Ok(HashMap::new());
-    };
+    let mut layers = HashMap::with_capacity(layer_metadata.len());
 
-    let extent = f64::from(layer.extent.max(1));
-    let raw_features = reader
-        .get_features_as::<f64>(layer.layer_index)
-        .map_err(|err| format!("Failed to read MVT layer features: {err:?}"))?;
-    let mut used_feature_ids = HashSet::with_capacity(raw_features.len());
-    let mut features = HashMap::with_capacity(raw_features.len());
+    for layer in layer_metadata {
+        let extent = f64::from(layer.extent.max(1));
+        let raw_features = reader
+            .get_features_as::<f64>(layer.layer_index)
+            .map_err(|err| format!("Failed to read MVT layer features: {err:?}"))?;
+        let mut used_feature_ids = HashSet::with_capacity(raw_features.len());
+        let mut features = HashMap::with_capacity(raw_features.len());
 
-    for (feature_index, raw_feature) in raw_features.into_iter().enumerate() {
-        let id = feature_id(raw_feature.id, feature_index, &mut used_feature_ids);
-        features.insert(
-            id,
-            SourceLayerFeature {
-                tile_id,
+        for (feature_index, raw_feature) in raw_features.into_iter().enumerate() {
+            let id = feature_id(raw_feature.id, feature_index, &mut used_feature_ids);
+            features.insert(
                 id,
-                geometry: Geometry::new(mvt_geometry_to_geojson_value(
-                    tile_id,
-                    extent,
-                    raw_feature.geometry,
-                )),
-                properties: raw_feature
-                    .properties
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(key, value)| (key, mvt_value_to_json(value)))
-                    .collect(),
+                MlTileFeature {
+                    id,
+                    geometry: Geometry::new(mvt_geometry_to_geojson_value(
+                        tile_id,
+                        extent,
+                        raw_feature.geometry,
+                    )),
+                    properties: raw_feature
+                        .properties
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(key, value)| (key, mvt_value_to_json(value)))
+                        .collect(),
+                },
+            );
+        }
+
+        layers.insert(
+            layer.name,
+            MlTile {
+                id: tile_id,
+                revision,
+                features,
             },
         );
     }
 
-    Ok(features)
+    Ok(layers)
 }
 
 fn feature_id(
