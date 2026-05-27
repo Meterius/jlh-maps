@@ -1,4 +1,4 @@
-use crate::app::main::BevyInstance;
+use crate::app::instance::BevyInstance;
 use crate::app::map::camera::MapViewCameraSettings as MapViewCameraSettingsBevy;
 use crate::app::map::core::MapViewSettings as MapViewSettingsBevy;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -92,7 +92,7 @@ impl From<MapViewCameraSettings> for MapViewCameraSettingsBevy {
 #[wasm_bindgen]
 impl BevyInstance {
     pub fn set_map_view_settings(&self, settings: MapViewSettings) -> Result<(), String> {
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             *world.get_resource_mut::<MapViewSettingsBevy>().unwrap() = settings.into();
         })
     }
@@ -101,7 +101,7 @@ impl BevyInstance {
         &self,
         settings: MapViewCameraSettings,
     ) -> Result<(), String> {
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             *world
                 .get_resource_mut::<MapViewCameraSettingsBevy>()
                 .unwrap() = settings.into();

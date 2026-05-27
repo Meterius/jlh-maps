@@ -1,4 +1,4 @@
-use crate::app::main::{BevyInstance, BevyInstanceInner};
+use crate::app::instance::{BevyInstance, BevyInstanceInner};
 use crate::app::maplibre_gl_js::integration::{
     MaplibreMapIntegration, NEXT_INTEGRATION_ID, find_map_integration, with_map_data_mut,
 };
@@ -8,7 +8,6 @@ use crate::app::maplibre_gl_js::utils::terrain::TerrainData;
 use anyhow::anyhow;
 use bevy::math::DMat4;
 use bevy::prelude::{Name, World, default};
-use std::cell::Cell;
 use std::collections::HashSet;
 use std::rc::Weak;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -17,7 +16,6 @@ use wasm_bindgen::prelude::wasm_bindgen;
 pub struct MaplibreIntegration {
     instance: Weak<BevyInstanceInner>,
     integration_id: u32,
-    removed: Cell<bool>,
 }
 
 fn parse_tile_key(tile: &str) -> anyhow::Result<CanonicalTileId> {
@@ -56,7 +54,7 @@ impl BevyInstance {
             id
         });
 
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             world.spawn((
                 MaplibreMapIntegration { id, ..default() },
                 Name::new(format!("MapLibre map integration {id}")),
@@ -66,7 +64,6 @@ impl BevyInstance {
         Ok(MaplibreIntegration {
             instance: self.weak_inner(),
             integration_id: id,
-            removed: Cell::new(false),
         })
     }
 }
@@ -104,7 +101,7 @@ impl MaplibreIntegration {
         };
         let integration_id = self.integration_id;
 
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             with_map_data_mut(world, integration_id, |map_data| {
                 map_data.view = view;
             });
@@ -151,7 +148,7 @@ impl MaplibreIntegration {
         };
         let integration_id = self.integration_id;
 
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             with_map_data_mut(world, integration_id, |map_data| {
                 map_data.terrain.tiles.insert(tile_key, tile_data);
             });
@@ -162,7 +159,7 @@ impl MaplibreIntegration {
         let tile_key = parse_tile_key(&tile_key).map_err(|err| err.to_string())?;
         let integration_id = self.integration_id;
 
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             with_map_data_mut(world, integration_id, |map_data| {
                 map_data.terrain.tiles.remove(&tile_key);
             });
@@ -180,7 +177,7 @@ impl MaplibreIntegration {
         let tile_id = CanonicalTileId { z, x, y };
         let integration_id = self.integration_id;
 
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             with_map_data_mut(world, integration_id, |map_data| {
                 if let Err(err) = map_data.data.update_tile(source_id.clone(), tile_id, data) {
                     tracing::warn!(
@@ -201,7 +198,7 @@ impl MaplibreIntegration {
         let tile_id = CanonicalTileId { z, x, y };
         let integration_id = self.integration_id;
 
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             with_map_data_mut(world, integration_id, |map_data| {
                 map_data.data.remove_tile(&source_id, &tile_id);
             });
@@ -216,7 +213,7 @@ impl MaplibreIntegration {
             .map_err(|err| err.to_string())?;
         let integration_id = self.integration_id;
 
-        self.enqueue(move |world| {
+        self.execute(move |world| {
             with_map_data_mut(world, integration_id, |map_data| {
                 map_data.terrain.active_tile_ids = active_tile_ids;
             });
@@ -225,38 +222,27 @@ impl MaplibreIntegration {
 }
 
 impl MaplibreIntegration {
-    fn enqueue(&self, command: impl FnOnce(&mut World) + Send + 'static) -> Result<(), String> {
-        if self.removed.get() {
-            return Err("MapLibre integration has been removed".to_string());
-        }
-
+    fn execute(&self, command: impl FnOnce(&mut World)) -> Result<(), String> {
         let Some(instance) = self.instance.upgrade() else {
             return Err("Bevy instance is not mounted".to_string());
         };
 
-        instance.enqueue(command)
-    }
-
-    fn remove_from_world(&self) {
-        if self.removed.replace(true) {
-            return;
-        }
-
-        let Some(instance) = self.instance.upgrade() else {
-            return;
-        };
-        let integration_id = self.integration_id;
-
-        let _ = instance.enqueue(move |world| {
-            if let Some(entity) = find_map_integration(world, integration_id) {
-                world.despawn(entity);
-            }
-        });
+        instance.execute(command)
     }
 }
 
 impl Drop for MaplibreIntegration {
     fn drop(&mut self) {
-        self.remove_from_world();
+        let Some(instance) = self.instance.upgrade() else {
+            return;
+        };
+
+        let integration_id = self.integration_id;
+
+        let _ = instance.execute(move |world| {
+            if let Some(entity) = find_map_integration(world, integration_id) {
+                world.despawn(entity);
+            }
+        });
     }
 }

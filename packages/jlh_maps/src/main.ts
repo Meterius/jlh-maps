@@ -1,7 +1,7 @@
 import './assets/main.css'
 // import './utils/virtual-webgl2'
 
-import initApp, { initialize } from 'jlh_maps_app'
+import initApp from 'jlh_maps_app'
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
@@ -16,8 +16,6 @@ initApp()
     console.error('WASM Initialization Failure: ', err)
   })
   .finally(() => {
-    initialize()
-
     const app = createApp(App)
 
     app.use(VueMaplibreGl)
