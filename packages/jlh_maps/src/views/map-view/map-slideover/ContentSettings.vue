@@ -25,20 +25,20 @@
         <h5 class="pb-2">Bevy</h5>
         <div class="grid gap-2">
           <label class="debug-toggle">
-            <input v-model="useBevyRet.mapViewSettings.value.enable_buildings" type="checkbox" />
+            <input v-model="useBevyRet.mapViewSettings.value.enableBuildings" type="checkbox" />
             <span>Buildings</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="useBevyRet.mapViewSettings.value.enable_waters" type="checkbox" />
+            <input v-model="useBevyRet.mapViewSettings.value.enableWaters" type="checkbox" />
             <span>Water</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="useBevyRet.mapViewSettings.value.enable_shadows" type="checkbox" />
+            <input v-model="useBevyRet.mapViewSettings.value.enableShadows" type="checkbox" />
             <span>Shadows</span>
           </label>
           <label class="debug-toggle">
             <input
-              v-model="useBevyRet.mapViewSettings.value.enable_window_cameras"
+              v-model="useBevyRet.mapViewSettings.value.enableWindowCameras"
               type="checkbox"
             />
             <span>Debug canvas</span>
@@ -53,28 +53,28 @@
         <div class="grid gap-2">
           <label class="debug-toggle">
             <input
-              v-model="useBevyRet.mapViewCameraSettings.value.enable_color_grading"
+              v-model="useBevyRet.mapViewCameraSettings.value.enableColorGrading"
               type="checkbox"
             />
             <span>Color grading</span>
           </label>
           <label class="debug-toggle">
             <input
-              v-model="useBevyRet.mapViewCameraSettings.value.enable_tonemapping"
+              v-model="useBevyRet.mapViewCameraSettings.value.enableTonemapping"
               type="checkbox"
             />
             <span>Tonemapping</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="useBevyRet.mapViewCameraSettings.value.enable_msaa" type="checkbox" />
+            <input v-model="useBevyRet.mapViewCameraSettings.value.enableMsaa" type="checkbox" />
             <span>MSAA</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="useBevyRet.mapViewCameraSettings.value.enable_ssao" type="checkbox" />
+            <input v-model="useBevyRet.mapViewCameraSettings.value.enableSsao" type="checkbox" />
             <span>SSAO</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="useBevyRet.mapViewCameraSettings.value.enable_taa" type="checkbox" />
+            <input v-model="useBevyRet.mapViewCameraSettings.value.enableTaa" type="checkbox" />
             <span>TAA</span>
           </label>
         </div>

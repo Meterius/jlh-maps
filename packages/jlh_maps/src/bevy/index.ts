@@ -1,18 +1,14 @@
 import {
   getCurrentScope,
   ref,
+  type Ref,
   shallowRef,
+  type ShallowRef,
   watch,
   watchEffect,
-  type Ref,
-  type ShallowRef,
 } from 'vue'
-import {
-  BevyInstance as BevyInstanceBevy,
-  MapViewCameraSettings as MapViewCameraSettingsBevy,
-  MapViewSettings as MapViewSettingsBevy,
-} from 'jlh_maps_app'
-import type { WindowInstanceRef as WindowInstanceRefBevy } from 'jlh_maps_app'
+import type { MapViewCameraSettings, MapViewSettings, WindowInstanceRef } from 'jlh_maps_app'
+import { BevyInstance } from 'jlh_maps_app'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import { onScopeDisposeLifo } from '@/composables/helper.ts'
 
@@ -25,23 +21,6 @@ interface CanvasRenderSize {
   scaleFactor: number
 }
 
-export interface BevyMapViewSettings {
-  enable_window_cameras: boolean
-  enable_buildings: boolean
-  enable_waters: boolean
-  enable_shadows: boolean
-  sun_azimuth_degrees: number
-  sun_elevation_degrees: number
-}
-
-export interface BevyMapViewCameraSettings {
-  enable_color_grading: boolean
-  enable_tonemapping: boolean
-  enable_msaa: boolean
-  enable_ssao: boolean
-  enable_taa: boolean
-}
-
 interface BevyInstanceState {
   instanceId: string
   isMounted: Ref<boolean>
@@ -51,12 +30,12 @@ interface BevyInstanceState {
 
   debugOffscreenCanvas: ShallowRef<OffscreenCanvas | null>
   textureOffscreenCanvas: ShallowRef<OffscreenCanvas | null>
-  bevyInstance: ShallowRef<BevyInstanceBevy | null>
-  debugWindow: ShallowRef<WindowInstanceRefBevy | null>
-  textureWindow: ShallowRef<WindowInstanceRefBevy | null>
+  bevyInstance: ShallowRef<BevyInstance | null>
+  debugWindow: ShallowRef<WindowInstanceRef | null>
+  textureWindow: ShallowRef<WindowInstanceRef | null>
 
-  mapViewSettings: Ref<BevyMapViewSettings>
-  mapViewCameraSettings: Ref<BevyMapViewCameraSettings>
+  mapViewSettings: Ref<MapViewSettings>
+  mapViewCameraSettings: Ref<MapViewCameraSettings>
 }
 
 const bevyInstances = new Map<string, BevyInstanceState>()
@@ -85,19 +64,19 @@ export function mountBevy(
     debugWindow: shallowRef(null),
     textureWindow: shallowRef(null),
     mapViewSettings: ref({
-      enable_window_cameras: false,
-      enable_buildings: true,
-      enable_waters: true,
-      enable_shadows: true,
-      sun_elevation_degrees: DEFAULT_SUN_ELEVATION_DEGREES,
-      sun_azimuth_degrees: DEFAULT_SUN_AZIMUTH_DEGREES,
+      enableWindowCameras: false,
+      enableBuildings: true,
+      enableWaters: true,
+      enableShadows: true,
+      sunElevationDegrees: DEFAULT_SUN_ELEVATION_DEGREES,
+      sunAzimuthDegrees: DEFAULT_SUN_AZIMUTH_DEGREES,
     }),
     mapViewCameraSettings: ref({
-      enable_color_grading: true,
-      enable_tonemapping: false,
-      enable_msaa: true,
-      enable_ssao: false,
-      enable_taa: false,
+      enableColorGrading: true,
+      enableTonemapping: false,
+      enableMsaa: true,
+      enableSsao: false,
+      enableTaa: false,
     }),
   }
 
@@ -159,17 +138,13 @@ export function mountBevy(
   watchEffect(() => {
     if (!state.isMounted.value) return
 
-    state.bevyInstance.value?.set_map_view_settings(
-      createMapViewSettingsSnapshot(state.mapViewSettings.value),
-    )
+    state.bevyInstance.value?.set_map_view_settings(state.mapViewSettings.value)
   })
 
   watchEffect(() => {
     if (!state.isMounted.value) return
 
-    state.bevyInstance.value?.set_map_view_camera_settings(
-      createMapViewCameraSettingsSnapshot(state.mapViewCameraSettings.value),
-    )
+    state.bevyInstance.value?.set_map_view_camera_settings(state.mapViewCameraSettings.value)
   })
 
   useForwardDebugCanvasEvents(state.debugCanvas, state.isMounted, state.debugWindow)
@@ -275,7 +250,7 @@ function mountRegisteredBevyInstance(
       maplibreSize.height,
     )
 
-    state.bevyInstance.value = new BevyInstanceBevy(
+    state.bevyInstance.value = new BevyInstance(
       state.debugOffscreenCanvas.value,
       state.textureOffscreenCanvas.value,
     )
@@ -421,31 +396,10 @@ function releaseAttachedCanvas(canvas: HTMLCanvasElement | null, instanceId: str
   }
 }
 
-function createMapViewSettingsSnapshot(settings: BevyMapViewSettings) {
-  return new MapViewSettingsBevy(
-    settings.enable_window_cameras,
-    settings.enable_buildings,
-    settings.enable_waters,
-    settings.enable_shadows,
-    settings.sun_azimuth_degrees,
-    settings.sun_elevation_degrees,
-  )
-}
-
-function createMapViewCameraSettingsSnapshot(settings: BevyMapViewCameraSettings) {
-  return new MapViewCameraSettingsBevy(
-    settings.enable_color_grading,
-    settings.enable_tonemapping,
-    settings.enable_msaa,
-    settings.enable_ssao,
-    settings.enable_taa,
-  )
-}
-
 function useForwardDebugCanvasEvents(
   canvas: ShallowRef<HTMLCanvasElement | null>,
   isMounted: Ref<boolean>,
-  debugWindow: ShallowRef<WindowInstanceRefBevy | null>,
+  debugWindow: ShallowRef<WindowInstanceRef | null>,
 ) {
   const canvasPosition = (event: MouseEvent | PointerEvent) => {
     const currentCanvas = canvas.value
@@ -458,7 +412,7 @@ function useForwardDebugCanvasEvents(
     }
   }
 
-  const onlyMounted = (callback: (windowRef: WindowInstanceRefBevy) => void) => {
+  const onlyMounted = (callback: (windowRef: WindowInstanceRef) => void) => {
     const mountedDebugWindow = debugWindow.value
     if (!isMounted.value || !mountedDebugWindow) return
 

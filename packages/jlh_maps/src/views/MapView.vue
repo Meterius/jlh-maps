@@ -1,7 +1,7 @@
 <template>
   <div style="position: absolute; left: 0; right: 0; top: 0; bottom: 0">
     <div
-      :style="`position: absolute; width: 100%; height: ${bevyMapViewSettings?.enable_window_cameras ? '50%' : '100%'}; top: 0`"
+      :style="`position: absolute; width: 100%; height: ${bevyMapViewSettings?.enableWindowCameras ? '50%' : '100%'}; top: 0`"
     >
       <mgl-map
         :map-key="mapKey"
@@ -120,19 +120,19 @@
           color="neutral"
           active-color="primary"
           variant="outline-solid"
-          :active="bevyMapViewSettings?.enable_window_cameras"
+          :active="bevyMapViewSettings?.enableWindowCameras"
           size="xl"
           class="pointer-events-auto cursor-pointer"
           icon="lucide:bug"
           title="Show bevy"
           aria-label="Show bevy"
-          :aria-pressed="bevyMapViewSettings?.enable_window_cameras"
+          :aria-pressed="bevyMapViewSettings?.enableWindowCameras"
           :disabled="!bevyMapViewSettings"
           @click="
             () => {
               if (bevyMapViewSettings)
-                bevyMapViewSettings.enable_window_cameras =
-                  !bevyMapViewSettings.enable_window_cameras
+                bevyMapViewSettings.enableWindowCameras =
+                  !bevyMapViewSettings.enableWindowCameras
             }
           "
         />
@@ -333,8 +333,8 @@
     </div>
 
     <div
-      v-show="bevyMapViewSettings?.enable_window_cameras"
-      :style="`position: absolute; width: ${bevyMapViewSettings?.enable_window_cameras ? '100%' : '10px'}; height: ${bevyMapViewSettings?.enable_window_cameras ? '50%' : '1px'}; bottom: 0`"
+      v-show="bevyMapViewSettings?.enableWindowCameras"
+      :style="`position: absolute; width: ${bevyMapViewSettings?.enableWindowCameras ? '100%' : '10px'}; height: ${bevyMapViewSettings?.enableWindowCameras ? '50%' : '1px'}; bottom: 0`"
     >
       <canvas
         ref="bevyDebugCanvas"
@@ -482,9 +482,9 @@ const bevyMount = createToggledComposable(
         },
       }),
       computed({
-        get: () => useBevyRet.mapViewSettings.value.enable_window_cameras,
+        get: () => useBevyRet.mapViewSettings.value.enableWindowCameras,
         set: (value) => {
-          useBevyRet.mapViewSettings.value.enable_window_cameras = value
+          useBevyRet.mapViewSettings.value.enableWindowCameras = value
         },
       }),
       { immediate: true },
@@ -498,9 +498,9 @@ const bevyMount = createToggledComposable(
         },
       }),
       computed({
-        get: () => useBevyRet.mapViewSettings.value.enable_shadows,
+        get: () => useBevyRet.mapViewSettings.value.enableShadows,
         set: (value) => {
-          useBevyRet.mapViewSettings.value.enable_shadows = value
+          useBevyRet.mapViewSettings.value.enableShadows = value
         },
       }),
       { immediate: true },
@@ -514,9 +514,9 @@ const bevyMount = createToggledComposable(
         },
       }),
       computed({
-        get: () => useBevyRet.mapViewSettings.value.enable_buildings,
+        get: () => useBevyRet.mapViewSettings.value.enableBuildings,
         set: (value) => {
-          useBevyRet.mapViewSettings.value.enable_buildings = value
+          useBevyRet.mapViewSettings.value.enableBuildings = value
         },
       }),
       { immediate: true },
@@ -530,9 +530,9 @@ const bevyMount = createToggledComposable(
         },
       }),
       computed({
-        get: () => useBevyRet.mapViewSettings.value.sun_azimuth_degrees,
+        get: () => useBevyRet.mapViewSettings.value.sunAzimuthDegrees,
         set: (value) => {
-          useBevyRet.mapViewSettings.value.sun_azimuth_degrees = value
+          useBevyRet.mapViewSettings.value.sunAzimuthDegrees = value
         },
       }),
       { immediate: true },
@@ -546,9 +546,9 @@ const bevyMount = createToggledComposable(
         },
       }),
       computed({
-        get: () => useBevyRet.mapViewSettings.value.sun_elevation_degrees,
+        get: () => useBevyRet.mapViewSettings.value.sunElevationDegrees,
         set: (value) => {
-          useBevyRet.mapViewSettings.value.sun_elevation_degrees = value
+          useBevyRet.mapViewSettings.value.sunElevationDegrees = value
         },
       }),
       { immediate: true },
@@ -614,11 +614,11 @@ const {
 
 const sunAzimuthLabel = computed(() => {
   if (!bevyMapViewSettings.value) return 'N/A'
-  return `${Math.round(bevyMapViewSettings.value.sun_azimuth_degrees)} deg`
+  return `${Math.round(bevyMapViewSettings.value.sunAzimuthDegrees)} deg`
 })
 const sunElevationLabel = computed(() => {
   if (!bevyMapViewSettings.value) return 'N/A'
-  return `${Math.round(bevyMapViewSettings.value.sun_elevation_degrees)} deg`
+  return `${Math.round(bevyMapViewSettings.value.sunElevationDegrees)} deg`
 })
 
 const rainfallRasterDataTime = rainfallRasterSourceProvider.rasterDataTime

@@ -12,7 +12,9 @@ use bevy::prelude::*;
 use bevy::window::WindowRef;
 use big_space::bundles::BigSpaceRootBundle;
 use big_space::prelude::{CellCoord, FloatingOrigin};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tsify::Tsify;
 
 const FIRST_CASCADE_FAR_METERS: f64 = 2_000.0;
 const SHADOW_MAX_DISTANCE_METERS: f64 = 10_000.0;
@@ -34,7 +36,9 @@ impl Plugin for CorePlugin {
     }
 }
 
-#[derive(Debug, Reflect, Resource)]
+#[derive(Debug, Reflect, Resource, Serialize, Deserialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+#[tsify(from_wasm_abi)]
 pub struct MapViewSettings {
     pub enable_window_cameras: bool,
 

@@ -15,6 +15,8 @@ use bevy::prelude::*;
 use bevy::render::camera::{MipBias, TemporalJitter};
 use bevy::render::view::ColorGrading;
 use big_space::prelude::{CellCoord, Grid};
+use serde::{Deserialize, Serialize};
+use tsify::Tsify;
 
 const MAPLIBRE_DEFAULT_FOV_RADIANS: f64 = 0.643_501_108_793_284_4;
 const DEFAULT_MAPLIBRE_FAR: f32 = 1_000.0;
@@ -239,7 +241,9 @@ fn opengl_to_wgpu_clip_matrix() -> DMat4 {
 
 // Effects
 
-#[derive(Clone, Debug, Reflect, Resource)]
+#[derive(Clone, Debug, Reflect, Resource, Serialize, Deserialize, Tsify)]
+#[serde(rename_all = "camelCase")]
+#[tsify(from_wasm_abi)]
 #[reflect(Resource, Default)]
 pub struct MapViewCameraSettings {
     pub enable_color_grading: bool,
