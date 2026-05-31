@@ -1,9 +1,8 @@
 import type { CustomLayerInterface, Map as MapLibreMap } from 'maplibre-gl'
-import { toValue, watch, type WatchHandle, type WatchSource } from 'vue'
+import type { ShallowRef } from 'vue'
 
 interface BevyLayerOptions {
   id?: string
-  tick?: () => void
 }
 
 const VERTEX_SHADER = `#version 300 es
@@ -36,6 +35,7 @@ export class BevyLayer implements CustomLayerInterface {
   id: string
   type = 'custom' as const
   renderingMode: '2d' | '3d' = '3d'
+  compositeSeperator = true
 
   private map!: MapLibreMap
   private program: WebGLProgram | undefined
@@ -45,28 +45,19 @@ export class BevyLayer implements CustomLayerInterface {
   private aPos = -1
   private uColorTexture: WebGLUniformLocation | null = null
   private uDepthRange: WebGLUniformLocation | null = null
-  private readonly tickCallback: (() => void) | undefined
-  private stopTextureCanvasWatch: WatchHandle | undefined
-  private tickFailed = false
 
   private textureWidth = 0
   private textureHeight = 0
 
   constructor(
-    private readonly textureCanvas: WatchSource<OffscreenCanvas | null>,
+    private readonly frameBitmap: ShallowRef<ImageBitmap | null>,
     options: BevyLayerOptions = {},
   ) {
     this.id = options.id ?? 'bevy-texture'
-    this.tickCallback = options.tick
   }
 
   onAdd(map: MapLibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext): void {
     this.map = map
-    this.stopTextureCanvasWatch = watch(
-      () => toValue(this.textureCanvas),
-      () => this.map.triggerRepaint(),
-      { immediate: true },
-    )
 
     this.program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER)
     this.aPos = gl.getAttribLocation(this.program, 'a_pos')
@@ -94,29 +85,15 @@ export class BevyLayer implements CustomLayerInterface {
     gl.bindBuffer(gl.ARRAY_BUFFER, null)
   }
 
-  render(gl: WebGL2RenderingContext | WebGLRenderingContext): void {
-    // Run bevy schedule for one frame
+  render(): void {}
 
-    try {
-      if (!this.tickFailed) {
-        this.tickCallback?.()
-      }
-    } catch (err) {
-      console.error('Error in Bevy layer tick callback:', err)
-      this.tickFailed = true
-    }
-
-    if (this.tickFailed) {
-      return
-    }
-
-    const textureCanvas = toValue(this.textureCanvas)
-
-    if (!textureCanvas) {
-      return
-    }
+  renderComposite(gl: WebGL2RenderingContext | WebGLRenderingContext): void {
+    const frameBitmap = this.frameBitmap.value
+    if (!frameBitmap) return
+    this.frameBitmap.value = null
 
     if (!this.program || !this.vertexBuffer || !this.texture) {
+      frameBitmap.close()
       this.map.triggerRepaint()
       return
     }
@@ -130,14 +107,15 @@ export class BevyLayer implements CustomLayerInterface {
     gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
 
     // Recreate texture if dimensions have changed
-    if (textureCanvas.width !== this.textureWidth || textureCanvas.height !== this.textureHeight) {
-      this.textureWidth = textureCanvas.width
-      this.textureHeight = textureCanvas.height
+    if (frameBitmap.width !== this.textureWidth || frameBitmap.height !== this.textureHeight) {
+      this.textureWidth = frameBitmap.width
+      this.textureHeight = frameBitmap.height
 
       if (isWebGL2(gl)) {
         gl.deleteTexture(this.texture)
         this.texture = createTexture(gl)
         if (!this.texture) {
+          frameBitmap.close()
           this.map.triggerRepaint()
           return
         }
@@ -161,7 +139,11 @@ export class BevyLayer implements CustomLayerInterface {
     // On chrome this happens < 1ms, likely the current setup is handled as gpu-gpu copy,
     // while on firefox this can take ~20-40ms and incurs a cpu copy
     // TODO: investigate firefox performance bottleneck of texture transfer
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, textureCanvas)
+    try {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, frameBitmap)
+    } finally {
+      frameBitmap.close()
+    }
 
     // Draw bevy render texture as fullscreen quad
 
@@ -193,9 +175,6 @@ export class BevyLayer implements CustomLayerInterface {
   }
 
   onRemove(_map: MapLibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext): void {
-    this.stopTextureCanvasWatch?.()
-    this.stopTextureCanvasWatch = undefined
-
     if (this.vertexArray && isWebGL2(gl)) {
       gl.deleteVertexArray(this.vertexArray)
     }

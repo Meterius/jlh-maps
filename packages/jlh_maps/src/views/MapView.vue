@@ -131,8 +131,7 @@
           @click="
             () => {
               if (bevyMapViewSettings)
-                bevyMapViewSettings.enableWindowCameras =
-                  !bevyMapViewSettings.enableWindowCameras
+                bevyMapViewSettings.enableWindowCameras = !bevyMapViewSettings.enableWindowCameras
             }
           "
         />
@@ -563,6 +562,55 @@ const bevyMount = createToggledComposable(
 )
 
 const bevyMapViewSettings = computed(() => bevyMount.value?.useBevyRet.mapViewSettings.value)
+
+const bevyFrameBitmap = shallowRef<ImageBitmap | null>(null)
+
+const closePendingBevyFrameBitmap = () => {
+  const frameBitmap = bevyFrameBitmap.value
+  bevyFrameBitmap.value = null
+  frameBitmap?.close()
+}
+
+let pendingBevyFrame = 0
+
+const tickBevyAndProduceFrame = async () => {
+  const mountedBevy = bevyMount.value
+  const textureCanvas = mountedBevy?.useBevyRet.textureOffscreenCanvas.value
+  if (!mountedBevy || !textureCanvas) {
+    closePendingBevyFrameBitmap()
+    return
+  }
+
+  const frameId = ++pendingBevyFrame
+
+  mountedBevy.useMaplibreIntegrationRet.syncOnRender()
+  const ticked = mountedBevy.useBevyRet.tick()
+
+  if (!ticked) {
+    closePendingBevyFrameBitmap()
+    return
+  }
+
+  const frameBitmap = await createImageBitmap(textureCanvas)
+  if (frameId !== pendingBevyFrame) {
+    frameBitmap.close()
+    return
+  }
+
+  const previousFrameBitmap = bevyFrameBitmap.value
+  bevyFrameBitmap.value = frameBitmap
+  previousFrameBitmap?.close()
+}
+
+onScopeDisposeLifo(() => {
+  closePendingBevyFrameBitmap()
+  // incrementing frame to invalidate potential pending frame
+  ++pendingBevyFrame
+})
+
+watchDefinedOnce(() => mapInstance.map, (map) => {
+  map.setRenderCompositeHook(tickBevyAndProduceFrame)
+})
 
 // Controls
 
@@ -1027,12 +1075,8 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
     useLayer(
       map,
-      new BevyLayer(() => bevyMount.value?.useBevyRet.textureOffscreenCanvas.value ?? null, {
+      new BevyLayer(bevyFrameBitmap, {
         id: 'bevy-texture',
-        tick: () => {
-          bevyMount.value?.useMaplibreIntegrationRet.syncOnRender()
-          bevyMount.value?.useBevyRet.tick()
-        },
       }),
       { beforeId: 'Water labels' },
     )
