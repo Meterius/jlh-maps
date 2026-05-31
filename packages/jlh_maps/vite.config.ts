@@ -88,6 +88,7 @@ export default defineConfig({
     vueDevTools(),
   ],
   resolve: {
+    dedupe: ['maplibre-gl'],
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },

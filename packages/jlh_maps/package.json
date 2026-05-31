@@ -35,7 +35,7 @@
     "jlh_maps_app": "file:../../crates/jlh_maps_app/pkg",
     "lodash": "^4.18.1",
     "lucide-static": "^1.16.0",
-    "maplibre-gl": "github:Meterius/jlh-maps-maplibre-gl-js#ca44db37afad1d6e9e0fcdf33222900193ea1dbc",
+    "maplibre-gl": "github:Meterius/jlh-maps-maplibre-gl-js#19e07617",
     "opening_hours": "^3.12.0",
     "pinia": "^3.0.4",
     "primevue": "^4.5.5",
