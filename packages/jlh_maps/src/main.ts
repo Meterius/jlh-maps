@@ -8,8 +8,11 @@ import ui from '@nuxt/ui/vue-plugin'
 
 import App from './App.vue'
 import router from './router'
+import { registerMaplibreProtocols } from './external/maplibre-protocols.ts'
 
 const app = createApp(App)
+
+registerMaplibreProtocols()
 
 app.use(VueMaplibreGl)
 app.use(createPinia())

@@ -8,6 +8,7 @@ Vue 3 + Vite frontend for the JLH maps application. It renders the MapLibre map 
 npm install
 npm run dev
 npm run build
+npm run build:demo
 npm run test:unit
 npm run test:e2e
 npm run lint
@@ -20,6 +21,8 @@ Vite loads `.env` for every command and `.env.[mode]` for the active mode.
 `.env.dev`. `npm run build` and `npm run build:prod` use the production-domain
 defaults from `.env`. `npm run build:local` uses Vite mode `local-docker` and
 `.env.local-docker` for the static bundle served by `infra/compose.local.yaml`.
+`npm run build:demo` uses Vite mode `demo`, builds with relative asset paths,
+and points MapLibre at the static OpenMapTiles demo data under `public/demo`.
 Vite reserves `local` as the `.env.local` machine-override suffix, so it cannot
 be used directly as a mode name.
 

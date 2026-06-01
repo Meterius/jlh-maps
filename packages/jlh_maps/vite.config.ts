@@ -11,7 +11,8 @@ const outlineSolidBase =
   'relative isolate overflow-hidden bg-default before:absolute before:inset-0 before:pointer-events-none before:content-[""] before:opacity-0 disabled:before:opacity-0 aria-disabled:before:opacity-0 focus:outline-none'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  ...(mode === 'demo' ? { base: './' } : {}),
   server: {
     fs: {
       allow: ['./', '../../crates/jlh_maps_frontend/pkg', '../../crates/jlh_maps_app/pkg'],
@@ -93,4 +94,4 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
-})
+}))
