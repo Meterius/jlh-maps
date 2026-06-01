@@ -528,8 +528,8 @@ function useForwardCanvasEvents(
 
 function canvasRenderSize(canvas: HTMLCanvasElement): CanvasRenderSize {
   return {
-    width: canvas.clientWidth,
-    height: canvas.clientHeight,
+    width: Math.max(canvas.clientWidth, 1),
+    height: Math.max(canvas.clientHeight, 1),
     scaleFactor: devicePixelRatio,
   }
 }
