@@ -2,6 +2,8 @@
 
 Simple map application.
 
+Demo: https://meterius.github.io/jlh-maps/demo/
+
 ## Structure
 
 ```text
