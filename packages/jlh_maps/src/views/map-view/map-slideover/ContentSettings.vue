@@ -37,10 +37,7 @@
             <span>Shadows</span>
           </label>
           <label class="debug-toggle">
-            <input
-              v-model="useBevyRet.mapViewSettings.value.enableWindowCameras"
-              type="checkbox"
-            />
+            <input v-model="useBevyRet.mapViewSettings.value.enableWindowCameras" type="checkbox" />
             <span>Debug canvas</span>
           </label>
         </div>

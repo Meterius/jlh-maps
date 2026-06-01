@@ -1,25 +1,27 @@
 import {
   getCurrentScope,
+  type MaybeRefOrGetter,
   ref,
   type Ref,
   shallowRef,
   type ShallowRef,
+  toValue,
   watch,
   watchEffect,
 } from 'vue'
 import type { MapViewCameraSettings, MapViewSettings, WindowInstanceRef } from 'jlh_maps_app'
-import { BevyInstance } from 'jlh_maps_app'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
-import { onScopeDisposeLifo } from '@/composables/helper.ts'
+import { releaseProxy, transfer, wrap, type Remote } from 'comlink'
+import { onScopeDisposeLifo, watchDefinedOnce } from '@/composables/helper.ts'
+import BevyWorker from './bevy.worker?worker'
+import type { BevyInstance, CanvasRenderSize } from './bevy.worker'
+import { isEqual } from 'lodash'
+import { coalesceTrailing } from '@/utils/helper.ts'
+
+export type UseBevyReturn = ReturnType<typeof useBevy>
 
 const DEFAULT_SUN_AZIMUTH_DEGREES = 11.31
 const DEFAULT_SUN_ELEVATION_DEGREES = 32.52
-
-interface CanvasRenderSize {
-  width: number
-  height: number
-  scaleFactor: number
-}
 
 interface BevyInstanceState {
   instanceId: string
@@ -28,19 +30,17 @@ interface BevyInstanceState {
   debugCanvas: ShallowRef<HTMLCanvasElement | null>
   maplibreCanvas: ShallowRef<HTMLCanvasElement | null>
 
-  debugOffscreenCanvas: ShallowRef<OffscreenCanvas | null>
-  textureOffscreenCanvas: ShallowRef<OffscreenCanvas | null>
-  bevyInstance: ShallowRef<BevyInstance | null>
-  debugWindow: ShallowRef<WindowInstanceRef | null>
-  textureWindow: ShallowRef<WindowInstanceRef | null>
+  bevyInstance: ShallowRef<Remote<BevyInstance> | null>
+  bevyWorker: ShallowRef<Worker | null>
 
   mapViewSettings: Ref<MapViewSettings>
   mapViewCameraSettings: Ref<MapViewCameraSettings>
+
+  refreshWindowSizes: () => Promise<void>
 }
 
 const bevyInstances = new Map<string, BevyInstanceState>()
 const attachedCanvasInstances = new WeakMap<HTMLCanvasElement, string>()
-const transferredDebugCanvases = new WeakMap<HTMLCanvasElement, OffscreenCanvas>()
 
 let bevyInstanceCounter = 0
 
@@ -58,11 +58,8 @@ export function mountBevy(
     isMounted: ref(false),
     debugCanvas: shallowRef(null),
     maplibreCanvas: shallowRef(null),
-    debugOffscreenCanvas: shallowRef(null),
-    textureOffscreenCanvas: shallowRef(null),
     bevyInstance: shallowRef(null),
-    debugWindow: shallowRef(null),
-    textureWindow: shallowRef(null),
+    bevyWorker: shallowRef(null),
     mapViewSettings: ref({
       enableWindowCameras: false,
       enableBuildings: true,
@@ -78,6 +75,25 @@ export function mountBevy(
       enableSsao: false,
       enableTaa: false,
     }),
+    refreshWindowSizes: coalesceTrailing(async () => {
+      const debugSize = targetWindowSize.debug.value
+      const maplibreSize = targetWindowSize.maplibre.value
+
+      if (
+        state.bevyInstance.value &&
+        debugSize &&
+        maplibreSize &&
+        (!isEqual(appliedWindowSize.debug.value, debugSize) ||
+          !isEqual(appliedWindowSize.maplibre.value, maplibreSize))
+      ) {
+        const applied = await state.bevyInstance.value.resize(debugSize, maplibreSize)
+
+        if (applied) {
+          appliedWindowSize.maplibre.value = maplibreSize
+          appliedWindowSize.debug.value = debugSize
+        }
+      }
+    }),
   }
 
   bevyInstances.set(instanceId, state)
@@ -85,21 +101,28 @@ export function mountBevy(
   useStaticCanvasSource(instanceId, 'debug', getDebugCanvas, state.debugCanvas)
   useStaticCanvasSource(instanceId, 'maplibre', getMaplibreCanvas, state.maplibreCanvas)
 
-  const debugCanvasRenderSize = shallowRef<CanvasRenderSize | null>(null)
-  const maplibreCanvasRenderSize = shallowRef<CanvasRenderSize | null>(null)
+  const targetWindowSize = {
+    debug: shallowRef<CanvasRenderSize | null>(null),
+    maplibre: shallowRef<CanvasRenderSize | null>(null),
+  }
+
+  const appliedWindowSize = {
+    debug: shallowRef<CanvasRenderSize | null>(null),
+    maplibre: shallowRef<CanvasRenderSize | null>(null),
+  }
 
   const updateDebugCanvasRenderSize = () => {
     const canvas = state.debugCanvas.value
     if (!canvas) return
 
-    debugCanvasRenderSize.value = canvasRenderSize(canvas)
+    targetWindowSize.debug.value = canvasRenderSize(canvas)
   }
 
   const updateMaplibreCanvasRenderSize = () => {
     const canvas = state.maplibreCanvas.value
     if (!canvas) return
 
-    maplibreCanvasRenderSize.value = canvasRenderSize(canvas)
+    targetWindowSize.maplibre.value = canvasRenderSize(canvas)
   }
 
   watch(state.debugCanvas, updateDebugCanvasRenderSize, { immediate: true })
@@ -108,49 +131,98 @@ export function mountBevy(
   useResizeObserver(state.debugCanvas, updateDebugCanvasRenderSize)
   useResizeObserver(state.maplibreCanvas, updateMaplibreCanvasRenderSize)
 
+  watchDefinedOnce(
+    () =>
+      state.debugCanvas.value && state.maplibreCanvas.value
+        ? {
+            debugCanvas: state.debugCanvas.value,
+            maplibreCanvas: state.maplibreCanvas.value,
+          }
+        : undefined,
+    ({ debugCanvas, maplibreCanvas }) => {
+      const debugSize = canvasRenderSize(debugCanvas)
+      const maplibreSize = canvasRenderSize(maplibreCanvas)
+
+      targetWindowSize.maplibre.value = maplibreSize
+      targetWindowSize.debug.value = debugSize
+
+      mountRegisteredBevyInstance(state, debugSize, maplibreSize)
+        .catch((error: unknown) => {
+          console.error('Failed to mount Bevy instance', error)
+          return disposeBevyInstance(instanceId)
+        })
+        .catch(console.error)
+    },
+  )
+
+  watchEffect(() => {
+    if (!state.isMounted.value) return
+
+    state.bevyInstance.value
+      ?.set_map_view_settings({ ...state.mapViewSettings.value })
+      .catch(console.error)
+  })
+
+  watchEffect(() => {
+    if (!state.isMounted.value) return
+
+    state.bevyInstance.value
+      ?.set_map_view_camera_settings({
+        ...state.mapViewCameraSettings.value,
+      })
+      .catch(console.error)
+  })
+
+  // TODO: replace by bi-directional communication, i.e. let the worker handle the update instead of on-demand poll which
+  // will swallow initial events
+  const debugWindow = shallowRef<Remote<WindowInstanceRef> | null>(null)
+  let debugWindowRequested = false
+
+  const releaseDebugWindowProxy = () => {
+    const debugWindowProxy = debugWindow.value
+    debugWindow.value = null
+    debugWindowProxy?.[releaseProxy]()
+  }
+
+  const requestDebugWindow = () => {
+    if (debugWindowRequested || debugWindow.value) return
+
+    const bevyInstance = state.bevyInstance.value
+    if (!state.isMounted.value || !bevyInstance) return
+
+    debugWindowRequested = true
+    bevyInstance
+      .get_debug_window()
+      .then((debugWindowRemote) => {
+        if (!debugWindowRemote) return
+
+        if (bevyInstances.get(instanceId) === state && state.bevyInstance.value === bevyInstance) {
+          debugWindow.value = debugWindowRemote
+        } else {
+          debugWindowRemote[releaseProxy]()
+        }
+      }, console.error)
+      .finally(() => {
+        debugWindowRequested = false
+      })
+  }
+
   watchEffect(() => {
     if (state.isMounted.value) {
-      resizeMountedBevyInstance(state, debugCanvasRenderSize.value, maplibreCanvasRenderSize.value)
+      requestDebugWindow()
+    } else {
+      releaseDebugWindowProxy()
     }
   })
 
-  watchEffect(() => {
-    if (state.isMounted.value) return
-
-    const debugCanvas = state.debugCanvas.value
-    const maplibreCanvas = state.maplibreCanvas.value
-    if (!debugCanvas || !maplibreCanvas) return
-
-    const debugSize = canvasRenderSize(debugCanvas)
-    const maplibreSize = canvasRenderSize(maplibreCanvas)
-
-    debugCanvasRenderSize.value = debugSize
-    maplibreCanvasRenderSize.value = maplibreSize
-
-    try {
-      mountRegisteredBevyInstance(state, debugSize, maplibreSize)
-    } catch (error) {
-      disposeBevyInstance(instanceId)
-      throw error
-    }
+  useForwardCanvasEvents(state.debugCanvas, () => {
+    requestDebugWindow()
+    return debugWindow.value
   })
-
-  watchEffect(() => {
-    if (!state.isMounted.value) return
-
-    state.bevyInstance.value?.set_map_view_settings(state.mapViewSettings.value)
-  })
-
-  watchEffect(() => {
-    if (!state.isMounted.value) return
-
-    state.bevyInstance.value?.set_map_view_camera_settings(state.mapViewCameraSettings.value)
-  })
-
-  useForwardDebugCanvasEvents(state.debugCanvas, state.isMounted, state.debugWindow)
 
   onScopeDisposeLifo(() => {
-    disposeBevyInstance(instanceId)
+    releaseDebugWindowProxy()
+    disposeBevyInstance(instanceId).catch(console.error)
   })
 
   return {
@@ -165,23 +237,14 @@ export function useBevy(instanceId: string) {
     isMounted: state.isMounted,
     debugCanvas: state.debugCanvas,
     textureCanvas: state.maplibreCanvas,
-    debugOffscreenCanvas: state.debugOffscreenCanvas,
-    textureOffscreenCanvas: state.textureOffscreenCanvas,
     bevyInstance: state.bevyInstance,
     mapViewSettings: state.mapViewSettings,
     mapViewCameraSettings: state.mapViewCameraSettings,
-    tick: () => {
+    tick: async () => {
       const bevyInstance = state.bevyInstance.value
-      if (!state.isMounted.value || !bevyInstance) return false
+      if (!state.isMounted.value || !bevyInstance) return null
 
-      bevyInstance.tick()
-      refreshBevyWindowRefs(state)
-      resizeMountedBevyInstance(
-        state,
-        state.debugCanvas.value ? canvasRenderSize(state.debugCanvas.value) : null,
-        state.maplibreCanvas.value ? canvasRenderSize(state.maplibreCanvas.value) : null,
-      )
-      return true
+      return (await Promise.all([state.refreshWindowSizes(), bevyInstance.tick()]))[1]
     },
   }
 }
@@ -228,7 +291,7 @@ function useStaticCanvasSource(
   )
 }
 
-function mountRegisteredBevyInstance(
+async function mountRegisteredBevyInstance(
   state: BevyInstanceState,
   debugSize: CanvasRenderSize,
   maplibreSize: CanvasRenderSize,
@@ -244,113 +307,37 @@ function mountRegisteredBevyInstance(
 
   try {
     debugCanvas.tabIndex = 0
-    state.debugOffscreenCanvas.value = getDebugOffscreenCanvas(debugCanvas, debugSize)
-    state.textureOffscreenCanvas.value = new OffscreenCanvas(
-      maplibreSize.width,
-      maplibreSize.height,
+
+    const worker = new BevyWorker()
+    state.bevyWorker.value = worker
+
+    const debugOffscreenCanvas = new OffscreenCanvas(debugSize.width, debugSize.height)
+    const textureOffscreenCanvas = new OffscreenCanvas(maplibreSize.width, maplibreSize.height)
+
+    state.bevyInstance.value = wrap<BevyInstance>(worker)
+    await state.bevyInstance.value.mount(
+      transfer(textureOffscreenCanvas, [textureOffscreenCanvas]),
+      transfer(debugOffscreenCanvas, [debugOffscreenCanvas]),
+      { ...state.mapViewSettings.value },
+      { ...state.mapViewCameraSettings.value },
+      debugSize,
+      maplibreSize,
     )
 
-    state.bevyInstance.value = new BevyInstance(
-      state.debugOffscreenCanvas.value,
-      state.textureOffscreenCanvas.value,
-    )
-    state.isMounted.value = true
-    refreshBevyWindowRefs(state)
-
-    resizeMountedBevyInstance(state, debugSize, maplibreSize)
-  } catch (error) {
-    state.isMounted.value = false
-
-    const bevyInstance = state.bevyInstance.value
-    state.bevyInstance.value = null
-    freeBevyWindowRefs(state)
-
-    if (bevyInstance) {
-      bevyInstance.free()
+    if (bevyInstances.get(state.instanceId) !== state) {
+      await releaseMountedBevyInstance(state)
+      return
     }
 
-    state.debugOffscreenCanvas.value = null
-    state.textureOffscreenCanvas.value = null
+    state.isMounted.value = true
+  } catch (error) {
+    state.isMounted.value = false
+    releaseMountedBevyInstance(state).catch(console.error)
     throw error
   }
 }
 
-function getDebugOffscreenCanvas(
-  debugCanvas: HTMLCanvasElement,
-  debugSize: CanvasRenderSize,
-): OffscreenCanvas {
-  const transferredCanvas = transferredDebugCanvases.get(debugCanvas)
-
-  if (transferredCanvas) {
-    transferredCanvas.width = debugSize.width
-    transferredCanvas.height = debugSize.height
-    return transferredCanvas
-  }
-
-  debugCanvas.width = debugSize.width
-  debugCanvas.height = debugSize.height
-
-  const offscreenCanvas = debugCanvas.transferControlToOffscreen()
-  transferredDebugCanvases.set(debugCanvas, offscreenCanvas)
-  return offscreenCanvas
-}
-
-function resizeMountedBevyInstance(
-  state: BevyInstanceState,
-  debugSize: CanvasRenderSize | null,
-  maplibreSize: CanvasRenderSize | null,
-) {
-  const bevyInstance = state.bevyInstance.value
-  if (!state.isMounted.value || !debugSize || !maplibreSize || !bevyInstance) return
-  refreshBevyWindowRefs(state)
-
-  if (
-    state.debugOffscreenCanvas.value &&
-    (state.debugOffscreenCanvas.value.width !== debugSize.width ||
-      state.debugOffscreenCanvas.value.height !== debugSize.height)
-  ) {
-    state.debugOffscreenCanvas.value.width = debugSize.width
-    state.debugOffscreenCanvas.value.height = debugSize.height
-  }
-
-  if (
-    state.textureOffscreenCanvas.value &&
-    (state.textureOffscreenCanvas.value.width !== maplibreSize.width ||
-      state.textureOffscreenCanvas.value.height !== maplibreSize.height)
-  ) {
-    state.textureOffscreenCanvas.value.width = maplibreSize.width
-    state.textureOffscreenCanvas.value.height = maplibreSize.height
-  }
-
-  state.debugWindow.value?.resize(debugSize.width, debugSize.height, debugSize.scaleFactor)
-  state.textureWindow.value?.resize(
-    maplibreSize.width,
-    maplibreSize.height,
-    maplibreSize.scaleFactor,
-  )
-}
-
-function refreshBevyWindowRefs(state: BevyInstanceState) {
-  const bevyInstance = state.bevyInstance.value
-  if (!state.isMounted.value || !bevyInstance) return
-
-  if (!state.debugWindow.value) {
-    state.debugWindow.value = bevyInstance.get_debug_window() ?? null
-  }
-
-  if (!state.textureWindow.value) {
-    state.textureWindow.value = bevyInstance.get_texture_window() ?? null
-  }
-}
-
-function freeBevyWindowRefs(state: BevyInstanceState) {
-  state.debugWindow.value?.free()
-  state.textureWindow.value?.free()
-  state.debugWindow.value = null
-  state.textureWindow.value = null
-}
-
-function disposeBevyInstance(instanceId: string) {
+async function disposeBevyInstance(instanceId: string) {
   const state = bevyInstances.get(instanceId)
 
   if (!state) return
@@ -361,10 +348,13 @@ function disposeBevyInstance(instanceId: string) {
 
   const bevyInstance = state.bevyInstance.value
   state.bevyInstance.value = null
-  freeBevyWindowRefs(state)
+  const bevyWorker = state.bevyWorker.value
+  state.bevyWorker.value = null
 
   if (bevyInstance) {
-    bevyInstance.free()
+    await releaseRemoteBevyInstance(bevyInstance, bevyWorker)
+  } else {
+    bevyWorker?.terminate()
   }
 
   releaseAttachedCanvas(state.debugCanvas.value, instanceId)
@@ -372,8 +362,31 @@ function disposeBevyInstance(instanceId: string) {
 
   state.debugCanvas.value = null
   state.maplibreCanvas.value = null
-  state.debugOffscreenCanvas.value = null
-  state.textureOffscreenCanvas.value = null
+}
+
+async function releaseMountedBevyInstance(state: BevyInstanceState) {
+  const bevyInstance = state.bevyInstance.value
+  const bevyWorker = state.bevyWorker.value
+  state.bevyInstance.value = null
+  state.bevyWorker.value = null
+
+  if (bevyInstance) {
+    await releaseRemoteBevyInstance(bevyInstance, bevyWorker)
+  } else {
+    bevyWorker?.terminate()
+  }
+}
+
+async function releaseRemoteBevyInstance(
+  bevyInstance: Remote<BevyInstance>,
+  bevyWorker: Worker | null,
+) {
+  try {
+    await bevyInstance.free()
+  } finally {
+    bevyInstance[releaseProxy]()
+    bevyWorker?.terminate()
+  }
 }
 
 function assertCanvasUnattached(
@@ -396,10 +409,9 @@ function releaseAttachedCanvas(canvas: HTMLCanvasElement | null, instanceId: str
   }
 }
 
-function useForwardDebugCanvasEvents(
+function useForwardCanvasEvents(
   canvas: ShallowRef<HTMLCanvasElement | null>,
-  isMounted: Ref<boolean>,
-  debugWindow: ShallowRef<WindowInstanceRef | null>,
+  window: MaybeRefOrGetter<Remote<WindowInstanceRef> | null>,
 ) {
   const canvasPosition = (event: MouseEvent | PointerEvent) => {
     const currentCanvas = canvas.value
@@ -412,60 +424,64 @@ function useForwardDebugCanvasEvents(
     }
   }
 
-  const onlyMounted = (callback: (windowRef: WindowInstanceRef) => void) => {
-    const mountedDebugWindow = debugWindow.value
-    if (!isMounted.value || !mountedDebugWindow) return
-
-    callback(mountedDebugWindow)
+  const withWindow = (callback: (windowDefined: Remote<WindowInstanceRef>) => Promise<unknown>) => {
+    const windowDefined = toValue(window)
+    if (windowDefined) {
+      callback(windowDefined).catch(console.error)
+    }
   }
 
   useEventListener(canvas, 'pointerenter', () => {
-    onlyMounted((windowRef) => windowRef.forward_cursor_entered())
+    withWindow((windowDefined) => windowDefined.forward_cursor_entered())
   })
 
   useEventListener(canvas, 'pointerleave', () => {
-    onlyMounted((windowRef) => windowRef.forward_cursor_left())
+    withWindow((windowDefined) => windowDefined.forward_cursor_left())
   })
 
   useEventListener(canvas, 'pointermove', (event) => {
-    const mountedDebugWindow = debugWindow.value
-    if (!isMounted.value || !mountedDebugWindow) return
+    withWindow(async (windowDefined) => {
+      event.preventDefault()
+      const position = canvasPosition(event)
+      if (!position) return
 
-    event.preventDefault()
-    const position = canvasPosition(event)
-    if (!position) return
-
-    mountedDebugWindow.forward_cursor_moved(
-      position.x,
-      position.y,
-      event.movementX,
-      event.movementY,
-    )
+      await windowDefined.forward_cursor_moved(
+        position.x,
+        position.y,
+        event.movementX,
+        event.movementY,
+      )
+    })
   })
 
   useEventListener(canvas, 'pointerdown', (event) => {
-    const currentCanvas = canvas.value
-    const mountedDebugWindow = debugWindow.value
-    if (!isMounted.value || !currentCanvas || !mountedDebugWindow) return
+    withWindow(async (windowDefined) => {
+      const currentCanvas = canvas.value
+      if (!currentCanvas) return
 
-    event.preventDefault()
-    currentCanvas.focus({ preventScroll: true })
-    if (!currentCanvas.hasPointerCapture(event.pointerId)) {
-      currentCanvas.setPointerCapture(event.pointerId)
-    }
-    mountedDebugWindow.forward_mouse_button(event.button, true)
+      event.preventDefault()
+      currentCanvas.focus({ preventScroll: true })
+      if (!currentCanvas.hasPointerCapture(event.pointerId)) {
+        currentCanvas.setPointerCapture(event.pointerId)
+      }
+
+      await windowDefined.forward_mouse_button(event.button, true)
+    })
   })
 
   useEventListener(canvas, 'pointerup', (event) => {
-    const currentCanvas = canvas.value
-    const mountedDebugWindow = debugWindow.value
-    if (!isMounted.value || !currentCanvas || !mountedDebugWindow) return
+    withWindow(async (windowDefined) => {
+      const currentCanvas = canvas.value
+      if (!currentCanvas) return
 
-    event.preventDefault()
-    if (currentCanvas.hasPointerCapture(event.pointerId)) {
-      currentCanvas.releasePointerCapture(event.pointerId)
-    }
-    mountedDebugWindow.forward_mouse_button(event.button, false)
+      event.preventDefault()
+
+      if (currentCanvas.hasPointerCapture(event.pointerId)) {
+        currentCanvas.releasePointerCapture(event.pointerId)
+      }
+
+      await windowDefined.forward_mouse_button(event.button, false)
+    })
   })
 
   useEventListener(canvas, 'pointercancel', (event) => {
@@ -481,49 +497,39 @@ function useForwardDebugCanvasEvents(
     canvas,
     'wheel',
     (event) => {
-      const mountedDebugWindow = debugWindow.value
-      if (!isMounted.value || !mountedDebugWindow) return
-
-      event.preventDefault()
-      mountedDebugWindow.forward_mouse_wheel(event.deltaX, event.deltaY, event.deltaMode)
+      withWindow(async (windowDefined) => {
+        event.preventDefault()
+        await windowDefined.forward_mouse_wheel(event.deltaX, event.deltaY, event.deltaMode)
+      })
     },
     { passive: false },
   )
 
   useEventListener(canvas, 'focus', () => {
-    onlyMounted((windowRef) => windowRef.forward_focus(true))
+    withWindow((windowDefined) => windowDefined.forward_focus(true))
   })
 
   useEventListener(canvas, 'blur', () => {
-    onlyMounted((windowRef) => windowRef.forward_focus(false))
+    withWindow((windowDefined) => windowDefined.forward_focus(false))
   })
 
   useEventListener(canvas, 'keydown', (event) => {
-    onlyMounted((windowRef) =>
-      windowRef.forward_keyboard_input(event.code, event.key, true, event.repeat),
+    withWindow((windowDefined) =>
+      windowDefined.forward_keyboard_input(event.code, event.key, true, event.repeat),
     )
   })
 
   useEventListener(canvas, 'keyup', (event) => {
-    onlyMounted((windowRef) =>
-      windowRef.forward_keyboard_input(event.code, event.key, false, event.repeat),
+    withWindow((windowDefined) =>
+      windowDefined.forward_keyboard_input(event.code, event.key, false, event.repeat),
     )
   })
 }
 
 function canvasRenderSize(canvas: HTMLCanvasElement): CanvasRenderSize {
-  const clientWidth = Math.round(canvas.clientWidth * devicePixelRatio)
-  const clientHeight = Math.round(canvas.clientHeight * devicePixelRatio)
-  const width = Math.max(1, clientWidth || canvas.width)
-  const height = Math.max(1, clientHeight || canvas.height)
-  const scaleFactor = Math.max(
-    1,
-    canvas.clientWidth > 0 ? width / canvas.clientWidth : devicePixelRatio,
-  )
-
   return {
-    width,
-    height,
-    scaleFactor,
+    width: canvas.clientWidth,
+    height: canvas.clientHeight,
+    scaleFactor: devicePixelRatio,
   }
 }

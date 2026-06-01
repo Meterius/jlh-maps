@@ -171,14 +171,14 @@ fn resize_window(world: &mut World, entity: Entity, width: u32, height: u32, sca
             let scale_factor = scale_factor.max(1.0);
             let scale_factor_changed = (window.scale_factor() - scale_factor).abs() > f32::EPSILON;
             let size_changed =
-                window.physical_width() != width || window.physical_height() != height;
+                window.width() as u32 != width || window.height() as u32 != height;
 
             if !scale_factor_changed && !size_changed {
                 return (false, None);
             }
 
             window.resolution.set_scale_factor(scale_factor);
-            window.resolution.set_physical_resolution(width, height);
+            window.resolution.set(width as f32, height as f32);
 
             let resized = WindowResized {
                 window: entity,

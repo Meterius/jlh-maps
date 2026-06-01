@@ -1,3 +1,4 @@
+use bevy::audio::AudioPlugin;
 use crate::app::common::debug_gizmos::DebugGizmosPlugin;
 use crate::app::common::editor::EditorPlugin;
 use crate::app::common::materials::MaterialsPlugin;
@@ -89,6 +90,10 @@ pub fn setup_app(app: &mut App, debug_canvas: OffscreenCanvas, texture_canvas: O
                     present_mode: PresentMode::AutoNoVsync,
                     transparent: true,
                     composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
+                    // used by winit which is not used, if enabled causes bevy_egui
+                    // to try to install hidden input in DOM which is unavailable in workers causing
+                    // a panic
+                    prevent_default_event_handling: false,
                     ..default()
                 }),
                 exit_condition: ExitCondition::DontExit,
@@ -104,7 +109,9 @@ pub fn setup_app(app: &mut App, debug_canvas: OffscreenCanvas, texture_canvas: O
             })
             .disable::<LogPlugin>()
             .disable::<WinitPlugin>()
-            .disable::<TransformPlugin>(),
+            .disable::<TransformPlugin>()
+            .disable::<GilrsPlugin>()
+            .disable::<AudioPlugin>(),
         MaterialsPlugin,
         BigSpaceDefaultPlugins,
         EguiPlugin::default(),

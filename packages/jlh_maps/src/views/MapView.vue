@@ -405,7 +405,7 @@ import {
   watchDefinedOnce,
 } from '@/composables/helper.ts'
 import { useMaplibreIntegration } from '@/bevy/maplibre-integration'
-import { mountBevy, useBevy } from '@/bevy'
+import { mountBevy, useBevy, type UseBevyReturn } from '@/bevy'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
 import MapSlideover, { type MapSlideoverTab } from '@/views/map-view/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
@@ -572,34 +572,55 @@ const closePendingBevyFrameBitmap = () => {
 }
 
 let pendingBevyFrame = 0
+let bevyTickFailure = false
 
-const tickBevyAndProduceFrame = async () => {
+const tickBevyAndProduceFrame = async (transform?: unknown) => {
   const mountedBevy = bevyMount.value
-  const textureCanvas = mountedBevy?.useBevyRet.textureOffscreenCanvas.value
-  if (!mountedBevy || !textureCanvas) {
+  if (!mountedBevy) {
     closePendingBevyFrameBitmap()
     return
   }
 
   const frameId = ++pendingBevyFrame
 
-  mountedBevy.useMaplibreIntegrationRet.syncOnRender()
-  const ticked = mountedBevy.useBevyRet.tick()
+  let frame: Awaited<ReturnType<UseBevyReturn['tick']>> | null = null
+  try {
+    frame = bevyTickFailure
+      ? null
+      : (
+          await Promise.all([
+            mountedBevy.useMaplibreIntegrationRet.syncOnRender(),
+            mountedBevy.useBevyRet.tick(),
+          ])
+        )[1]
+  } catch (error) {
+    bevyTickFailure = true
+    console.error('Bevy worker tick failed', error)
+  }
 
-  if (!ticked) {
+  if (!frame) {
     closePendingBevyFrameBitmap()
     return
   }
 
-  const frameBitmap = await createImageBitmap(textureCanvas)
   if (frameId !== pendingBevyFrame) {
-    frameBitmap.close()
+    frame.textureBitmap.close()
+    frame.debugBitmap?.close()
     return
   }
 
   const previousFrameBitmap = bevyFrameBitmap.value
-  bevyFrameBitmap.value = frameBitmap
+  bevyFrameBitmap.value = frame.textureBitmap
   previousFrameBitmap?.close()
+
+  if (bevyDebugCanvas.value) {
+    const context = bevyDebugCanvas.value.getContext('bitmaprenderer')
+    if (context) {
+      context.transferFromImageBitmap(frame.debugBitmap)
+    } else {
+      frame.debugBitmap?.close()
+    }
+  }
 }
 
 onScopeDisposeLifo(() => {
@@ -608,9 +629,12 @@ onScopeDisposeLifo(() => {
   ++pendingBevyFrame
 })
 
-watchDefinedOnce(() => mapInstance.map, (map) => {
-  map.setRenderCompositeHook(tickBevyAndProduceFrame)
-})
+watchDefinedOnce(
+  () => mapInstance.map,
+  (map) => {
+    map.setRenderCompositeHook(tickBevyAndProduceFrame)
+  },
+)
 
 // Controls
 

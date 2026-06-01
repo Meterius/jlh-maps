@@ -88,13 +88,14 @@ export class BevyLayer implements CustomLayerInterface {
   render(): void {}
 
   renderComposite(gl: WebGL2RenderingContext | WebGLRenderingContext): void {
+    this.map.triggerRepaint()
+
     const frameBitmap = this.frameBitmap.value
     if (!frameBitmap) return
     this.frameBitmap.value = null
 
     if (!this.program || !this.vertexBuffer || !this.texture) {
       frameBitmap.close()
-      this.map.triggerRepaint()
       return
     }
 
@@ -170,8 +171,6 @@ export class BevyLayer implements CustomLayerInterface {
       this.map.painter.depthRangeFor3D[1],
     )
     gl.drawArrays(gl.TRIANGLES, 0, 6)
-
-    this.map.triggerRepaint()
   }
 
   onRemove(_map: MapLibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext): void {
