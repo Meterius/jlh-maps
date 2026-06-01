@@ -1,4 +1,9 @@
-import { addProtocol, type AddProtocolAction, type GetResourceResponse, type RequestParameters } from 'maplibre-gl'
+import {
+  addProtocol,
+  type AddProtocolAction,
+  type GetResourceResponse,
+  type RequestParameters,
+} from 'maplibre-gl'
 import { Protocol } from 'pmtiles'
 
 const DEMO_ASSETS_PROTOCOL = 'demo-assets'
@@ -22,7 +27,11 @@ export function registerMaplibreProtocols() {
 }
 
 const loadDemoAsset: AddProtocolAction = async (requestParameters, abortController) =>
-  fetchDemoResource(getDemoPath(requestParameters.url, DEMO_ASSETS_PROTOCOL), requestParameters, abortController)
+  fetchDemoResource(
+    getDemoPath(requestParameters.url, DEMO_ASSETS_PROTOCOL),
+    requestParameters,
+    abortController,
+  )
 
 const loadDemoGlyphs: AddProtocolAction = async (requestParameters, abortController) => {
   const pathSegments = getDemoPath(requestParameters.url, DEMO_GLYPHS_PROTOCOL)
@@ -43,7 +52,11 @@ const loadDemoGlyphs: AddProtocolAction = async (requestParameters, abortControl
 
   pathSegments[fontstackIndex] = selectFirstFont(fontstack)
 
-  return fetchDemoResource(pathSegments.map(encodeURIComponent).join('/'), requestParameters, abortController)
+  return fetchDemoResource(
+    pathSegments.map(encodeURIComponent).join('/'),
+    requestParameters,
+    abortController,
+  )
 }
 
 const loadDemoPmtiles: AddProtocolAction = async (requestParameters, abortController) => {
@@ -114,7 +127,9 @@ async function fetchDemoResource(
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to load ${requestParameters.url}: ${response.status} ${response.statusText}`)
+    throw new Error(
+      `Failed to load ${requestParameters.url}: ${response.status} ${response.statusText}`,
+    )
   }
 
   const expiry = {
@@ -143,11 +158,7 @@ async function fetchDemoResource(
 }
 
 function resolveDemoUrl(logicalPath: string): URL {
-  const encodedPath = logicalPath
-    .split('/')
-    .filter(Boolean)
-    .map(encodeDemoPathSegment)
-    .join('/')
+  const encodedPath = logicalPath.split('/').filter(Boolean).map(encodeDemoPathSegment).join('/')
 
   return new URL(`${DEMO_ROOT}/${encodedPath}`, appBaseUrl)
 }

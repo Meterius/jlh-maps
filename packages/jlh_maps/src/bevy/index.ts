@@ -240,11 +240,11 @@ export function useBevy(instanceId: string) {
     bevyInstance: state.bevyInstance,
     mapViewSettings: state.mapViewSettings,
     mapViewCameraSettings: state.mapViewCameraSettings,
-    tick: async () => {
+    tick: async (frameIdx: number) => {
       const bevyInstance = state.bevyInstance.value
       if (!state.isMounted.value || !bevyInstance) return null
 
-      return (await Promise.all([state.refreshWindowSizes(), bevyInstance.tick()]))[1]
+      return (await Promise.all([state.refreshWindowSizes(), bevyInstance.tick(frameIdx)]))[1]
     },
   }
 }

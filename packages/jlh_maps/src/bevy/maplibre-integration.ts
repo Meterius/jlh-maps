@@ -89,7 +89,8 @@ export function useMaplibreIntegration(
   )
 
   return {
-    syncOnRender: () => mapIntegration.value?.syncOnRender() ?? Promise.resolve(),
+    syncOnRender: (frameIdx: number) =>
+      mapIntegration.value?.syncOnRender(frameIdx) ?? Promise.resolve(),
   }
 }
 
@@ -123,10 +124,10 @@ class MaplibreGlJsIntegration {
     )
   }
 
-  async syncOnRender() {
+  async syncOnRender(frameIdx: number) {
     if (this.stopped) return
 
-    await Promise.all([this.syncView(), this.syncTerrain(), this.syncVisibleSourceTiles()])
+    await Promise.all([this.syncView(frameIdx), this.syncTerrain(), this.syncVisibleSourceTiles()])
   }
 
   stop() {
@@ -163,13 +164,14 @@ class MaplibreGlJsIntegration {
     })
   }
 
-  private async syncView() {
+  private async syncView(frameId: number) {
     const center = this.map.getCenter()
     const canvas = this.map.getCanvas()
     const mainMatrix = this.getMainMatrix()
     if (!mainMatrix) return
 
     await this.bevyMapIntegration.sync_view(
+      frameId,
       canvas.width,
       canvas.height,
       this.map.getZoom(),

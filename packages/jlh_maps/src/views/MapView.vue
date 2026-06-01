@@ -581,7 +581,7 @@ const tickBevyAndProduceFrame = async (transform?: unknown) => {
     return
   }
 
-  const frameId = ++pendingBevyFrame
+  const frameIdx = ++pendingBevyFrame
 
   let frame: Awaited<ReturnType<UseBevyReturn['tick']>> | null = null
   try {
@@ -589,8 +589,8 @@ const tickBevyAndProduceFrame = async (transform?: unknown) => {
       ? null
       : (
           await Promise.all([
-            mountedBevy.useMaplibreIntegrationRet.syncOnRender(),
-            mountedBevy.useBevyRet.tick(),
+            mountedBevy.useMaplibreIntegrationRet.syncOnRender(frameIdx),
+            mountedBevy.useBevyRet.tick(frameIdx),
           ])
         )[1]
   } catch (error) {
@@ -603,7 +603,7 @@ const tickBevyAndProduceFrame = async (transform?: unknown) => {
     return
   }
 
-  if (frameId !== pendingBevyFrame) {
+  if (frameIdx !== pendingBevyFrame) {
     frame.textureBitmap.close()
     frame.debugBitmap?.close()
     return

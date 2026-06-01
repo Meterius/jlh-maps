@@ -6,6 +6,9 @@ import initApp, {
   type MapViewSettings,
   type WindowInstanceRef as BevyWindowInstanceRef,
 } from 'jlh_maps_app'
+import { TickGate, type TickGateHolder } from '@/bevy/helper.ts'
+
+const TICK_GATE_TIMEOUT_MS = 50
 
 let initAppPromise: Promise<unknown> | null = null
 
@@ -21,10 +24,17 @@ export type CanvasRenderSize = {
 }
 
 class WorkerMaplibreIntegration {
-  constructor(private readonly integration: BevyMaplibreIntegration) {}
+  constructor(
+    private readonly integration: BevyMaplibreIntegration,
+    private readonly tickGateHolder: TickGateHolder,
+  ) {}
 
   free() {
-    this.integration.free()
+    try {
+      this.tickGateHolder.free()
+    } finally {
+      this.integration.free()
+    }
   }
 
   remove_source_tile(sourceId: string, z: number, x: number, y: number) {
@@ -40,6 +50,7 @@ class WorkerMaplibreIntegration {
   }
 
   sync_view(
+    frameId: number,
     width: number,
     height: number,
     zoom: number,
@@ -49,16 +60,20 @@ class WorkerMaplibreIntegration {
     centerLat: number,
     mainMatrix: Float64Array,
   ) {
-    this.integration.sync_view(
-      width,
-      height,
-      zoom,
-      pitch,
-      bearing,
-      centerLng,
-      centerLat,
-      mainMatrix,
-    )
+    try {
+      this.integration.sync_view(
+        width,
+        height,
+        zoom,
+        pitch,
+        bearing,
+        centerLng,
+        centerLat,
+        mainMatrix,
+      )
+    } finally {
+      this.tickGateHolder.release(frameId)
+    }
   }
 
   update_source_tile(sourceId: string, z: number, x: number, y: number, data: Uint8Array) {
@@ -107,6 +122,8 @@ class WorkerBevyInstance {
 
   private mapViewSettings: MapViewSettings | null = null
 
+  private readonly tickGate = new TickGate()
+
   async mount(
     textureCanvas: OffscreenCanvas,
     debugCanvas: OffscreenCanvas,
@@ -133,6 +150,7 @@ class WorkerBevyInstance {
     this.textureWindow?.free()
     this.debugWindow = null
     this.textureWindow = null
+    this.tickGate.free()
 
     this.bevyInstance?.free()
     this.bevyInstance = null
@@ -153,11 +171,21 @@ class WorkerBevyInstance {
     return true
   }
 
-  async tick() {
+  async tick(frameIdx: number) {
     const bevyInstance = this.bevyInstance
     const textureCanvas = this.textureCanvas
     const debugCanvas = this.debugCanvas
     if (!bevyInstance || !textureCanvas || !debugCanvas) return null
+
+    // since instance and integration messages are handled by separate event listeners,
+    // even if the messages are sent in order from the main thread, they may be processed out-of-order
+    // thus requiring the tick gate mechanism
+    const tickGateResult = await this.tickGate.untilTickReleased(frameIdx, TICK_GATE_TIMEOUT_MS)
+    if (!tickGateResult.released) {
+      console.warn(
+        `Bevy tick gate timed out after ${TICK_GATE_TIMEOUT_MS}ms waiting for holder(s): ${tickGateResult.pendingHolderIds.join(', ')}`,
+      )
+    }
 
     bevyInstance.tick()
     this.refreshWindowRefs()
@@ -187,7 +215,16 @@ class WorkerBevyInstance {
       throw new Error('Cannot create MapLibre integration before Bevy is mounted')
     }
 
-    return proxy(new WorkerMaplibreIntegration(bevyInstance.create_map_integration()))
+    const tickGateHolder = this.tickGate.registerHolder()
+
+    try {
+      return proxy(
+        new WorkerMaplibreIntegration(bevyInstance.create_map_integration(), tickGateHolder),
+      )
+    } catch (error) {
+      tickGateHolder.free()
+      throw error
+    }
   }
 
   get_debug_window() {
