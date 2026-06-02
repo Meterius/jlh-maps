@@ -1,4 +1,6 @@
 use crate::app::maplibre_gl_js::mvt::parse_tile_layers;
+use crate::app::task_pool::AppTaskPool;
+use crate::wasm_task_pool::Task;
 use bevy::prelude::Reflect;
 use geojson::Geometry;
 use serde::Deserialize;
@@ -37,6 +39,7 @@ pub struct MlTerrainTile {
 pub struct MlData {
     pub sources: HashMap<String, MlSource>,
     next_revision: u64,
+    pending_tile_parse_tasks: HashMap<MlTileKey, MlTileParseTask>,
 }
 
 #[derive(Default)]
@@ -65,27 +68,95 @@ pub struct MlTileFeature {
     pub properties: HashMap<String, serde_json::Value>,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct MlTileKey {
+    source_id: String,
+    tile_id: CanonicalTileId,
+}
+
+impl MlTileKey {
+    fn new(source_id: impl Into<String>, tile_id: CanonicalTileId) -> Self {
+        Self {
+            source_id: source_id.into(),
+            tile_id,
+        }
+    }
+}
+
+struct MlTileParseTask {
+    revision: u64,
+    task: Task<Result<HashMap<String, MlTile>, String>>,
+}
+
 impl MlData {
     pub fn update_tile(
         &mut self,
         source_id: String,
         tile_id: CanonicalTileId,
         data: Vec<u8>,
-    ) -> Result<u64, String> {
+        task_pool: &AppTaskPool,
+    ) -> u64 {
         self.next_revision = self.next_revision.saturating_add(1).max(1);
         let revision = self.next_revision;
-        let layers = match parse_tile_layers(tile_id, data, revision) {
-            Ok(layers) => layers,
-            Err(err) => {
-                self.remove_tile(&source_id, &tile_id);
-                return Err(err);
+
+        let task = task_pool.spawn(move || parse_tile_layers(tile_id, data, revision));
+        self.pending_tile_parse_tasks.insert(
+            MlTileKey::new(source_id, tile_id),
+            MlTileParseTask { revision, task },
+        );
+
+        revision
+    }
+
+    pub fn apply_pending_tile_parse_results(&mut self) {
+        let completed_tasks = self
+            .pending_tile_parse_tasks
+            .iter_mut()
+            .filter_map(|(tile_key, pending_task)| {
+                pending_task
+                    .task
+                    .poll_once()
+                    .map(|layers| (tile_key.clone(), pending_task.revision, layers))
+            })
+            .collect::<Vec<_>>();
+
+        for (tile_key, revision, layers) in completed_tasks {
+            let is_current = self
+                .pending_tile_parse_tasks
+                .get(&tile_key)
+                .is_some_and(|pending_task| pending_task.revision == revision);
+            if !is_current {
+                continue;
             }
-        };
 
-        self.remove_tile(&source_id, &tile_id);
+            self.pending_tile_parse_tasks.remove(&tile_key);
+            self.remove_tile_layers(&tile_key.source_id, &tile_key.tile_id);
 
+            let layers = match layers {
+                Ok(layers) => layers,
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to parse MapLibre source tile {}/{:?}: {}",
+                        tile_key.source_id,
+                        tile_key.tile_id,
+                        err
+                    );
+                    continue;
+                }
+            };
+
+            self.apply_tile_layers(tile_key.source_id, tile_key.tile_id, layers);
+        }
+    }
+
+    fn apply_tile_layers(
+        &mut self,
+        source_id: String,
+        tile_id: CanonicalTileId,
+        layers: HashMap<String, MlTile>,
+    ) {
         if layers.is_empty() {
-            return Ok(revision);
+            return;
         }
 
         let source = self
@@ -101,11 +172,15 @@ impl MlData {
                 .tiles
                 .insert(tile_id, Arc::new(tile));
         }
-
-        Ok(revision)
     }
 
     pub fn remove_tile(&mut self, source_id: &str, tile_id: &CanonicalTileId) {
+        self.pending_tile_parse_tasks
+            .remove(&MlTileKey::new(source_id, *tile_id));
+        self.remove_tile_layers(source_id, tile_id);
+    }
+
+    fn remove_tile_layers(&mut self, source_id: &str, tile_id: &CanonicalTileId) {
         let Some(source) = self.sources.get_mut(source_id) else {
             return;
         };

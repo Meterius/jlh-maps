@@ -5,6 +5,7 @@ use crate::app::maplibre_gl_js::integration::{
 use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile, MlView};
 use crate::app::maplibre_gl_js::utils::dem_data::DEMData;
 use crate::app::maplibre_gl_js::utils::terrain::TerrainData;
+use crate::app::task_pool::AppTaskPool;
 use anyhow::anyhow;
 use bevy::math::DMat4;
 use bevy::prelude::{Name, World, default};
@@ -178,12 +179,17 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
+            let Some(task_pool) = world.get_resource::<AppTaskPool>().cloned() else {
+                tracing::warn!(
+                    "Failed to schedule MapLibre source tile parse: AppTaskPool resource not found"
+                );
+                return;
+            };
+
             with_map_data_mut(world, integration_id, |map_data| {
-                if let Err(err) = map_data.data.update_tile(source_id.clone(), tile_id, data) {
-                    tracing::warn!(
-                        "Failed to parse MapLibre source tile {source_id}/{tile_id:?}: {err}"
-                    );
-                }
+                map_data
+                    .data
+                    .update_tile(source_id, tile_id, data, &task_pool);
             });
         })
     }
