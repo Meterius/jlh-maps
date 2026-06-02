@@ -3,6 +3,7 @@ use bevy::prelude::Reflect;
 use geojson::Geometry;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::app::maplibre_gl_js::utils::terrain::TerrainData;
 
@@ -47,7 +48,7 @@ pub struct MlSource {
 #[derive(Default)]
 pub struct MlLayer {
     pub id: String,
-    pub tiles: HashMap<CanonicalTileId, MlTile>,
+    pub tiles: HashMap<CanonicalTileId, Arc<MlTile>>,
 }
 
 #[derive(Default)]
@@ -98,7 +99,7 @@ impl MlData {
                 .entry(layer_id.clone())
                 .or_insert_with(|| MlLayer::new(layer_id))
                 .tiles
-                .insert(tile_id, tile);
+                .insert(tile_id, Arc::new(tile));
         }
 
         Ok(revision)
