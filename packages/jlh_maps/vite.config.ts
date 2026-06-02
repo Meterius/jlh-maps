@@ -1,6 +1,7 @@
 import { fileURLToPath, URL } from 'node:url'
+import { readFileSync } from 'node:fs'
 
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
 import ui from '@nuxt/ui/vite'
@@ -13,6 +14,49 @@ const outlineSolidBase =
 const crossOriginIsolationHeaders = {
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'credentialless',
+}
+
+const coiServiceWorkerPath = fileURLToPath(
+  new URL('./node_modules/coi-serviceworker/coi-serviceworker.js', import.meta.url),
+)
+
+// injects https://github.com/gzuidhof/coi-serviceworker into demo build which is required
+// to allow a static headless file server to run with COEP and COOP headers required for wasm threading
+function demoCoopCoepPlugin(enabled: boolean): Plugin {
+  return {
+    name: 'jlh-maps-demo-coop-coep',
+    apply: 'build' as const,
+    transformIndexHtml() {
+      if (!enabled) {
+        return
+      }
+
+      return [
+        {
+          tag: 'script',
+          children:
+            'window.coi = { coepCredentialless: () => true, quiet: () => true }',
+          injectTo: 'head' as const,
+        },
+        {
+          tag: 'script',
+          attrs: {
+            src: './coi-serviceworker.js',
+          },
+          injectTo: 'head' as const,
+        },
+      ]
+    },
+    generateBundle() {
+      if (enabled) {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'coi-serviceworker.js',
+          source: readFileSync(coiServiceWorkerPath, 'utf8'),
+        })
+      }
+    },
+  }
 }
 
 // https://vite.dev/config/
@@ -33,6 +77,7 @@ export default defineConfig(({ mode }) => ({
     headers: crossOriginIsolationHeaders,
   },
   plugins: [
+    demoCoopCoepPlugin(mode === 'demo'),
     wasm(),
     vue(),
     ui({
