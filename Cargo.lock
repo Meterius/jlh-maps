@@ -4832,6 +4832,7 @@ dependencies = [
  "itertools 0.14.0",
  "mvt-reader",
  "raw-window-handle",
+ "rayon",
  "serde",
  "serde_json",
  "smallvec",

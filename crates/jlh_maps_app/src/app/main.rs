@@ -1,4 +1,3 @@
-use bevy::audio::AudioPlugin;
 use crate::app::common::debug_gizmos::DebugGizmosPlugin;
 use crate::app::common::editor::EditorPlugin;
 use crate::app::common::materials::MaterialsPlugin;
@@ -10,6 +9,7 @@ use crate::app::maplibre_gl_js::MaplibreGlJsPlugin;
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::offscreen_window_handle::OffscreenWindowHandle;
 use crate::app::window_events::WindowInstanceRef;
+use bevy::audio::AudioPlugin;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;

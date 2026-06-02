@@ -1,4 +1,6 @@
 use crate::app::main::setup_app;
+use crate::app::task_pool::AppTaskPool;
+use crate::app::task_pool::AppTaskPoolPlugin;
 use bevy::app::{App, PluginsState};
 use bevy::log::LogPlugin;
 use bevy::prelude;
@@ -56,6 +58,7 @@ impl BevyInstance {
         initialize();
 
         let mut app = App::new();
+        app.add_plugins(AppTaskPoolPlugin {});
         setup_app(&mut app, debug_canvas, texture_canvas);
 
         Self {
@@ -102,6 +105,26 @@ impl BevyInstance {
         }
 
         managed_app.app.update();
+        Ok(())
+    }
+
+    pub fn tick_secondary(&self) -> prelude::Result<(), String> {
+        let mut managed_app_ref = self.inner.managed_app.borrow_mut();
+
+        let Some(managed_app) = managed_app_ref.as_mut() else {
+            return Err("Bevy instance is not mounted".to_string());
+        };
+
+        if managed_app.plugins_cleaned {
+            let world = managed_app.app.world_mut();
+
+            let Some(app_task_pool) = world.get_resource_mut::<AppTaskPool>() else {
+                return Err("AppTaskPool resource not found".to_string());
+            };
+
+            app_task_pool.tick_until_empty();
+        }
+
         Ok(())
     }
 }

@@ -170,8 +170,7 @@ fn resize_window(world: &mut World, entity: Entity, width: u32, height: u32, sca
         world.get_mut::<Window>(entity).map(|mut window| {
             let scale_factor = scale_factor.max(1.0);
             let scale_factor_changed = (window.scale_factor() - scale_factor).abs() > f32::EPSILON;
-            let size_changed =
-                window.width() as u32 != width || window.height() as u32 != height;
+            let size_changed = window.width() as u32 != width || window.height() as u32 != height;
 
             if !scale_factor_changed && !size_changed {
                 return (false, None);

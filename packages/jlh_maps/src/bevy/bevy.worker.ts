@@ -121,6 +121,7 @@ class WorkerBevyInstance {
   private textureWindow: BevyWindowInstanceRef | null = null
 
   private mapViewSettings: MapViewSettings | null = null
+  private secondaryTickScheduled = false
 
   private readonly tickGate = new TickGate()
 
@@ -151,6 +152,7 @@ class WorkerBevyInstance {
     this.debugWindow = null
     this.textureWindow = null
     this.tickGate.free()
+    this.secondaryTickScheduled = false
 
     this.bevyInstance?.free()
     this.bevyInstance = null
@@ -206,6 +208,8 @@ class WorkerBevyInstance {
     } catch (error) {
       console.warn('Failed to create ImageBitmap:', error)
       return null
+    } finally {
+      this.scheduleSecondaryTick(bevyInstance)
     }
   }
 
@@ -261,6 +265,22 @@ class WorkerBevyInstance {
 
     this.debugWindow ??= bevyInstance.get_debug_window() ?? null
     this.textureWindow ??= bevyInstance.get_texture_window() ?? null
+  }
+
+  private scheduleSecondaryTick(bevyInstance: BevyBevyInstance) {
+    if (this.secondaryTickScheduled) return
+    this.secondaryTickScheduled = true
+
+    setTimeout(() => {
+      this.secondaryTickScheduled = false
+      if (this.bevyInstance !== bevyInstance) return
+
+      try {
+        bevyInstance.tick_secondary()
+      } catch (error) {
+        console.warn('Failed to execute secondary Bevy tick:', error)
+      }
+    }, 0)
   }
 }
 
