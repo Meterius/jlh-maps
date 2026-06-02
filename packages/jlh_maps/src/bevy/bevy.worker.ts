@@ -1,20 +1,87 @@
 import { expose, proxy, transfer } from 'comlink'
-import initApp, {
+import { threads } from 'wasm-feature-detect'
+import type {
   BevyInstance as BevyBevyInstance,
-  type MaplibreIntegration as BevyMaplibreIntegration,
-  type MapViewCameraSettings,
-  type MapViewSettings,
-  type WindowInstanceRef as BevyWindowInstanceRef,
+  MaplibreIntegration as BevyMaplibreIntegration,
+  MapViewCameraSettings,
+  MapViewSettings,
+  WindowInstanceRef as BevyWindowInstanceRef,
 } from 'jlh_maps_app'
 import { TickGate, type TickGateHolder } from '@/bevy/helper.ts'
 
 const TICK_GATE_TIMEOUT_MS = 50
 
-let initAppPromise: Promise<unknown> | null = null
+type WasmAppModule = typeof import('jlh_maps_app') & {
+  initThreadPool?: (numThreads: number) => Promise<void>
+}
+
+let initAppPromise: Promise<WasmAppModule> | null = null
 
 function ensureInitialized() {
-  initAppPromise ??= initApp()
+  initAppPromise ??= initializeRustWasm()
   return initAppPromise
+}
+
+async function initializeRustWasm(): Promise<WasmAppModule> {
+  if (await wasmThreadsAvailable()) {
+    try {
+      const threadedModule = (await import('jlh_maps_app_threaded')) as unknown as WasmAppModule
+      await threadedModule.default()
+      await initializeRustThreadPool(threadedModule)
+      return threadedModule
+    } catch (error) {
+      console.warn('Failed to initialize threaded Rust wasm; using non-threaded wasm', error)
+    }
+  } else {
+    console.warn('WebAssembly threads are unavailable; using non-threaded Rust wasm')
+  }
+
+  const wasmModule = (await import('jlh_maps_app')) as WasmAppModule
+  await wasmModule.default()
+  return wasmModule
+}
+
+async function initializeRustThreadPool(wasmModule: WasmAppModule) {
+  const initThreadPool = wasmModule.initThreadPool
+  if (typeof initThreadPool !== 'function') {
+    throw new Error('Threaded Rust wasm package did not export initThreadPool')
+  }
+
+  const numThreads = rustThreadCount()
+  if (numThreads <= 1) {
+    throw new Error('Only one worker thread is available')
+  }
+
+  await initThreadPool(numThreads)
+  console.info(`Initialized Rust Rayon thread pool with ${numThreads} worker(s)`)
+}
+
+async function wasmThreadsAvailable() {
+  if (typeof SharedArrayBuffer === 'undefined') {
+    console.warn('SharedArrayBuffer is not supported')
+    return false
+  }
+
+  if (globalThis.crossOriginIsolated !== true) {
+    console.warn('Cross-origin isolation is not enabled')
+    return false
+  }
+
+  try {
+    const threadsAvailable = await threads()
+    if (!threadsAvailable) {
+      console.warn('WebAssembly threads are not supported')
+    }
+    return threadsAvailable
+  } catch (err) {
+    console.warn('Could not detect WebAssembly threads support due to error: ', err)
+    return false
+  }
+}
+
+function rustThreadCount() {
+  const hardwareConcurrency = globalThis.navigator?.hardwareConcurrency ?? 2
+  return Math.max(1, Math.min(4, hardwareConcurrency))
 }
 
 export type CanvasRenderSize = {
@@ -133,13 +200,13 @@ class WorkerBevyInstance {
     debugSize: CanvasRenderSize,
     textureSize: CanvasRenderSize,
   ) {
-    await ensureInitialized()
+    const wasmModule = await ensureInitialized()
 
     this.debugCanvas = debugCanvas
     this.textureCanvas = textureCanvas
 
     this.resizeCanvases(debugSize, textureSize)
-    this.bevyInstance = new BevyBevyInstance(debugCanvas, textureCanvas)
+    this.bevyInstance = new wasmModule.BevyInstance(debugCanvas, textureCanvas)
     this.set_map_view_settings(mapViewSettings)
     this.set_map_view_camera_settings(mapViewCameraSettings)
     this.refreshWindowRefs()

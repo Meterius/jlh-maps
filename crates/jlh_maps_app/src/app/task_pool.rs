@@ -1,4 +1,4 @@
-use crate::wasm_task_pool::{TaskPool, TaskPoolBackendKind, rayon_backend_available};
+use crate::wasm_task_pool::{TaskPool, TaskPoolBackendKind, backend_available};
 use bevy::app::App;
 use bevy::prelude::{Plugin, Resource};
 use std::ops::Deref;
@@ -8,50 +8,34 @@ pub struct AppTaskPoolPlugin;
 
 impl Plugin for AppTaskPoolPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(AppTaskPool::new_detected());
+        app.insert_resource(AppTaskPool::new());
     }
 }
 
 #[derive(Resource, Clone)]
 pub struct AppTaskPool {
     pool: TaskPool,
-    backend: TaskPoolBackendKind,
+}
+
+impl Default for AppTaskPool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AppTaskPool {
-    pub fn new_detected() -> Self {
-        Self::new(Self::detect_backend())
-    }
-
-    pub fn new(backend: TaskPoolBackendKind) -> Self {
-        let pool = match backend {
-            TaskPoolBackendKind::Manual => TaskPool::new_manual(),
-            TaskPoolBackendKind::Rayon => TaskPool::new_rayon(),
-        };
-
-        info!("Using {backend:?} app task pool backend");
-
-        Self { pool, backend }
-    }
-
-    pub fn detect_backend() -> TaskPoolBackendKind {
-        if rayon_backend_available() {
+    pub fn new() -> Self {
+        let backend = if backend_available(TaskPoolBackendKind::Rayon) {
             TaskPoolBackendKind::Rayon
         } else {
             TaskPoolBackendKind::Manual
-        }
-    }
+        };
 
-    pub fn backend(&self) -> TaskPoolBackendKind {
-        self.backend
-    }
+        let pool = TaskPool::builder().backend(backend).build();
 
-    pub fn is_manual(&self) -> bool {
-        self.backend == TaskPoolBackendKind::Manual
-    }
+        info!("Using {backend:?} app task pool backend");
 
-    pub fn is_rayon(&self) -> bool {
-        self.backend == TaskPoolBackendKind::Rayon
+        Self { pool }
     }
 }
 

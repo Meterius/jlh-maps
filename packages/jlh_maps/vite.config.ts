@@ -10,13 +10,27 @@ import wasm from 'vite-plugin-wasm'
 const outlineSolidBase =
   'relative isolate overflow-hidden bg-default before:absolute before:inset-0 before:pointer-events-none before:content-[""] before:opacity-0 disabled:before:opacity-0 aria-disabled:before:opacity-0 focus:outline-none'
 
+const crossOriginIsolationHeaders = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
   ...(mode === 'demo' ? { base: './' } : {}),
   server: {
+    headers: crossOriginIsolationHeaders,
     fs: {
-      allow: ['./', '../../crates/jlh_maps_frontend/pkg', '../../crates/jlh_maps_app/pkg'],
+      allow: [
+        './',
+        '../../crates/jlh_maps_frontend/pkg',
+        '../../crates/jlh_maps_app/pkg',
+        '../../crates/jlh_maps_app/pkg_threaded',
+      ],
     },
+  },
+  preview: {
+    headers: crossOriginIsolationHeaders,
   },
   plugins: [
     wasm(),

@@ -1,14 +1,32 @@
 build-dev:
-    wasm-pack build --dev --target web -- --target wasm32-unknown-unknown
+    just build false false both
 
 build-release:
-    wasm-pack build --release --target web -- --target wasm32-unknown-unknown
+    just build true false both
 
-build-release-profile:
-    wasm-pack build --release --target web -- --target wasm32-unknown-unknown --features profile
+build release="false" profile="false" threaded="both":
+    just _build-threaded-{{threaded}} "{{release}}" "{{profile}}"
 
 build-dev-watch:
-    cargo watch --why -s "just build-dev"
+    cargo watch --why -s "just build"
+
+adjust-threaded-package:
+    node -e "const fs = require('node:fs'); const path = 'pkg_threaded/package.json'; const pkg = JSON.parse(fs.readFileSync(path, 'utf8')); pkg.name = 'jlh_maps_app_threaded'; fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');"
+
+[private]
+_build-threaded-both release profile:
+    just _build-threaded-false "{{release}}" "{{profile}}"
+    just _build-threaded-true "{{release}}" "{{profile}}"
+
+[private]
+_build-threaded-false release profile:
+    wasm-pack build {{ if release == "true" { "--release" } else { "--dev" } }} --target web --out-dir pkg -- --target wasm32-unknown-unknown {{ if profile == "true" { "--features profile" } else { "" } }}
+
+[private]
+[env("RUSTFLAGS", "-C target-feature=+atomics,+bulk-memory -C link-arg=--shared-memory -C link-arg=--max-memory=1073741824 -C link-arg=--import-memory -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base")]
+_build-threaded-true release profile:
+    wasm-pack build {{ if release == "true" { "--release" } else { "--dev" } }} --target web --out-dir pkg_threaded -- --target wasm32-unknown-unknown -Z build-std=panic_abort,std --features {{ if profile == "true" { "wasm-threads,profile" } else { "wasm-threads" } }}
+    just adjust-threaded-package
 
 bench-edge-distance:
     cargo test -p jlh_maps_app --release --test edge_distance_bench -- --ignored --nocapture
@@ -26,3 +44,4 @@ profile-vtune-edge-distance: profile-build-edge-distance
 clean:
     cargo clean -p jlh_maps_app
     if exist pkg rmdir /s /q pkg
+    if exist pkg_threaded rmdir /s /q pkg_threaded

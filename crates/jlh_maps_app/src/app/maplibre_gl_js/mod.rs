@@ -15,9 +15,7 @@ impl Plugin for MaplibreGlJsPlugin {
     }
 }
 
-fn apply_pending_tile_parse_results(
-    mut integrations: Query<&mut MaplibreMapIntegration>,
-) {
+fn apply_pending_tile_parse_results(mut integrations: Query<&mut MaplibreMapIntegration>) {
     for mut integration in integrations.iter_mut() {
         integration.data.apply_pending_tile_parse_results();
     }

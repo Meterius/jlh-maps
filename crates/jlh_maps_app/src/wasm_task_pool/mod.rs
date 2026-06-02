@@ -37,16 +37,6 @@ impl TaskPoolBuilder {
         self
     }
 
-    pub fn manual(mut self) -> Self {
-        self.backend = TaskPoolBackendKind::Manual;
-        self
-    }
-
-    pub fn rayon(mut self) -> Self {
-        self.backend = TaskPoolBackendKind::Rayon;
-        self
-    }
-
     // Accepted for API symmetry with Bevy's TaskPoolBuilder. wasm-bindgen-rayon
     // uses a global Rayon pool initialized by JS, so this does not create threads.
     pub fn num_threads(mut self, num_threads: usize) -> Self {
@@ -80,14 +70,6 @@ pub struct TaskPool {
 impl TaskPool {
     pub fn builder() -> TaskPoolBuilder {
         TaskPoolBuilder::new()
-    }
-
-    pub fn new_manual() -> Self {
-        TaskPoolBuilder::new().manual().build()
-    }
-
-    pub fn new_rayon() -> Self {
-        TaskPoolBuilder::new().rayon().build()
     }
 
     pub fn spawn<T>(&self, task: impl FnOnce() -> T + Send + 'static) -> Task<T>
@@ -149,10 +131,6 @@ impl TaskPool {
             TaskPoolBackend::Rayon => TaskPoolBackendKind::Rayon,
         }
     }
-}
-
-pub fn rayon_backend_available() -> bool {
-    cfg_rayon_backend_available()
 }
 
 #[derive(Clone)]
@@ -313,19 +291,13 @@ fn spawn_rayon(_task: Box<dyn RunnableTask>) {
     unreachable!("Rayon backend cannot be constructed without the `wasm-threads` feature");
 }
 
-#[cfg(all(feature = "wasm-threads", target_arch = "wasm32"))]
-fn cfg_rayon_backend_available() -> bool {
-    rayon::current_num_threads() > 1
-}
-
-#[cfg(all(feature = "wasm-threads", not(target_arch = "wasm32")))]
-fn cfg_rayon_backend_available() -> bool {
-    true
-}
-
-#[cfg(not(feature = "wasm-threads"))]
-fn cfg_rayon_backend_available() -> bool {
-    false
+pub fn backend_available(backend: TaskPoolBackendKind) -> bool {
+    match backend {
+        TaskPoolBackendKind::Manual => true,
+        TaskPoolBackendKind::Rayon => {
+            !cfg!(target_arch = "wasm32") || cfg!(feature = "wasm-threads")
+        }
+    }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -338,7 +310,9 @@ mod tests {
 
     #[test]
     fn manual_backend_defers_work_until_ticked() {
-        let pool = TaskPool::new_manual();
+        let pool = TaskPool::builder()
+            .backend(TaskPoolBackendKind::Manual)
+            .build();
         let mut task = pool.spawn(|| 42);
 
         assert_eq!(pool.queued_len(), 1);
@@ -350,7 +324,9 @@ mod tests {
 
     #[test]
     fn manual_backend_ticks_bounded_work() {
-        let pool = TaskPool::new_manual();
+        let pool = TaskPool::builder()
+            .backend(TaskPoolBackendKind::Manual)
+            .build();
         let mut a = pool.spawn(|| 1);
         let mut b = pool.spawn(|| 2);
 

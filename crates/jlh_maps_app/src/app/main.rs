@@ -65,7 +65,6 @@ pub struct AppWindows {
     pub texture: Option<Entity>,
 }
 
-#[derive(Resource)]
 pub struct OffscreenCanvases {
     pub debug: OffscreenCanvas,
     pub texture: OffscreenCanvas,
