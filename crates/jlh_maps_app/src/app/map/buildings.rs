@@ -1,9 +1,10 @@
 use crate::app::map::camera::MapViewCamera;
 use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MapViewSettings};
-use crate::app::map::feature_plane_mesh::{
-    FeatureTileBucket, FeatureTileBucketPlaneMesh, FeatureTileBucketPlaneMeshConfig,
-    tile_flat_bounds_world,
+use crate::app::map::feature::bucket::FeatureTileBucket;
+use crate::app::map::feature::mesh::{
+    FeatureTileBucketPlaneMesh, FeatureTileBucketPlaneMeshConfig,
 };
+use crate::app::map::transform::tile_flat_bounds_world;
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::maplibre_gl_js::types::CanonicalTileId;
 use crate::utils::debug::SoftExpect;

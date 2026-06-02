@@ -1,7 +1,7 @@
 pub mod buildings;
 pub mod camera;
 pub mod core;
-pub mod feature_plane_mesh;
+pub mod feature;
 pub mod interop;
 pub mod terrain;
 pub mod transform;
@@ -17,7 +17,7 @@ impl Plugin for MapPlugin {
             camera::CameraPlugin,
             core::CorePlugin,
             terrain::TerrainPlugin,
-            feature_plane_mesh::FeaturePlaneMeshPlugin,
+            feature::MapFeaturePlugin,
             buildings::BuildingsPlugin,
             waters::WatersPlugin,
         ));

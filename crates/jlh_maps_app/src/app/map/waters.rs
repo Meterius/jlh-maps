@@ -1,8 +1,10 @@
 use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MapViewSettings};
-use crate::app::map::feature_plane_mesh::{
-    FeatureTileBucket, FeatureTileBucketEdgeDistanceTexture, FeatureTileBucketPlaneMesh,
-    FeatureTileBucketPlaneMeshConfig, tile_flat_center_world,
+use crate::app::map::feature::bucket::FeatureTileBucket;
+use crate::app::map::feature::edge_distance_texture::FeatureTileBucketEdgeDistanceTexture;
+use crate::app::map::feature::mesh::{
+    FeatureTileBucketPlaneMesh, FeatureTileBucketPlaneMeshConfig,
 };
+use crate::app::map::transform::tile_flat_center_world;
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::maplibre_gl_js::types::CanonicalTileId;
 use crate::utils::debug::SoftExpect;
