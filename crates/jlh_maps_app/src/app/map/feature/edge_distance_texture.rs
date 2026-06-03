@@ -53,7 +53,7 @@ pub struct FeatureTileEdgeDistanceTextureState {
 impl FeatureTileEdgeDistanceTexture {
     pub fn new(layer_id: &'static str, resolution: UVec2, images: &mut Assets<Image>) -> Self {
         let resolution = resolution.max(UVec2::ONE);
-        let data = vec![0.0; (resolution.x * resolution.y) as usize];
+        let data = vec![1.0; (resolution.x * resolution.y) as usize];
         let texture = images.add(make_image(resolution, &data));
 
         TileTaskBased::from_parts(
@@ -112,7 +112,7 @@ fn apply_texture(
         let data = match data {
             Some(data) => data,
             None => {
-                default_data = vec![0.0; (resolution.x * resolution.y) as usize];
+                default_data = vec![1.0; (resolution.x * resolution.y) as usize];
                 &default_data
             }
         };

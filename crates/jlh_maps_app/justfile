@@ -10,6 +10,9 @@ build release="false" profile="false" threaded="both":
 build-dev-watch:
     cargo watch --why -s "just build"
 
+build-dev-watch-threaded:
+    cargo watch --why -s "just build false false true"
+
 adjust-threaded-package:
     node -e "const fs = require('node:fs'); const path = 'pkg_threaded/package.json'; const pkg = JSON.parse(fs.readFileSync(path, 'utf8')); pkg.name = 'jlh_maps_app_threaded'; fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');"
 

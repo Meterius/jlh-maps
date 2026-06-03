@@ -1,13 +1,12 @@
+use crate::app::map::buckets::{BucketInitializeTileParams, MapTileBucketMeta};
 use crate::app::map::camera::MapViewCamera;
-use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MapViewSettings};
+use crate::app::map::core::MAP_VIEW_COLOR_RENDER_LAYER;
 use crate::app::map::feature::mesh::{FeatureTileMesh, FeatureTileMeshConfig};
 use crate::app::map::feature::tile::FeatureTile;
-use crate::app::map::transform::tile_flat_bounds_world;
-use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
-use crate::app::maplibre_gl_js::types::CanonicalTileId;
-use crate::utils::debug::SoftExpect;
+use crate::app::map::feature::tile_bucket_manager::TileBucket;
 use bevy::asset::{Asset, AssetApp, Handle, load_internal_asset, uuid_handle};
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParamItem;
 use bevy::pbr::{
     DefaultOpaqueRendererMethod, ExtendedMaterial, MaterialExtension, MaterialPlugin,
     OpaqueRendererMethod,
@@ -15,8 +14,6 @@ use bevy::pbr::{
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
-use big_space::grid::Grid;
-use std::collections::HashMap;
 
 pub struct BuildingsPlugin;
 
@@ -25,7 +22,7 @@ impl Plugin for BuildingsPlugin {
         load_internal_asset!(
             app,
             BUILDING_MATERIAL_SHADER_HANDLE,
-            "../../../assets/shaders/building_pbr.fragment.wgsl",
+            "../../../../assets/shaders/building_pbr.fragment.wgsl",
             Shader::from_wgsl
         );
         app.register_type::<BuildingMaterialUniform>()
@@ -34,7 +31,6 @@ impl Plugin for BuildingsPlugin {
             .add_plugins(MaterialPlugin::<BuildingMaterial>::default())
             .init_resource::<GlobalBuildingMaterial>()
             .add_systems(PreUpdate, sync_building_material_opaque_render_method)
-            .add_systems(Update, (sync_spawned_building_buckets,).chain())
             .add_systems(
                 PostUpdate,
                 sync_distance_visibility.after(TransformSystems::Propagate),
@@ -49,22 +45,8 @@ const BUILDING_TOP_ALTITUDE_PROPERTY_KEYS: &[&str] = &["render_height", "height"
 const BUILDING_MATERIAL_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("6821f839-72cf-4b53-a709-d0260d921b72");
 
-#[derive(Component)]
-pub struct BuildingManager {
-    pub maplibre_int_id: Entity,
-    pub spawned_buildings: HashMap<String, SpawnedBuildingSource>,
-}
-
-#[derive(Default)]
-pub struct SpawnedBuildingSource {
-    tiles: HashMap<CanonicalTileId, Entity>,
-}
-
-#[derive(Component)]
-struct BuildingTileBucket;
-
 #[derive(Resource, Reflect)]
-struct GlobalBuildingMaterial(Handle<BuildingMaterial>);
+pub(crate) struct GlobalBuildingMaterial(Handle<BuildingMaterial>);
 
 type BuildingMaterial = ExtendedMaterial<StandardMaterial, BuildingMaterialExtension>;
 
@@ -143,136 +125,53 @@ fn sync_building_material_opaque_render_method(
     }
 }
 
-fn sync_spawned_building_buckets(
-    mut commands: Commands,
-    map_view_settings: Res<MapViewSettings>,
-    map_ints: Query<&MaplibreMapIntegration>,
-    mut managers: Query<(Entity, &Grid, &mut BuildingManager)>,
-    buckets: Query<(), With<BuildingTileBucket>>,
-    material: Res<GlobalBuildingMaterial>,
+#[derive(Component)]
+struct BuildingTile;
+
+pub(super) fn initialize_building_tile(
+    e_commands: &mut EntityCommands,
+    params: &mut SystemParamItem<'_, '_, BucketInitializeTileParams>,
+    bucket: &TileBucket<MapTileBucketMeta>,
 ) {
-    for (manager_id, grid, mut manager) in managers.iter_mut() {
-        let maplibre_int_id = manager.maplibre_int_id;
-        let Some(map_int) = map_ints.get(maplibre_int_id).ok().soft_expect("") else {
-            continue;
-        };
-
-        remove_stale_building_buckets(
-            &mut commands,
-            map_int,
-            &mut manager.spawned_buildings,
-            &buckets,
-            !map_view_settings.enable_buildings,
-        );
-
-        if !map_view_settings.enable_buildings {
-            continue;
-        }
-
-        for (source_id, source) in &map_int.data.sources {
-            for tile_id in source.tiles.keys() {
-                let spawned_source = manager
-                    .spawned_buildings
-                    .entry(source_id.clone())
-                    .or_default();
-
-                if spawned_source.tiles.contains_key(tile_id) {
-                    continue;
-                }
-
-                let bucket_id = spawn_building_bucket(
-                    &mut commands,
-                    manager_id,
-                    maplibre_int_id,
-                    grid,
-                    source_id,
-                    *tile_id,
-                    material.0.clone(),
-                );
-
-                spawned_source.tiles.insert(*tile_id, bucket_id);
-            }
-        }
-    }
-}
-
-fn remove_stale_building_buckets(
-    commands: &mut Commands,
-    map_int: &MaplibreMapIntegration,
-    spawned_buildings: &mut HashMap<String, SpawnedBuildingSource>,
-    buckets: &Query<(), With<BuildingTileBucket>>,
-    remove_all: bool,
-) {
-    spawned_buildings.retain(|source_id, spawned_source| {
-        let source = (!remove_all)
-            .then_some(map_int)
-            .and_then(|map_int| map_int.data.sources.get(source_id));
-
-        spawned_source.tiles.retain(|tile_id, bucket_entity| {
-            if source
-                .and_then(|source| source.tiles.get(tile_id))
-                .is_none()
-            {
-                commands.entity(*bucket_entity).despawn();
-                return false;
-            }
-
-            buckets.get(*bucket_entity).is_ok()
-        });
-
-        !spawned_source.tiles.is_empty()
-    });
-}
-
-fn spawn_building_bucket(
-    commands: &mut Commands,
-    manager_id: Entity,
-    maplibre_int_id: Entity,
-    grid: &Grid,
-    source_id: &str,
-    tile_id: CanonicalTileId,
-    material: Handle<BuildingMaterial>,
-) -> Entity {
-    let (center, flat_half_extents) = tile_flat_bounds_world(tile_id);
-    let (cell, translation) = grid.translation_to_grid(center);
-
-    let bucket_id = commands
-        .spawn((
-            Name::new(format!("Building bucket {source_id}/{tile_id:?}")),
-            Visibility::Hidden,
-            cell,
-            Transform::from_translation(translation),
-            RenderLayers::layer(MAP_VIEW_COLOR_RENDER_LAYER),
-            DistanceVisibility {
-                max_distance: DEFAULT_BUILDING_VISIBILITY_DISTANCE,
-                flat_half_extents,
-            },
-            BuildingTileBucket,
-            FeatureTile::new(maplibre_int_id, source_id, tile_id, center),
-            FeatureTileMesh::new(FeatureTileMeshConfig {
-                layer_id: BUILDING_SOURCE_LAYER,
-                base_property_keys: Some(BUILDING_BASE_ALTITUDE_PROPERTY_KEYS),
-                top_property_keys: Some(BUILDING_TOP_ALTITUDE_PROPERTY_KEYS),
-                wall_normal_smooth_angle: Some(35.0_f32.to_radians()),
-            }),
-            MeshMaterial3d(material),
-        ))
-        .id();
-
-    commands.entity(manager_id).add_child(bucket_id);
-    bucket_id
+    e_commands.insert((
+        Name::new(format!(
+            "Building tile {}/{:?}",
+            bucket.source_id, bucket.tile_id
+        )),
+        Visibility::Hidden,
+        RenderLayers::layer(MAP_VIEW_COLOR_RENDER_LAYER),
+        DistanceVisibility {
+            max_distance: DEFAULT_BUILDING_VISIBILITY_DISTANCE,
+            flat_half_extents: bucket.half_extents,
+        },
+        BuildingTile,
+        FeatureTile::new(
+            bucket.maplibre_int_id,
+            &bucket.source_id,
+            bucket.tile_id,
+            bucket.center,
+        ),
+        FeatureTileMesh::new(FeatureTileMeshConfig {
+            layer_id: BUILDING_SOURCE_LAYER,
+            base_property_keys: Some(BUILDING_BASE_ALTITUDE_PROPERTY_KEYS),
+            top_property_keys: Some(BUILDING_TOP_ALTITUDE_PROPERTY_KEYS),
+            wall_normal_smooth_angle: Some(35.0_f32.to_radians()),
+        }),
+        MeshMaterial3d(params.2.0.clone()),
+    ));
 }
 
 pub const DISABLE_DISTANCE_VISIBILITY: bool = false;
 
 #[derive(Component)]
-pub struct DistanceVisibility {
-    pub max_distance: f32,
-    pub flat_half_extents: Vec2,
+struct DistanceVisibility {
+    max_distance: f32,
+    flat_half_extents: Vec2,
 }
 
 fn sync_distance_visibility(
     cameras: Query<(&MapViewCamera, &GlobalTransform, &ChildOf)>,
+    parents: Query<&ChildOf>,
     mut distance_visible_entities: Query<
         (
             &DistanceVisibility,
@@ -286,9 +185,14 @@ fn sync_distance_visibility(
     for (distance_visibility, entity_transform, ChildOf(entity_parent), mut visibility) in
         distance_visible_entities.iter_mut()
     {
-        let Some((_, camera_transform, _)) = cameras
-            .iter()
-            .find(|(_, _, ChildOf(camera_parent))| camera_parent == entity_parent)
+        // TODO: remove hierarchical lookup
+        let Some(camera_transform) =
+            cameras
+                .iter()
+                .find_map(|(_, camera_transform, ChildOf(camera_parent))| {
+                    has_ancestor_or_self(*entity_parent, *camera_parent, &parents)
+                        .then_some(camera_transform)
+                })
         else {
             continue;
         };
@@ -306,6 +210,20 @@ fn sync_distance_visibility(
         } else {
             Visibility::Hidden
         };
+    }
+}
+
+fn has_ancestor_or_self(mut entity: Entity, target: Entity, parents: &Query<&ChildOf>) -> bool {
+    loop {
+        if entity == target {
+            return true;
+        }
+
+        let Ok(ChildOf(parent)) = parents.get(entity) else {
+            return false;
+        };
+
+        entity = *parent;
     }
 }
 

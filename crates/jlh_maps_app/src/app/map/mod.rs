@@ -1,11 +1,10 @@
-pub mod buildings;
+pub mod buckets;
 pub mod camera;
 pub mod core;
 pub mod feature;
 pub mod interop;
 pub mod terrain;
 pub mod transform;
-pub mod waters;
 
 use bevy::prelude::*;
 
@@ -18,8 +17,7 @@ impl Plugin for MapPlugin {
             core::CorePlugin,
             terrain::TerrainPlugin,
             feature::MapFeaturePlugin,
-            buildings::BuildingsPlugin,
-            waters::WatersPlugin,
+            buckets::BucketsPlugin,
         ));
     }
 }

@@ -10,6 +10,12 @@ use std::sync::Arc;
 
 pub struct TileTaskBasedPlugin<C: TileTaskBasedMeta>(std::marker::PhantomData<C>);
 
+impl<C: TileTaskBasedMeta> Default for TileTaskBasedPlugin<C> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<C: TileTaskBasedMeta> TileTaskBasedPlugin<C> {
     pub fn new() -> Self {
         Self(std::marker::PhantomData)
