@@ -52,7 +52,7 @@ pub trait TileTaskBasedMeta: Send + Sync + 'static {
     );
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct TileTaskBasedRevision {
     terrain_hash: Option<String>,
     tile_revision: Option<u64>,
@@ -76,6 +76,7 @@ pub struct TileTaskBased<C: TileTaskBasedMeta> {
     state: C::State,
     dirty: bool,
 
+    data_revision: u64,
     revision: TileTaskBasedRevision,
 
     pending_task: Option<Task<C::Data>>,
@@ -89,6 +90,7 @@ impl<C: TileTaskBasedMeta> TileTaskBased<C> {
             state,
             dirty: true,
             revision: TileTaskBasedRevision::default(),
+            data_revision: 0,
             pending_task: None,
         }
     }
@@ -99,6 +101,14 @@ impl<C: TileTaskBasedMeta> TileTaskBased<C> {
 
     pub fn state(&self) -> &C::State {
         &self.state
+    }
+
+    pub fn data(&self) -> Option<&C::Data> {
+        self.data.as_ref()
+    }
+
+    pub fn data_revision(&self) -> u64 {
+        self.data_revision
     }
 
     fn clear_data(&mut self) {
@@ -159,6 +169,7 @@ fn sync_item<C: TileTaskBasedMeta>(
         tile_tb.pending_task = None;
         C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, Some(&data));
         tile_tb.data = Some(data);
+        tile_tb.data_revision += 1;
     }
 
     // clear if tile no longer exists
@@ -166,6 +177,7 @@ fn sync_item<C: TileTaskBasedMeta>(
         if !tile_tb.revision.is_empty() {
             tile_tb.clear_data();
             C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, None);
+            tile_tb.data_revision += 1;
             tile_tb.dirty = false;
             tile_tb.revision.reset();
         }

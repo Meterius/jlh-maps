@@ -1,7 +1,7 @@
 use crate::app::maplibre_gl_js::types::CanonicalTileId;
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{LngLat, MercatorCoordinate};
 use crate::app::maplibre_gl_js::utils::tile::get_tile_lnglat_bounds;
-use bevy::math::{DVec3, Vec2, Vec3Swizzles, dvec3, vec2};
+use bevy::math::{DVec2, DVec3, Vec2, Vec3Swizzles, dvec2, dvec3, vec2};
 
 pub const MERCATOR_WORLD_SIZE: f64 = 100_000.0;
 
@@ -32,6 +32,27 @@ pub fn tile_flat_bounds_world(tile_id: CanonicalTileId) -> (DVec3, Vec2) {
 pub fn lng_lat_alt_to_world(lng: f64, lat: f64, alt: f64) -> DVec3 {
     let coords = MercatorCoordinate::from_lng_lat(LngLat::new(lng, lat), alt);
     DVec3::new(coords.x, -coords.y, coords.z) * MERCATOR_WORLD_SIZE
+}
+
+pub fn world_xy_to_lnglat(world_xy: DVec2) -> DVec2 {
+    let mercator_x = world_xy.x / MERCATOR_WORLD_SIZE;
+    let mercator_y = -world_xy.y / MERCATOR_WORLD_SIZE;
+    let lng = mercator_x * 360.0 - 180.0;
+    let lat = (std::f64::consts::PI * (1.0 - 2.0 * mercator_y))
+        .sinh()
+        .atan()
+        .to_degrees();
+
+    dvec2(lng, lat)
+}
+
+pub fn tile_world_units_per_meter(tile_id: CanonicalTileId) -> f64 {
+    let bounds = get_tile_lnglat_bounds(tile_id);
+    let center = (bounds.0 + bounds.1) * 0.5;
+
+    MercatorCoordinate::from_lng_lat(LngLat::new(center.x, center.y), 0.0)
+        .meter_in_mercator_coordinate_units()
+        * MERCATOR_WORLD_SIZE
 }
 
 pub fn lng_lat_bounds_contains(

@@ -33,6 +33,10 @@
             <span>Water</span>
           </label>
           <label class="debug-toggle">
+            <input v-model="useBevyRet.mapViewSettings.value.enableTrees" type="checkbox" />
+            <span>Trees</span>
+          </label>
+          <label class="debug-toggle">
             <input v-model="useBevyRet.mapViewSettings.value.enableShadows" type="checkbox" />
             <span>Shadows</span>
           </label>

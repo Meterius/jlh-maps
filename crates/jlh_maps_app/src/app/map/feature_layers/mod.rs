@@ -1,4 +1,5 @@
 pub mod buildings;
+pub mod trees;
 pub mod waters;
 
 use crate::app::map::feature::bucket_layer::TileBucketLayerPlugin;
@@ -13,7 +14,9 @@ impl Plugin for FeatureLayersPlugin {
             TileBucketManagerPlugin,
             TileBucketLayerPlugin::<waters::WaterTileBucketLayer>::new(),
             TileBucketLayerPlugin::<buildings::BuildingTileBucketLayer>::new(),
+            TileBucketLayerPlugin::<trees::TreeTileBucketLayer>::new(),
             buildings::BuildingsPlugin,
+            trees::TreesPlugin,
             waters::WatersPlugin,
         ));
     }
@@ -21,6 +24,10 @@ impl Plugin for FeatureLayersPlugin {
 
 pub fn make_bucket_manager(maplibre_int_id: Entity) -> TileBucketManager {
     TileBucketManager::new(maplibre_int_id, |mut e_commands, _| {
-        e_commands.insert((waters::WaterTileBucket, buildings::BuildingTileBucket));
+        e_commands.insert((
+            waters::WaterTileBucket,
+            buildings::BuildingTileBucket,
+            trees::TreeTileBucket,
+        ));
     })
 }

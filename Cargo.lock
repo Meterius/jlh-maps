@@ -4001,6 +4001,7 @@ dependencies = [
  "bytemuck",
  "encase",
  "libm",
+ "mint",
  "rand 0.9.2",
  "serde_core",
 ]
@@ -4830,7 +4831,9 @@ dependencies = [
  "geo-types",
  "geojson",
  "itertools 0.14.0",
+ "map_scatter",
  "mvt-reader",
+ "rand 0.9.2",
  "raw-window-handle",
  "rayon",
  "serde",
@@ -5228,6 +5231,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "map_scatter"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4200ed82da74071678d57917065e0f2aa4831ba10ae8e379cbe21468d2a984c2"
+dependencies = [
+ "glam",
+ "mint",
+ "rand 0.9.2",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5316,6 +5332,12 @@ dependencies = [
  "adler2",
  "simd-adler32",
 ]
+
+[[package]]
+name = "mint"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e53debba6bda7a793e5f99b8dacf19e626084f525f7829104ba9898f367d85ff"
 
 [[package]]
 name = "mio"

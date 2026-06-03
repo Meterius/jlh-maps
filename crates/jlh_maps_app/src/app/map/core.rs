@@ -43,6 +43,7 @@ pub struct MapViewSettings {
 
     pub enable_buildings: bool,
     pub enable_waters: bool,
+    pub enable_trees: bool,
     pub enable_shadows: bool,
     pub sun_azimuth_degrees: f32,
     pub sun_elevation_degrees: f32,
@@ -54,6 +55,7 @@ impl Default for MapViewSettings {
             enable_window_cameras: false,
             enable_buildings: true,
             enable_waters: true,
+            enable_trees: true,
             enable_shadows: true,
             sun_azimuth_degrees: DEFAULT_SUN_AZIMUTH_DEGREES,
             sun_elevation_degrees: DEFAULT_SUN_ELEVATION_DEGREES,
