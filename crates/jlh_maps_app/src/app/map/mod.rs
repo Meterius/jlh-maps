@@ -1,8 +1,8 @@
-pub mod buckets;
 pub mod camera;
 pub mod core;
 pub mod feature;
 pub mod interop;
+pub mod feature_layers;
 pub mod terrain;
 pub mod transform;
 
@@ -17,7 +17,7 @@ impl Plugin for MapPlugin {
             core::CorePlugin,
             terrain::TerrainPlugin,
             feature::MapFeaturePlugin,
-            buckets::BucketsPlugin,
+            feature_layers::FeatureLayersPlugin,
         ));
     }
 }

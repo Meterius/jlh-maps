@@ -1,7 +1,7 @@
 use crate::app::common::editor::GameViewCamera;
 use crate::app::main::AppWindows;
-use crate::app::map::buckets::MapTileBucketManager;
 use crate::app::map::camera::MapViewCamera;
+use crate::app::map::feature_layers::make_bucket_manager;
 use crate::app::map::terrain::TerrainTileManager;
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{LngLat, MercatorCoordinate};
@@ -120,7 +120,7 @@ pub fn spawn_map_view(
                 maplibre_int_id: maplibre_integration_id,
                 spawned_tiles: HashMap::default(),
             },
-            MapTileBucketManager::new(maplibre_integration_id),
+            make_bucket_manager(maplibre_integration_id),
         ))
         .id();
 

@@ -1,9 +1,10 @@
-use crate::app::map::buckets::{BucketInitializeTileParams, MapTileBucketMeta};
 use crate::app::map::core::MAP_VIEW_COLOR_RENDER_LAYER;
+use crate::app::map::core::MapViewSettings;
+use crate::app::map::feature::bucket_layer::TileBucketLayerMeta;
+use crate::app::map::feature::bucket_manager::TileBucket;
 use crate::app::map::feature::edge_distance_texture::FeatureTileEdgeDistanceTexture;
 use crate::app::map::feature::mesh::{FeatureTileMesh, FeatureTileMeshConfig};
 use crate::app::map::feature::tile::FeatureTile;
-use crate::app::map::feature::tile_bucket_manager::TileBucket;
 use bevy::asset::{Asset, AssetApp, Handle, load_internal_asset, uuid_handle};
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParamItem;
@@ -70,57 +71,78 @@ impl MaterialExtension for WaterMaterialExtension {
 #[derive(Component)]
 struct WaterTile;
 
-pub(super) fn initialize_water_tile(
-    e_commands: &mut EntityCommands,
-    params: &mut SystemParamItem<'_, '_, BucketInitializeTileParams>,
-    bucket: &TileBucket<MapTileBucketMeta>,
-) {
-    let edge_distance_texture = FeatureTileEdgeDistanceTexture::new(
-        WATER_SOURCE_LAYER,
-        WATER_EDGE_DISTANCE_TEXTURE_RESOLUTION,
-        &mut params.0,
-    );
-    let material = params.1.add(ExtendedMaterial {
-        base: StandardMaterial {
-            opaque_render_method: OpaqueRendererMethod::Forward,
-            base_color: Color::WHITE,
-            depth_bias: 40000.0,
-            ..default()
-        },
-        extension: WaterMaterialExtension {
-            edge_distance_texture: edge_distance_texture.texture().clone(),
-            uniform: WaterMaterialUniform {
-                water_color: Srgba::from(WATER_COLOR).to_vec4(),
-                water2_color: Srgba::from(WATER2_COLOR).to_vec4(),
-                time: 0.,
-                _webgl2_padding_8b: 0,
-                _webgl2_padding_12b: 0,
-                _webgl2_padding_16b: 0,
-            },
-        },
-    });
+#[derive(Component)]
+pub(crate) struct WaterTileBucket;
 
-    e_commands.insert((
-        Name::new(format!(
-            "Water tile {}/{:?}",
-            bucket.source_id, bucket.tile_id
-        )),
-        RenderLayers::layer(MAP_VIEW_COLOR_RENDER_LAYER),
-        MeshMaterial3d(material),
-        NotShadowCaster,
-        WaterTile,
-        FeatureTile::new(
-            bucket.maplibre_int_id,
-            &bucket.source_id,
-            bucket.tile_id,
-            bucket.center,
-        ),
-        FeatureTileMesh::new(FeatureTileMeshConfig {
-            layer_id: WATER_SOURCE_LAYER,
-            ..default()
-        }),
-        edge_distance_texture,
-    ));
+pub(super) struct WaterTileBucketLayer;
+
+type WaterInitializeTileParams = (
+    ResMut<'static, Assets<Image>>,
+    ResMut<'static, Assets<WaterMaterial>>,
+);
+
+impl TileBucketLayerMeta for WaterTileBucketLayer {
+    type BucketMarker = WaterTileBucket;
+    type EnabledParams = Res<'static, MapViewSettings>;
+    type SpawnParams = WaterInitializeTileParams;
+
+    fn is_enabled(settings: &SystemParamItem<'_, '_, Self::EnabledParams>) -> bool {
+        settings.enable_waters
+    }
+
+    fn spawn(
+        mut e_commands: EntityCommands,
+        params: &mut SystemParamItem<'_, '_, Self::SpawnParams>,
+        _: Entity,
+        bucket: &TileBucket,
+    ) {
+        let edge_distance_texture = FeatureTileEdgeDistanceTexture::new(
+            WATER_SOURCE_LAYER,
+            WATER_EDGE_DISTANCE_TEXTURE_RESOLUTION,
+            &mut params.0,
+        );
+        let material = params.1.add(ExtendedMaterial {
+            base: StandardMaterial {
+                opaque_render_method: OpaqueRendererMethod::Forward,
+                base_color: Color::WHITE,
+                depth_bias: 40000.0,
+                ..default()
+            },
+            extension: WaterMaterialExtension {
+                edge_distance_texture: edge_distance_texture.texture().clone(),
+                uniform: WaterMaterialUniform {
+                    water_color: Srgba::from(WATER_COLOR).to_vec4(),
+                    water2_color: Srgba::from(WATER2_COLOR).to_vec4(),
+                    time: 0.,
+                    _webgl2_padding_8b: 0,
+                    _webgl2_padding_12b: 0,
+                    _webgl2_padding_16b: 0,
+                },
+            },
+        });
+
+        e_commands.insert((
+            Name::new(format!(
+                "Water tile {}/{:?}",
+                bucket.source_id, bucket.tile_id
+            )),
+            RenderLayers::layer(MAP_VIEW_COLOR_RENDER_LAYER),
+            MeshMaterial3d(material),
+            NotShadowCaster,
+            WaterTile,
+            FeatureTile::new(
+                bucket.maplibre_int_id,
+                &bucket.source_id,
+                bucket.tile_id,
+                bucket.center,
+            ),
+            FeatureTileMesh::new(FeatureTileMeshConfig {
+                layer_id: WATER_SOURCE_LAYER,
+                ..default()
+            }),
+            edge_distance_texture,
+        ));
+    }
 }
 
 fn update_water_material_time(time: Res<Time>, mut materials: ResMut<Assets<WaterMaterial>>) {

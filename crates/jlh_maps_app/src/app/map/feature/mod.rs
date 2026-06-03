@@ -1,7 +1,8 @@
+pub mod bucket_layer;
+pub mod bucket_manager;
 pub mod edge_distance_texture;
 pub mod mesh;
 pub mod tile;
-pub mod tile_bucket_manager;
 pub mod tile_task_based;
 pub mod utils;
 

@@ -1,9 +1,10 @@
-use crate::app::map::buckets::{BucketInitializeTileParams, MapTileBucketMeta};
 use crate::app::map::camera::MapViewCamera;
 use crate::app::map::core::MAP_VIEW_COLOR_RENDER_LAYER;
+use crate::app::map::core::MapViewSettings;
+use crate::app::map::feature::bucket_layer::TileBucketLayerMeta;
+use crate::app::map::feature::bucket_manager::TileBucket;
 use crate::app::map::feature::mesh::{FeatureTileMesh, FeatureTileMeshConfig};
 use crate::app::map::feature::tile::FeatureTile;
-use crate::app::map::feature::tile_bucket_manager::TileBucket;
 use bevy::asset::{Asset, AssetApp, Handle, load_internal_asset, uuid_handle};
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParamItem;
@@ -128,37 +129,55 @@ fn sync_building_material_opaque_render_method(
 #[derive(Component)]
 struct BuildingTile;
 
-pub(super) fn initialize_building_tile(
-    e_commands: &mut EntityCommands,
-    params: &mut SystemParamItem<'_, '_, BucketInitializeTileParams>,
-    bucket: &TileBucket<MapTileBucketMeta>,
-) {
-    e_commands.insert((
-        Name::new(format!(
-            "Building tile {}/{:?}",
-            bucket.source_id, bucket.tile_id
-        )),
-        Visibility::Hidden,
-        RenderLayers::layer(MAP_VIEW_COLOR_RENDER_LAYER),
-        DistanceVisibility {
-            max_distance: DEFAULT_BUILDING_VISIBILITY_DISTANCE,
-            flat_half_extents: bucket.half_extents,
-        },
-        BuildingTile,
-        FeatureTile::new(
-            bucket.maplibre_int_id,
-            &bucket.source_id,
-            bucket.tile_id,
-            bucket.center,
-        ),
-        FeatureTileMesh::new(FeatureTileMeshConfig {
-            layer_id: BUILDING_SOURCE_LAYER,
-            base_property_keys: Some(BUILDING_BASE_ALTITUDE_PROPERTY_KEYS),
-            top_property_keys: Some(BUILDING_TOP_ALTITUDE_PROPERTY_KEYS),
-            wall_normal_smooth_angle: Some(35.0_f32.to_radians()),
-        }),
-        MeshMaterial3d(params.2.0.clone()),
-    ));
+#[derive(Component)]
+pub(crate) struct BuildingTileBucket;
+
+pub(super) struct BuildingTileBucketLayer;
+
+type BuildingInitializeTileParams = Res<'static, GlobalBuildingMaterial>;
+
+impl TileBucketLayerMeta for BuildingTileBucketLayer {
+    type BucketMarker = BuildingTileBucket;
+    type EnabledParams = Res<'static, MapViewSettings>;
+    type SpawnParams = BuildingInitializeTileParams;
+
+    fn is_enabled(settings: &SystemParamItem<'_, '_, Self::EnabledParams>) -> bool {
+        settings.enable_buildings
+    }
+
+    fn spawn(
+        mut e_commands: EntityCommands,
+        params: &mut SystemParamItem<'_, '_, Self::SpawnParams>,
+        _: Entity,
+        bucket: &TileBucket,
+    ) {
+        e_commands.insert((
+            Name::new(format!(
+                "Building tile {}/{:?}",
+                bucket.source_id, bucket.tile_id
+            )),
+            Visibility::Hidden,
+            RenderLayers::layer(MAP_VIEW_COLOR_RENDER_LAYER),
+            DistanceVisibility {
+                max_distance: DEFAULT_BUILDING_VISIBILITY_DISTANCE,
+                flat_half_extents: bucket.half_extents,
+            },
+            BuildingTile,
+            FeatureTile::new(
+                bucket.maplibre_int_id,
+                &bucket.source_id,
+                bucket.tile_id,
+                bucket.center,
+            ),
+            FeatureTileMesh::new(FeatureTileMeshConfig {
+                layer_id: BUILDING_SOURCE_LAYER,
+                base_property_keys: Some(BUILDING_BASE_ALTITUDE_PROPERTY_KEYS),
+                top_property_keys: Some(BUILDING_TOP_ALTITUDE_PROPERTY_KEYS),
+                wall_normal_smooth_angle: Some(35.0_f32.to_radians()),
+            }),
+            MeshMaterial3d(params.0.clone()),
+        ));
+    }
 }
 
 pub const DISABLE_DISTANCE_VISIBILITY: bool = false;
