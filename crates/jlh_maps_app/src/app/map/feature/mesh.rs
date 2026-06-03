@@ -52,7 +52,7 @@ impl FeatureTileMesh {
 }
 
 impl TileTaskBasedMeta for FeatureTileMeshMeta {
-    type Data = FeaturePlaneMeshBuffers;
+    type Data = FeatureTileMeshData;
     type State = FeatureTileMeshState;
     type Config = FeatureTileMeshConfig;
     type ApplyParams = (Commands<'static, 'static>, ResMut<'static, Assets<Mesh>>);
@@ -66,7 +66,7 @@ impl TileTaskBasedMeta for FeatureTileMeshMeta {
         terrain_data: Option<MlTerrainTile>,
         config: Self::Config,
     ) -> Self::Data {
-        build_mesh_buffers(tile, terrain_data, config)
+        build_mesh_data(tile, terrain_data, config)
     }
 
     fn apply_data(
@@ -74,15 +74,32 @@ impl TileTaskBasedMeta for FeatureTileMeshMeta {
         params: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
         _config: &Self::Config,
         state: &mut Self::State,
-        data: Option<&Self::Data>,
-    ) {
+        data: Option<Self::Data>,
+    ) -> Option<Self::Data> {
         let (commands, meshes) = params;
-        apply_mesh_buffers(commands, entity, state, data, meshes);
+        apply_mesh(commands, entity, state, data, meshes);
+        None
+    }
+}
+
+pub struct FeatureTileMeshData(Option<Mesh>);
+
+impl FeatureTileMeshData {
+    fn empty() -> Self {
+        Self(None)
+    }
+
+    fn mesh(mesh: Mesh) -> Self {
+        Self(Some(mesh))
+    }
+
+    fn into_mesh(self) -> Option<Mesh> {
+        self.0
     }
 }
 
 #[derive(Default)]
-pub struct FeaturePlaneMeshBuffers {
+struct FeaturePlaneMeshBuffers {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
     uvs: Vec<[f32; 2]>,
@@ -95,36 +112,35 @@ impl FeaturePlaneMeshBuffers {
         self.positions.is_empty() || self.indices.is_empty()
     }
 
-    fn to_mesh(&self) -> Mesh {
+    fn into_mesh(self) -> Mesh {
         let mut mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
         );
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions.clone());
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals.clone());
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs.clone());
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, self.feature_data.clone());
-        mesh.insert_indices(Indices::U32(self.indices.clone()));
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, self.feature_data);
+        mesh.insert_indices(Indices::U32(self.indices));
         mesh
     }
 }
 
 // Mesh Construction / Application
 
-fn apply_mesh_buffers(
+fn apply_mesh(
     commands: &mut Commands,
     bucket_entity: Entity,
     state: &mut FeatureTileMeshState,
-    buffers: Option<&FeaturePlaneMeshBuffers>,
+    data: Option<FeatureTileMeshData>,
     meshes: &mut Assets<Mesh>,
 ) {
-    let Some(buffers) = buffers.filter(|buffers| !buffers.is_empty()) else {
+    let Some(mesh) = data.and_then(FeatureTileMeshData::into_mesh) else {
         commands.entity(bucket_entity).try_remove::<Mesh3d>();
         state.mesh_handle = None;
         return;
     };
 
-    let mesh = buffers.to_mesh();
     if let Some(mesh_handle) = &state.mesh_handle {
         if let Some(existing_mesh) = meshes.get_mut(mesh_handle) {
             *existing_mesh = mesh;
@@ -136,11 +152,11 @@ fn apply_mesh_buffers(
     }
 }
 
-fn build_mesh_buffers(
+fn build_mesh_data(
     tile: Arc<MlTile>,
     terrain_data: Option<MlTerrainTile>,
     config: FeatureTileMeshConfig,
-) -> FeaturePlaneMeshBuffers {
+) -> FeatureTileMeshData {
     let tile_id = tile.id;
     let bounds = get_tile_lnglat_bounds(tile_id);
     let center = tile_flat_center_world(tile_id);
@@ -163,7 +179,11 @@ fn build_mesh_buffers(
         );
     }
 
-    buffers
+    if buffers.is_empty() {
+        FeatureTileMeshData::empty()
+    } else {
+        FeatureTileMeshData::mesh(buffers.into_mesh())
+    }
 }
 
 fn push_feature_mesh(

@@ -106,8 +106,9 @@ impl TileTaskBasedMeta for FeatureTileScatterMeta {
         _params: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
         _config: &Self::Config,
         _state: &mut Self::State,
-        _data: Option<&Self::Data>,
-    ) {
+        data: Option<Self::Data>,
+    ) -> Option<Self::Data> {
+        data
     }
 }
 
@@ -221,11 +222,9 @@ impl PolygonMaskTexture {
 
 impl Texture for PolygonMaskTexture {
     fn sample(&self, _channel: TextureChannel, p: Vec2) -> f32 {
-        self.polygons
+        if self.polygons
             .iter()
-            .any(|polygon| polygon.contains(p))
-            .then_some(1.0)
-            .unwrap_or(0.0)
+            .any(|polygon| polygon.contains(p)) { 1.0 } else { 0.0 }
     }
 }
 

@@ -113,10 +113,14 @@ impl MlData {
             .pending_tile_parse_tasks
             .iter_mut()
             .filter_map(|(tile_key, pending_task)| {
+                if !pending_task.task.is_finished() {
+                    return None;
+                }
+
                 pending_task
                     .task
-                    .poll_once()
-                    .map(|layers| (tile_key.clone(), pending_task.revision, layers))
+                    .take_result()
+                    .map(|tile| (tile_key.clone(), pending_task.revision, tile))
             })
             .collect::<Vec<_>>();
 

@@ -31,7 +31,7 @@ pub fn initialize() {
         // Log plugin only performs settings global logger and subscribers,
         // initializing only once to avoid errors on repeat
         app.add_plugins(LogPlugin {
-            filter: "info,wgpu_core=warn,wgpu_hal=warn".into(),
+            filter: "info,map_scatter=warn,wgpu_core=warn,wgpu_hal=warn".into(),
             ..default()
         });
     }

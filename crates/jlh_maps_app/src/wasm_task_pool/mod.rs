@@ -215,12 +215,16 @@ pub struct Task<T> {
 }
 
 impl<T> Task<T> {
-    pub fn poll_once(&mut self) -> Option<T> {
+    pub fn take_result(&mut self) -> Option<T> {
         lock(&self.state.inner).result.take()
     }
 
-    pub fn is_finished(&self) -> bool {
+    pub fn has_result(&self) -> bool {
         lock(&self.state.inner).result.is_some()
+    }
+
+    pub fn is_finished(&self) -> bool {
+        lock(&self.state.inner).finished
     }
 
     pub fn detach(self) {}
@@ -249,6 +253,7 @@ impl<T> Default for TaskState<T> {
         Self {
             inner: Mutex::new(TaskStateInner {
                 result: None,
+                finished: false,
                 waker: None,
             }),
         }
@@ -259,6 +264,7 @@ impl<T> TaskState<T> {
     fn complete(&self, result: T) {
         let mut inner = lock(&self.inner);
         inner.result = Some(result);
+        inner.finished = true;
 
         if let Some(waker) = inner.waker.take() {
             waker.wake();
@@ -268,6 +274,7 @@ impl<T> TaskState<T> {
 
 struct TaskStateInner<T> {
     result: Option<T>,
+    finished: bool,
     waker: Option<Waker>,
 }
 
@@ -319,7 +326,10 @@ mod tests {
         assert!(!task.is_finished());
         assert_eq!(pool.tick_n(1), 1);
         assert!(task.is_finished());
-        assert_eq!(task.poll_once(), Some(42));
+        assert!(task.has_result());
+        assert_eq!(task.take_result(), Some(42));
+        assert!(task.is_finished());
+        assert!(!task.has_result());
     }
 
     #[test]
@@ -332,10 +342,10 @@ mod tests {
 
         assert_eq!(pool.tick_n(1), 1);
         assert_eq!(pool.queued_len(), 1);
-        assert_eq!(a.poll_once(), Some(1));
-        assert_eq!(b.poll_once(), None);
+        assert_eq!(a.take_result(), Some(1));
+        assert_eq!(b.take_result(), None);
 
         assert_eq!(pool.tick_until_empty(), 1);
-        assert_eq!(b.poll_once(), Some(2));
+        assert_eq!(b.take_result(), Some(2));
     }
 }

@@ -10,7 +10,7 @@ use bevy::asset::{Assets, Handle, RenderAssetUsages};
 use bevy::ecs::system::SystemParamItem;
 use bevy::image::{Image, ImageSampler};
 use bevy::math::{UVec2, dvec2};
-use bevy::prelude::{Entity, Plugin, ResMut};
+use bevy::prelude::{Entity, Plugin, ResMut, uvec2};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use geojson::Value;
 use std::sync::Arc;
@@ -53,8 +53,7 @@ pub struct FeatureTileEdgeDistanceTextureState {
 impl FeatureTileEdgeDistanceTexture {
     pub fn new(layer_id: &'static str, resolution: UVec2, images: &mut Assets<Image>) -> Self {
         let resolution = resolution.max(UVec2::ONE);
-        let data = vec![1.0; (resolution.x * resolution.y) as usize];
-        let texture = images.add(make_image(resolution, &data));
+        let texture = images.add(make_default_image());
 
         TileTaskBased::from_parts(
             FeatureTileEdgeDistanceTextureConfig {
@@ -71,7 +70,7 @@ impl FeatureTileEdgeDistanceTexture {
 }
 
 impl TileTaskBasedMeta for FeatureTileEdgeDistanceTextureMeta {
-    type Data = Vec<f32>;
+    type Data = Image;
     type State = FeatureTileEdgeDistanceTextureState;
     type Config = FeatureTileEdgeDistanceTextureConfig;
     type ApplyParams = ResMut<'static, Assets<Image>>;
@@ -85,17 +84,18 @@ impl TileTaskBasedMeta for FeatureTileEdgeDistanceTextureMeta {
         _terrain_tile: Option<MlTerrainTile>,
         config: Self::Config,
     ) -> Self::Data {
-        build_texture(tile, config.layer_id, config.resolution)
+        build_texture_image(tile, config.layer_id, config.resolution)
     }
 
     fn apply_data(
         _entity: Entity,
         images: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
-        config: &Self::Config,
+        _config: &Self::Config,
         state: &mut Self::State,
-        data: Option<&Self::Data>,
-    ) {
-        apply_texture(state, config.resolution, data.map(Vec::as_slice), images);
+        image: Option<Self::Data>,
+    ) -> Option<Self::Data> {
+        apply_texture(state, image, images);
+        None
     }
 }
 
@@ -103,24 +103,15 @@ impl TileTaskBasedMeta for FeatureTileEdgeDistanceTextureMeta {
 
 fn apply_texture(
     state: &FeatureTileEdgeDistanceTextureState,
-    resolution: UVec2,
-    data: Option<&[f32]>,
+    image: Option<Image>,
     images: &mut Assets<Image>,
 ) {
-    if let Some(image) = images.get_mut(&state.texture) {
-        let default_data;
-        let data = match data {
-            Some(data) => data,
-            None => {
-                default_data = vec![1.0; (resolution.x * resolution.y) as usize];
-                &default_data
-            }
-        };
-        *image = make_image(resolution, data);
+    if let Some(target_image) = images.get_mut(&state.texture) {
+        *target_image = image.unwrap_or_else(make_default_image);
     }
 }
 
-fn build_texture(tile: Arc<MlTile>, layer_id: &'static str, resolution: UVec2) -> Vec<f32> {
+fn build_texture_image(tile: Arc<MlTile>, layer_id: &'static str, resolution: UVec2) -> Image {
     let bounds = get_tile_lnglat_bounds(tile.id);
     let mut data = vec![0.0; (resolution.x * resolution.y) as usize];
     let edges = build_features_edge_segments(
@@ -137,7 +128,7 @@ fn build_texture(tile: Arc<MlTile>, layer_id: &'static str, resolution: UVec2) -
         resolution.y as usize,
         EDGE_DISTANCE_MAX_UV,
     );
-    data
+    make_image(resolution, data)
 }
 
 fn build_features_edge_segments<'a>(
@@ -186,13 +177,20 @@ fn push_polygon_edge_segments(
 
 // Utils
 
-fn make_image(resolution: UVec2, data: &[f32]) -> Image {
-    let format = TextureFormat::R32Float;
-    let mut bytes = Vec::with_capacity(size_of_val(data));
+fn make_image(resolution: UVec2, data: Vec<f32>) -> Image {
+    let mut bytes = Vec::with_capacity(data.len() * size_of::<f32>());
     for value in data {
         bytes.extend_from_slice(&value.to_ne_bytes());
     }
 
+    make_image_from_bytes(resolution, bytes)
+}
+
+fn make_default_image() -> Image {
+    make_image_from_bytes(uvec2(1, 1), 1.0f32.to_ne_bytes().to_vec())
+}
+
+fn make_image_from_bytes(resolution: UVec2, bytes: Vec<u8>) -> Image {
     let mut image = Image::new(
         Extent3d {
             width: resolution.x,
@@ -201,7 +199,7 @@ fn make_image(resolution: UVec2, data: &[f32]) -> Image {
         },
         TextureDimension::D2,
         bytes,
-        format,
+        TextureFormat::R32Float,
         RenderAssetUsages::default(),
     );
     image.sampler = ImageSampler::linear();

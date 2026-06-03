@@ -48,8 +48,8 @@ pub trait TileTaskBasedMeta: Send + Sync + 'static {
         params: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
         config: &Self::Config,
         state: &mut Self::State,
-        data: Option<&Self::Data>,
-    );
+        data: Option<Self::Data>,
+    ) -> Option<Self::Data>;
 }
 
 #[derive(Default, Clone)]
@@ -161,22 +161,25 @@ fn sync_item<C: TileTaskBasedMeta>(
     task_pool: &AppTaskPool,
 ) {
     // apply task returns
-    if let Some(data) = tile_tb
+    if tile_tb
         .pending_task
-        .as_mut()
-        .and_then(|pending_task| pending_task.poll_once())
-    {
-        tile_tb.pending_task = None;
-        C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, Some(&data));
-        tile_tb.data = Some(data);
-        tile_tb.data_revision += 1;
-    }
+        .as_ref()
+        .is_some_and(|pending_task| pending_task.is_finished())
+        && let Some(data) = tile_tb
+            .pending_task
+            .take()
+            .and_then(|mut pending_task| pending_task.take_result())
+        {
+            tile_tb.data =
+                C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, Some(data));
+            tile_tb.data_revision += 1;
+        }
 
     // clear if tile no longer exists
     let Some(tile) = tile.tile(map_int) else {
         if !tile_tb.revision.is_empty() {
             tile_tb.clear_data();
-            C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, None);
+            tile_tb.data = C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, None);
             tile_tb.data_revision += 1;
             tile_tb.dirty = false;
             tile_tb.revision.reset();
