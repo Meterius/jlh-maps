@@ -319,6 +319,7 @@ async function mountRegisteredBevyInstance(
     await state.bevyInstance.value.mount(
       transfer(textureOffscreenCanvas, [textureOffscreenCanvas]),
       transfer(debugOffscreenCanvas, [debugOffscreenCanvas]),
+      bevyAssetBaseUrl(),
       { ...state.mapViewSettings.value },
       { ...state.mapViewCameraSettings.value },
       debugSize,
@@ -336,6 +337,10 @@ async function mountRegisteredBevyInstance(
     releaseMountedBevyInstance(state).catch(console.error)
     throw error
   }
+}
+
+function bevyAssetBaseUrl() {
+  return new URL(`${import.meta.env.BASE_URL}bevy-assets/`, document.baseURI).toString()
 }
 
 async function disposeBevyInstance(instanceId: string) {

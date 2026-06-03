@@ -23,7 +23,7 @@ impl Plugin for BuildingsPlugin {
         load_internal_asset!(
             app,
             BUILDING_MATERIAL_SHADER_HANDLE,
-            "../../../../assets/shaders/building_pbr.fragment.wgsl",
+            "../../../../assets-internal/shaders/building_pbr.fragment.wgsl",
             Shader::from_wgsl
         );
         app.register_type::<BuildingMaterialUniform>()

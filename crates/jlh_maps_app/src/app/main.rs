@@ -9,6 +9,7 @@ use crate::app::maplibre_gl_js::MaplibreGlJsPlugin;
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::offscreen_window_handle::OffscreenWindowHandle;
 use crate::app::window_events::WindowInstanceRef;
+use bevy::asset::{AssetMetaCheck, AssetPlugin};
 use bevy::audio::AudioPlugin;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
@@ -78,9 +79,19 @@ impl ExtractResource for AppWindows {
     }
 }
 
-pub fn setup_app(app: &mut App, debug_canvas: OffscreenCanvas, texture_canvas: OffscreenCanvas) {
+pub fn setup_app(
+    app: &mut App,
+    debug_canvas: OffscreenCanvas,
+    texture_canvas: OffscreenCanvas,
+    asset_base_url: String,
+) {
     app.add_plugins((
         DefaultPlugins
+            .set(AssetPlugin {
+                file_path: asset_base_url,
+                meta_check: AssetMetaCheck::Never,
+                ..default()
+            })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     canvas: None,

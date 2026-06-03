@@ -21,7 +21,7 @@ impl Plugin for WatersPlugin {
         load_internal_asset!(
             app,
             WATER_GRADIENT_MATERIAL_SHADER_HANDLE,
-            "../../../../assets/shaders/water_gradient.fragment.wgsl",
+            "../../../../assets-internal/shaders/water_gradient.fragment.wgsl",
             Shader::from_wgsl
         );
         app.register_type::<WaterMaterialUniform>()

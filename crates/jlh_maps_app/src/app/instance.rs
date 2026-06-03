@@ -54,12 +54,16 @@ struct ManagedBevyApp {
 #[wasm_bindgen]
 impl BevyInstance {
     #[wasm_bindgen(constructor)]
-    pub fn new(debug_canvas: OffscreenCanvas, texture_canvas: OffscreenCanvas) -> Self {
+    pub fn new(
+        debug_canvas: OffscreenCanvas,
+        texture_canvas: OffscreenCanvas,
+        asset_base_url: String,
+    ) -> Self {
         initialize();
 
         let mut app = App::new();
         app.add_plugins(AppTaskPoolPlugin {});
-        setup_app(&mut app, debug_canvas, texture_canvas);
+        setup_app(&mut app, debug_canvas, texture_canvas, asset_base_url);
 
         Self {
             inner: Rc::new(BevyInstanceInner {

@@ -195,6 +195,7 @@ class WorkerBevyInstance {
   async mount(
     textureCanvas: OffscreenCanvas,
     debugCanvas: OffscreenCanvas,
+    assetBaseUrl: string,
     mapViewSettings: MapViewSettings,
     mapViewCameraSettings: MapViewCameraSettings,
     debugSize: CanvasRenderSize,
@@ -206,7 +207,7 @@ class WorkerBevyInstance {
     this.textureCanvas = textureCanvas
 
     this.resizeCanvases(debugSize, textureSize)
-    this.bevyInstance = new wasmModule.BevyInstance(debugCanvas, textureCanvas)
+    this.bevyInstance = new wasmModule.BevyInstance(debugCanvas, textureCanvas, assetBaseUrl)
     this.set_map_view_settings(mapViewSettings)
     this.set_map_view_camera_settings(mapViewCameraSettings)
     this.refreshWindowRefs()

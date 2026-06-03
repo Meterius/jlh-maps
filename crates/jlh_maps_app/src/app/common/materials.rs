@@ -18,13 +18,13 @@ impl Plugin for MaterialsPlugin {
         load_internal_asset!(
             app,
             DEPTH_TEXTURE_MATERIAL_SHADER_HANDLE,
-            "../../../assets/shaders/depth.fragment.wgsl",
+            "../../../assets-internal/shaders/depth.fragment.wgsl",
             Shader::from_wgsl
         );
         load_internal_asset!(
             app,
             TRANSPARENT_OVERWRITE_MATERIAL_SHADER_HANDLE,
-            "../../../assets/shaders/transparent_overwrite.fragment.wgsl",
+            "../../../assets-internal/shaders/transparent_overwrite.fragment.wgsl",
             Shader::from_wgsl
         );
         app.add_plugins((
