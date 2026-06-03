@@ -23,9 +23,12 @@ use map_scatter::prelude::{
 };
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 const GEOMETRY_MASK_TEXTURE_ID: &str = "geometry_mask";
+const DENSITY_PATCH_TEXTURE_ID: &str = "density_patch";
 const SCATTER_KIND_ID: &str = "tree";
 const SCATTER_LAYER_ID: &str = "tree_scatter";
 
@@ -42,6 +45,14 @@ pub type FeatureTileScatter = TileTaskBased<FeatureTileScatterMeta>;
 pub struct FeatureTileScatterMeta;
 
 #[derive(Clone, Copy)]
+pub struct FeatureTileScatterDensityConfig {
+    pub patch_size_meters: f32,
+    pub min_probability: f32,
+    pub max_probability: f32,
+    pub contrast: f32,
+}
+
+#[derive(Clone, Copy)]
 pub struct FeatureTileScatterConfig {
     pub layer_id: &'static str,
 
@@ -52,6 +63,8 @@ pub struct FeatureTileScatterConfig {
     pub max_points: usize,
     pub chunk_extent_meters: f32,
     pub raster_cell_size_meters: f32,
+
+    pub density: Option<FeatureTileScatterDensityConfig>,
 }
 
 impl Default for FeatureTileScatterConfig {
@@ -64,6 +77,7 @@ impl Default for FeatureTileScatterConfig {
             max_points: 800,
             chunk_extent_meters: 256.0,
             raster_cell_size_meters: 4.0,
+            density: None,
         }
     }
 }
@@ -138,16 +152,39 @@ fn build_scatter_points(
 
     let mut textures = TextureRegistry::new();
     textures.register(GEOMETRY_MASK_TEXTURE_ID, polygon_mask);
+    let has_density_patch = if let Some(density_config) = config.density {
+        let patch_size = density_config.patch_size_meters * world_units_per_meter;
+        if patch_size.is_finite() && patch_size > 0.0 {
+            textures.register(
+                DENSITY_PATCH_TEXTURE_ID,
+                DensityPatchTexture::new(scatter_seed(tile.id), patch_size, density_config),
+            );
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
 
     let cache = FieldProgramCache::new();
-    let mut rng = StdRng::seed_from_u64(scatter_seed(config.layer_id, tile.id));
-    let plan = PlanBuilder::tree_plan(config.sample_radius_meters * world_units_per_meter);
+
+    let mut rng = StdRng::seed_from_u64(scatter_seed(tile.id));
+
+    let plan = PlanBuilder::tree_plan(
+        config.sample_radius_meters * world_units_per_meter,
+        has_density_patch,
+    );
+
     let run_config = RunConfig::new(domain_extent)
         .with_chunk_extent((config.chunk_extent_meters * world_units_per_meter).max(1.0))
         .with_raster_cell_size((config.raster_cell_size_meters * world_units_per_meter).max(0.01))
         .with_grid_halo(2);
+
     let mut runner = ScatterRunner::new(run_config, &textures, &cache);
+
     let result = runner.run(&plan, &mut rng);
+
     let center = tile_flat_world_center(tile.id);
     let bounds = get_tile_lnglat_bounds(tile.id);
 
@@ -182,18 +219,20 @@ fn build_scatter_points(
 struct PlanBuilder;
 
 impl PlanBuilder {
-    fn tree_plan(sample_radius: f32) -> map_scatter::prelude::Plan {
+    fn tree_plan(sample_radius: f32, has_density_patch: bool) -> map_scatter::prelude::Plan {
         let mut spec = FieldGraphSpec::default();
         spec.add_with_semantics(
             "inside_geometry",
             NodeSpec::texture(GEOMETRY_MASK_TEXTURE_ID, TextureChannel::R),
             FieldSemantics::Gate,
         );
-        spec.add_with_semantics(
-            "probability",
-            NodeSpec::constant(1.0),
-            FieldSemantics::Probability,
-        );
+
+        let probability = if has_density_patch {
+            NodeSpec::texture(DENSITY_PATCH_TEXTURE_ID, TextureChannel::R)
+        } else {
+            NodeSpec::constant(1.0)
+        };
+        spec.add_with_semantics("probability", probability, FieldSemantics::Probability);
 
         let layer = Layer::new_with(
             SCATTER_LAYER_ID,
@@ -203,6 +242,87 @@ impl PlanBuilder {
 
         map_scatter::prelude::Plan::new().with_layer(layer)
     }
+}
+
+struct DensityPatchTexture {
+    seed: u64,
+    patch_size: f32,
+    min_probability: f32,
+    max_probability: f32,
+    contrast: f32,
+}
+
+impl DensityPatchTexture {
+    fn new(seed: u64, patch_size: f32, config: FeatureTileScatterDensityConfig) -> Self {
+        let min_probability = config.min_probability.clamp(0.0, 1.0);
+        let max_probability = config.max_probability.clamp(min_probability, 1.0);
+
+        Self {
+            seed,
+            patch_size,
+            min_probability,
+            max_probability,
+            contrast: config.contrast.max(0.01),
+        }
+    }
+}
+
+impl Texture for DensityPatchTexture {
+    fn sample(&self, _channel: TextureChannel, p: Vec2) -> f32 {
+        let coarse = value_noise(p / self.patch_size, self.seed, 0);
+        let detail = value_noise(p / (self.patch_size * 0.45), self.seed, 1);
+        let density = (coarse * 0.75 + detail * 0.25)
+            .clamp(0.0, 1.0)
+            .powf(self.contrast);
+
+        self.min_probability + (self.max_probability - self.min_probability) * density
+    }
+}
+
+fn value_noise(p: Vec2, seed: u64, octave: u64) -> f32 {
+    let cell_x = p.x.floor();
+    let cell_y = p.y.floor();
+    let local_x = p.x - cell_x;
+    let local_y = p.y - cell_y;
+
+    let x0 = cell_x as i64;
+    let y0 = cell_y as i64;
+    let x1 = x0 + 1;
+    let y1 = y0 + 1;
+
+    let tx = smootherstep(local_x);
+    let ty = smootherstep(local_y);
+
+    let bottom = lerp(
+        cell_random(seed, octave, x0, y0),
+        cell_random(seed, octave, x1, y0),
+        tx,
+    );
+    let top = lerp(
+        cell_random(seed, octave, x0, y1),
+        cell_random(seed, octave, x1, y1),
+        tx,
+    );
+
+    lerp(bottom, top, ty)
+}
+
+fn cell_random(seed: u64, octave: u64, x: i64, y: i64) -> f32 {
+    let mut hasher = DefaultHasher::new();
+    seed.hash(&mut hasher);
+    octave.hash(&mut hasher);
+    x.hash(&mut hasher);
+    y.hash(&mut hasher);
+    (hasher.finish() as f64 / u64::MAX as f64) as f32
+}
+
+fn smootherstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 #[derive(Default)]
@@ -344,15 +464,8 @@ fn point_in_ring(point: Vec2, ring: &[Vec2]) -> bool {
     inside
 }
 
-fn scatter_seed(layer_id: &str, tile_id: CanonicalTileId) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    for byte in layer_id.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    for value in [tile_id.z, tile_id.x, tile_id.y] {
-        hash ^= u64::from(value);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
+fn scatter_seed(tile_id: CanonicalTileId) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    tile_id.hash(&mut hasher);
+    hasher.finish()
 }
