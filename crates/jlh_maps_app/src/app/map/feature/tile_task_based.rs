@@ -169,11 +169,10 @@ fn sync_item<C: TileTaskBasedMeta>(
             .pending_task
             .take()
             .and_then(|mut pending_task| pending_task.take_result())
-        {
-            tile_tb.data =
-                C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, Some(data));
-            tile_tb.data_revision += 1;
-        }
+    {
+        tile_tb.data = C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, Some(data));
+        tile_tb.data_revision += 1;
+    }
 
     // clear if tile no longer exists
     let Some(tile) = tile.tile(map_int) else {

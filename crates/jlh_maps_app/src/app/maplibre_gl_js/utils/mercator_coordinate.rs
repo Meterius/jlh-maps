@@ -1,5 +1,7 @@
 // Rust port of https://github.com/maplibre/maplibre-gl-js/blob/4412ee1bd912f669534fc801aaae87aaf8066274/src/geo/mercator_coordinate.ts
 
+use bevy::math::{DVec2, Vec2, vec2};
+
 /// MapLibre's WGS-84 mean earth radius in meters.
 pub const EARTH_RADIUS: f64 = 6_371_008.8;
 
@@ -91,6 +93,23 @@ pub fn altitude_from_mercator_z(z: f64, y: f64) -> f64 {
 
 pub fn mercator_scale(lat: f64) -> f64 {
     1.0 / lat.to_radians().cos()
+}
+
+pub fn lng_lat_is_in_bounds(bounds: (DVec2, DVec2), lnglat: DVec2) -> bool {
+    lnglat.x >= bounds.0.x
+        && lnglat.x <= bounds.1.x
+        && lnglat.y >= bounds.0.y
+        && lnglat.y <= bounds.1.y
+}
+
+pub fn tile_uv_from_lng_lat(bounds: (DVec2, DVec2), lnglat: DVec2) -> Vec2 {
+    let bounds_size = bounds.1 - bounds.0;
+    if bounds_size.x == 0.0 || bounds_size.y == 0.0 {
+        return Vec2::ZERO;
+    }
+
+    let uv = ((lnglat - bounds.0) / bounds_size).as_vec2();
+    vec2(uv.x, 1.0 - uv.y)
 }
 
 #[cfg(test)]

@@ -2,16 +2,17 @@ use crate::app::map::feature::tile_task_based::{
     TileTaskBased, TileTaskBasedMeta, TileTaskBasedPlugin,
 };
 use crate::app::map::feature::utils::poly::ring_without_closing_position;
-use crate::app::map::transform::{
-    lng_lat_alt_to_world, lng_lat_bounds_contains, tile_flat_center_world, tile_uv,
+use crate::app::map::transform::{tile_flat_world_center, world_from_lng_lat_alt};
+use crate::app::maplibre_gl_js::types::{MlTerrainTile, MlTile, MlTileFeature};
+use crate::app::maplibre_gl_js::utils::mercator_coordinate::{
+    lng_lat_is_in_bounds, tile_uv_from_lng_lat,
 };
-use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile, MlTile, MlTileFeature};
 use crate::app::maplibre_gl_js::utils::terrain::get_dem_elevation;
 use crate::app::maplibre_gl_js::utils::tile::get_tile_lnglat_bounds;
 use bevy::app::App;
 use bevy::asset::{Assets, Handle, RenderAssetUsages};
 use bevy::ecs::system::SystemParamItem;
-use bevy::math::{DVec3, dvec2, vec2};
+use bevy::math::{DVec3, dvec2};
 use bevy::mesh::{Indices, Mesh, Mesh3d, PrimitiveTopology};
 use bevy::prelude::{Commands, Entity, Plugin, ResMut};
 use geojson::{JsonValue, Value};
@@ -159,7 +160,7 @@ fn build_mesh_data(
 ) -> FeatureTileMeshData {
     let tile_id = tile.id;
     let bounds = get_tile_lnglat_bounds(tile_id);
-    let center = tile_flat_center_world(tile_id);
+    let center = tile_flat_world_center(tile_id);
     let mut buffers = FeaturePlaneMeshBuffers::default();
 
     for feature in tile
@@ -170,7 +171,6 @@ fn build_mesh_data(
     {
         push_feature_mesh(
             feature,
-            tile_id,
             center,
             bounds,
             terrain_data.as_ref(),
@@ -188,7 +188,6 @@ fn build_mesh_data(
 
 fn push_feature_mesh(
     feature: &MlTileFeature,
-    tile_id: CanonicalTileId,
     center: DVec3,
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
     terrain_data: Option<&MlTerrainTile>,
@@ -228,7 +227,6 @@ fn push_feature_mesh(
         Value::Polygon(polygon) => push_polygon_mesh(
             polygon,
             center,
-            tile_id,
             bounds,
             base_altitude,
             top_altitude,
@@ -245,7 +243,6 @@ fn push_feature_mesh(
                 push_polygon_mesh(
                     polygon,
                     center,
-                    tile_id,
                     bounds,
                     base_altitude,
                     top_altitude,
@@ -275,35 +272,6 @@ fn push_feature_mesh(
     }
 }
 
-struct TerrainElevationTile<'a> {
-    bounds: (bevy::math::DVec2, bevy::math::DVec2),
-    terrain_data: &'a MlTerrainTile,
-}
-
-impl<'a> TerrainElevationTile<'a> {
-    fn new(tile_id: CanonicalTileId, terrain_data: &'a MlTerrainTile) -> Self {
-        Self {
-            bounds: get_tile_lnglat_bounds(tile_id),
-            terrain_data,
-        }
-    }
-
-    fn elevation_meters(&self, lnglat: bevy::math::DVec2) -> Option<f64> {
-        if !lng_lat_bounds_contains(self.bounds, lnglat) {
-            return None;
-        }
-
-        let bounds_size = self.bounds.1 - self.bounds.0;
-        if bounds_size.x == 0.0 || bounds_size.y == 0.0 {
-            return None;
-        }
-
-        let uv = ((lnglat - self.bounds.0) / bounds_size).as_vec2();
-        let uv = vec2(uv.x, 1.0 - uv.y);
-        get_dem_elevation(&self.terrain_data.terrain_data, uv).map(f64::from)
-    }
-}
-
 // Polygon Mesh Construction
 
 fn feature_vertex_data(altitude: f64) -> [f32; 2] {
@@ -314,7 +282,6 @@ fn feature_vertex_data(altitude: f64) -> [f32; 2] {
 fn push_polygon_mesh(
     polygon: &[Vec<Vec<f64>>],
     center: DVec3,
-    tile_id: CanonicalTileId,
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
     base_altitude: f64,
     top_altitude: Option<f64>,
@@ -331,8 +298,6 @@ fn push_polygon_mesh(
     let mut hole_indices = Vec::new();
     let mut vertex_count = 0usize;
     let mut rings = Vec::new();
-    let terrain_tile =
-        terrain_data.map(|terrain_data| TerrainElevationTile::new(tile_id, terrain_data));
     let surface_altitude = top_altitude.unwrap_or(base_altitude);
 
     for (ring_index, ring) in polygon.iter().enumerate() {
@@ -359,24 +324,32 @@ fn push_polygon_mesh(
         let ring_first_vertex = positions.len();
         let mut ring_world_positions = Vec::new();
         for lnglat in lnglats {
-            let terrain_altitude = terrain_tile
-                .as_ref()
-                .and_then(|terrain_tile| terrain_tile.elevation_meters(lnglat))
+            let terrain_altitude = terrain_data
+                .filter(|_| lng_lat_is_in_bounds(bounds, lnglat))
+                .and_then(|terrain_data| {
+                    get_dem_elevation(
+                        &terrain_data.terrain_data,
+                        tile_uv_from_lng_lat(bounds, lnglat),
+                    )
+                })
+                .map(f64::from)
                 .unwrap_or(0.0);
+
             let world =
-                lng_lat_alt_to_world(lnglat.x, lnglat.y, surface_altitude + terrain_altitude)
+                world_from_lng_lat_alt(lnglat.x, lnglat.y, surface_altitude + terrain_altitude)
                     - center;
+
             flat_coords.push(world.x);
             flat_coords.push(world.y);
             positions.push(world.as_vec3().to_array());
             normals.push([0.0, 0.0, 1.0]);
-            uvs.push(tile_uv(bounds, lnglat).to_array());
+            uvs.push(tile_uv_from_lng_lat(bounds, lnglat).to_array());
             feature_data.push(feature_vertex_data(surface_altitude + terrain_altitude));
             if top_altitude.is_some() {
                 ring_world_positions.push(ExtrusionVertex {
                     top: world,
                     top_altitude: surface_altitude + terrain_altitude,
-                    base: lng_lat_alt_to_world(
+                    base: world_from_lng_lat_alt(
                         lnglat.x,
                         lnglat.y,
                         base_altitude + terrain_altitude,

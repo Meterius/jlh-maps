@@ -2,8 +2,8 @@ use crate::app::map::feature::tile_task_based::{
     TileTaskBased, TileTaskBasedMeta, TileTaskBasedPlugin,
 };
 use crate::app::map::feature::utils::poly::ring_without_closing_position;
-use crate::app::map::transform::tile_uv;
 use crate::app::maplibre_gl_js::types::{MlTerrainTile, MlTile, MlTileFeature};
+use crate::app::maplibre_gl_js::utils::mercator_coordinate::tile_uv_from_lng_lat;
 use crate::app::maplibre_gl_js::utils::tile::get_tile_lnglat_bounds;
 use crate::utils::edge_distance::update_edge_distance_texture;
 use bevy::asset::{Assets, Handle, RenderAssetUsages};
@@ -160,7 +160,7 @@ fn push_polygon_edge_segments(
         let uvs = ring_positions
             .iter()
             .filter(|&position| position.len() >= 2)
-            .map(|position| tile_uv(bounds, dvec2(position[0], position[1])))
+            .map(|position| tile_uv_from_lng_lat(bounds, dvec2(position[0], position[1])))
             .collect::<Vec<_>>();
 
         if uvs.len() < 2 {

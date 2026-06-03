@@ -1,4 +1,4 @@
-use crate::app::map::transform::tile_flat_bounds_world;
+use crate::app::map::transform::tile_flat_world_bounds;
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::maplibre_gl_js::types::CanonicalTileId;
 use crate::utils::debug::SoftExpect;
@@ -121,7 +121,7 @@ fn spawn_bucket(
     tile_id: CanonicalTileId,
     on_spawn: TileBucketOnSpawn,
 ) -> Entity {
-    let (center, half_extents) = tile_flat_bounds_world(tile_id);
+    let (center, half_extents) = tile_flat_world_bounds(tile_id);
     let (cell, translation) = grid.translation_to_grid(center);
 
     let bucket = TileBucket {

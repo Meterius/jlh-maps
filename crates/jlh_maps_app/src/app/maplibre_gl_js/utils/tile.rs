@@ -1,4 +1,4 @@
-use crate::app::map::transform::lng_lat_to_world;
+use crate::app::map::transform::world_from_lng_lat_alt;
 use crate::app::maplibre_gl_js::types::CanonicalTileId;
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{
     lat_from_mercator_y, lng_from_mercator_x,
@@ -22,8 +22,8 @@ pub fn get_tile_lnglat_bounds(id: CanonicalTileId) -> (DVec2, DVec2) {
 pub fn tile_transform_d(tile_id: CanonicalTileId, alt: f64) -> (DVec3, DVec2) {
     let bounds = get_tile_lnglat_bounds(tile_id);
 
-    let south_west = lng_lat_to_world(bounds.0.x, bounds.0.y, alt);
-    let north_east = lng_lat_to_world(bounds.1.x, bounds.1.y, alt);
+    let south_west = world_from_lng_lat_alt(bounds.0.x, bounds.0.y, alt);
+    let north_east = world_from_lng_lat_alt(bounds.1.x, bounds.1.y, alt);
 
     let min = south_west.min(north_east);
     let max = south_west.max(north_east);

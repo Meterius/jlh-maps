@@ -3,15 +3,18 @@ use crate::app::map::feature::tile_task_based::{
 };
 use crate::app::map::feature::utils::poly::ring_without_closing_position;
 use crate::app::map::transform::{
-    lng_lat_alt_to_world, lng_lat_bounds_contains, tile_flat_center_world,
-    tile_world_units_per_meter, world_xy_to_lnglat,
+    lng_lat_from_world_xy, tile_flat_world_center, tile_world_units_per_meter,
+    world_from_lng_lat_alt,
 };
 use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile, MlTile, MlTileFeature};
+use crate::app::maplibre_gl_js::utils::mercator_coordinate::{
+    lng_lat_is_in_bounds, tile_uv_from_lng_lat,
+};
 use crate::app::maplibre_gl_js::utils::terrain::get_dem_elevation;
 use crate::app::maplibre_gl_js::utils::tile::get_tile_lnglat_bounds;
 use bevy::app::App;
 use bevy::ecs::system::SystemParamItem;
-use bevy::math::{DVec2, DVec3, Vec2, Vec3, Vec3Swizzles, vec2};
+use bevy::math::{DVec3, Vec2, Vec3, Vec3Swizzles};
 use bevy::prelude::{Entity, Plugin};
 use geojson::{JsonValue, Value};
 use map_scatter::prelude::{
@@ -127,7 +130,7 @@ fn build_scatter_points(
         return FeatureScatterPoints::default();
     }
 
-    let (_, half_extents) = crate::app::map::transform::tile_flat_bounds_world(tile.id);
+    let (_, half_extents) = crate::app::map::transform::tile_flat_world_bounds(tile.id);
     let domain_extent = half_extents * 2.0;
     if domain_extent.x <= 0.0 || domain_extent.y <= 0.0 {
         return FeatureScatterPoints::default();
@@ -145,9 +148,8 @@ fn build_scatter_points(
         .with_grid_halo(2);
     let mut runner = ScatterRunner::new(run_config, &textures, &cache);
     let result = runner.run(&plan, &mut rng);
-    let terrain_tile =
-        terrain_data.map(|terrain_data| TerrainElevationTile::new(tile.id, terrain_data));
-    let center = tile_flat_center_world(tile.id);
+    let center = tile_flat_world_center(tile.id);
+    let bounds = get_tile_lnglat_bounds(tile.id);
 
     let positions = result
         .placements
@@ -156,12 +158,20 @@ fn build_scatter_points(
         .map(|placement| {
             let local_xy = placement.position;
             let world_xy = center.xy() + local_xy.as_dvec2();
-            let lnglat = world_xy_to_lnglat(world_xy);
-            let terrain_altitude = terrain_tile
-                .as_ref()
-                .and_then(|terrain_tile| terrain_tile.elevation_meters(lnglat))
+            let lnglat = lng_lat_from_world_xy(world_xy);
+
+            let terrain_altitude = terrain_data
+                .filter(|_| lng_lat_is_in_bounds(bounds, lnglat))
+                .and_then(|terrain_data| {
+                    get_dem_elevation(
+                        &terrain_data.terrain_data,
+                        tile_uv_from_lng_lat(bounds, lnglat),
+                    )
+                })
+                .map(f64::from)
                 .unwrap_or(0.0);
-            let z = lng_lat_alt_to_world(lnglat.x, lnglat.y, terrain_altitude).z - center.z;
+
+            let z = world_from_lng_lat_alt(lnglat.x, lnglat.y, terrain_altitude).z - center.z;
             Vec3::new(local_xy.x, local_xy.y, z as f32)
         })
         .collect();
@@ -202,7 +212,7 @@ struct PolygonMaskTexture {
 
 impl PolygonMaskTexture {
     fn from_tile_layer(tile: &MlTile, config: &FeatureTileScatterConfig) -> Self {
-        let center = tile_flat_center_world(tile.id);
+        let center = tile_flat_world_center(tile.id);
         let polygons = tile
             .layers
             .get(config.layer_id)
@@ -222,9 +232,11 @@ impl PolygonMaskTexture {
 
 impl Texture for PolygonMaskTexture {
     fn sample(&self, _channel: TextureChannel, p: Vec2) -> f32 {
-        if self.polygons
-            .iter()
-            .any(|polygon| polygon.contains(p)) { 1.0 } else { 0.0 }
+        if self.polygons.iter().any(|polygon| polygon.contains(p)) {
+            1.0
+        } else {
+            0.0
+        }
     }
 }
 
@@ -297,7 +309,7 @@ fn mask_ring(ring: &[Vec<f64>], center: DVec3) -> Option<Vec<Vec2>> {
                 return None;
             }
 
-            let world = lng_lat_alt_to_world(position[0], position[1], 0.0) - center;
+            let world = world_from_lng_lat_alt(position[0], position[1], 0.0) - center;
             Some(world.xy().as_vec2())
         })
         .collect::<Vec<_>>();
@@ -330,35 +342,6 @@ fn point_in_ring(point: Vec2, ring: &[Vec2]) -> bool {
     }
 
     inside
-}
-
-struct TerrainElevationTile<'a> {
-    bounds: (DVec2, DVec2),
-    terrain_data: &'a MlTerrainTile,
-}
-
-impl<'a> TerrainElevationTile<'a> {
-    fn new(tile_id: CanonicalTileId, terrain_data: &'a MlTerrainTile) -> Self {
-        Self {
-            bounds: get_tile_lnglat_bounds(tile_id),
-            terrain_data,
-        }
-    }
-
-    fn elevation_meters(&self, lnglat: DVec2) -> Option<f64> {
-        if !lng_lat_bounds_contains(self.bounds, lnglat) {
-            return None;
-        }
-
-        let bounds_size = self.bounds.1 - self.bounds.0;
-        if bounds_size.x == 0.0 || bounds_size.y == 0.0 {
-            return None;
-        }
-
-        let uv = ((lnglat - self.bounds.0) / bounds_size).as_vec2();
-        let uv = vec2(uv.x, 1.0 - uv.y);
-        get_dem_elevation(&self.terrain_data.terrain_data, uv).map(f64::from)
-    }
 }
 
 fn scatter_seed(layer_id: &str, tile_id: CanonicalTileId) -> u64 {
