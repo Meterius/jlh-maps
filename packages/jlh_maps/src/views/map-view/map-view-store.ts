@@ -25,6 +25,7 @@ export type MapViewBaseStyleLayerSettings = {
   bevyEnabled: boolean
   shadowsEnabled: boolean
   buildingsEnabled: boolean
+  treesEnabled: boolean
   terrainEnabled: boolean
 }
 
@@ -102,6 +103,7 @@ function createDefaultMapViewBaseStyleLayerSettings(): MapViewBaseStyleLayerSett
     bevyEnabled: true,
     shadowsEnabled: true,
     buildingsEnabled: true,
+    treesEnabled: true,
     terrainEnabled: false,
   }
 }

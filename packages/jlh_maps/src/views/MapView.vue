@@ -188,6 +188,21 @@
                       !currentBaseStyleLayerSettings.buildingsEnabled
                   "
                 />
+
+                <UButton
+                  label="Trees"
+                  color="neutral"
+                  active-color="primary"
+                  variant="outline-solid"
+                  :active="currentBaseStyleLayerSettings.treesEnabled"
+                  size="md"
+                  class="cursor-pointer"
+                  icon="lucide:tree-pine"
+                  @click="
+                    currentBaseStyleLayerSettings.treesEnabled =
+                      !currentBaseStyleLayerSettings.treesEnabled
+                  "
+                />
               </div>
 
               <USeparator v-if="currentBaseStyleLayerSettings.bevyEnabled" />
@@ -516,6 +531,22 @@ const bevyMount = createToggledComposable(
         get: () => useBevyRet.mapViewSettings.value.enableBuildings,
         set: (value) => {
           useBevyRet.mapViewSettings.value.enableBuildings = value
+        },
+      }),
+      { immediate: true },
+    )
+
+    syncRef(
+      computed({
+        get: () => currentBaseStyleLayerSettings.value.treesEnabled,
+        set: (value) => {
+          currentBaseStyleLayerSettings.value.treesEnabled = value
+        },
+      }),
+      computed({
+        get: () => useBevyRet.mapViewSettings.value.enableTrees,
+        set: (value) => {
+          useBevyRet.mapViewSettings.value.enableTrees = value
         },
       }),
       { immediate: true },
