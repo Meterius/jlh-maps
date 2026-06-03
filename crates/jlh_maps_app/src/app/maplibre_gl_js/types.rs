@@ -1,7 +1,7 @@
-use crate::app::maplibre_gl_js::mvt::parse_tile_layers;
+use crate::app::maplibre_gl_js::mvt::parse_tile;
 use crate::app::task_pool::AppTaskPool;
 use crate::wasm_task_pool::Task;
-use bevy::prelude::Reflect;
+use bevy::prelude::{Reflect, default};
 use geojson::Geometry;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -45,12 +45,6 @@ pub struct MlData {
 #[derive(Default)]
 pub struct MlSource {
     pub id: String,
-    pub layers: HashMap<String, MlLayer>,
-}
-
-#[derive(Default)]
-pub struct MlLayer {
-    pub id: String,
     pub tiles: HashMap<CanonicalTileId, Arc<MlTile>>,
 }
 
@@ -58,6 +52,12 @@ pub struct MlLayer {
 pub struct MlTile {
     pub id: CanonicalTileId,
     pub revision: u64,
+    pub layers: HashMap<String, MlTileLayer>,
+}
+
+#[derive(Default)]
+pub struct MlTileLayer {
+    pub id: String,
     pub features: HashMap<u64, MlTileFeature>,
 }
 
@@ -85,7 +85,7 @@ impl MlTileKey {
 
 struct MlTileParseTask {
     revision: u64,
-    task: Task<Result<HashMap<String, MlTile>, String>>,
+    task: Task<Result<MlTile, String>>,
 }
 
 impl MlData {
@@ -99,7 +99,7 @@ impl MlData {
         self.next_revision = self.next_revision.saturating_add(1).max(1);
         let revision = self.next_revision;
 
-        let task = task_pool.spawn(move || parse_tile_layers(tile_id, data, revision));
+        let task = task_pool.spawn(move || parse_tile(tile_id, data, revision));
         self.pending_tile_parse_tasks.insert(
             MlTileKey::new(source_id, tile_id),
             MlTileParseTask { revision, task },
@@ -120,7 +120,7 @@ impl MlData {
             })
             .collect::<Vec<_>>();
 
-        for (tile_key, revision, layers) in completed_tasks {
+        for (tile_key, revision, tile) in completed_tasks {
             let is_current = self
                 .pending_tile_parse_tasks
                 .get(&tile_key)
@@ -130,10 +130,10 @@ impl MlData {
             }
 
             self.pending_tile_parse_tasks.remove(&tile_key);
-            self.remove_tile_layers(&tile_key.source_id, &tile_key.tile_id);
+            self.remove_tile(&tile_key.source_id, &tile_key.tile_id);
 
-            let layers = match layers {
-                Ok(layers) => layers,
+            let tile = match tile {
+                Ok(tile) => tile,
                 Err(err) => {
                     tracing::warn!(
                         "Failed to parse MapLibre source tile {}/{:?}: {}",
@@ -145,70 +145,32 @@ impl MlData {
                 }
             };
 
-            self.apply_tile_layers(tile_key.source_id, tile_key.tile_id, layers);
+            self.apply_tile(tile_key.source_id, tile);
         }
     }
 
-    fn apply_tile_layers(
-        &mut self,
-        source_id: String,
-        tile_id: CanonicalTileId,
-        layers: HashMap<String, MlTile>,
-    ) {
-        if layers.is_empty() {
+    fn apply_tile(&mut self, source_id: String, tile: MlTile) {
+        if tile.layers.is_empty() {
             return;
         }
 
         let source = self
             .sources
             .entry(source_id.clone())
-            .or_insert_with(|| MlSource::new(source_id));
+            .or_insert_with(|| MlSource {
+                id: source_id,
+                ..default()
+            });
 
-        for (layer_id, tile) in layers {
-            source
-                .layers
-                .entry(layer_id.clone())
-                .or_insert_with(|| MlLayer::new(layer_id))
-                .tiles
-                .insert(tile_id, Arc::new(tile));
-        }
+        source.tiles.insert(tile.id, Arc::new(tile));
     }
 
     pub fn remove_tile(&mut self, source_id: &str, tile_id: &CanonicalTileId) {
         self.pending_tile_parse_tasks
             .remove(&MlTileKey::new(source_id, *tile_id));
-        self.remove_tile_layers(source_id, tile_id);
-    }
 
-    fn remove_tile_layers(&mut self, source_id: &str, tile_id: &CanonicalTileId) {
-        let Some(source) = self.sources.get_mut(source_id) else {
-            return;
-        };
-
-        source.layers.retain(|_, layer| {
-            layer.tiles.remove(tile_id);
-            !layer.tiles.is_empty()
-        });
-        if source.layers.is_empty() {
-            self.sources.remove(source_id);
-        }
-    }
-}
-
-impl MlSource {
-    fn new(id: String) -> Self {
-        Self {
-            id,
-            layers: HashMap::default(),
-        }
-    }
-}
-
-impl MlLayer {
-    fn new(id: String) -> Self {
-        Self {
-            id,
-            tiles: HashMap::default(),
+        if let Some(source) = self.sources.get_mut(source_id) {
+            source.tiles.remove(tile_id);
         }
     }
 }

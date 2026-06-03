@@ -1,16 +1,16 @@
-use crate::app::map::feature::bucket::FeatureTileBucket;
+use crate::app::map::feature::tile_task_based::{
+    TileTaskBased, TileTaskBasedMeta, TileTaskBasedPlugin,
+};
 use crate::app::map::feature::utils::poly::ring_without_closing_position;
 use crate::app::map::transform::tile_uv;
-use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
-use crate::app::maplibre_gl_js::types::{MlTile, MlTileFeature};
+use crate::app::maplibre_gl_js::types::{MlTerrainTile, MlTile, MlTileFeature};
 use crate::app::maplibre_gl_js::utils::tile::get_tile_lnglat_bounds;
-use crate::app::task_pool::AppTaskPool;
 use crate::utils::edge_distance::update_edge_distance_texture;
-use crate::wasm_task_pool::Task;
 use bevy::asset::{Assets, Handle, RenderAssetUsages};
+use bevy::ecs::system::SystemParamItem;
 use bevy::image::{Image, ImageSampler};
 use bevy::math::{UVec2, dvec2};
-use bevy::prelude::{Component, Plugin, Query, Res, ResMut, Update};
+use bevy::prelude::{Entity, Plugin, ResMut};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use geojson::Value;
 use std::sync::Arc;
@@ -21,132 +21,115 @@ pub struct FeatureEdgeDistanceTexturePlugin;
 
 impl Plugin for FeatureEdgeDistanceTexturePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_systems(Update, sync_textures);
+        app.add_plugins(TileTaskBasedPlugin::<FeatureTileEdgeDistanceTextureMeta>::new());
     }
 }
 
 // ECS
 
-#[derive(Component)]
-pub struct FeatureTileBucketEdgeDistanceTexture {
-    pub texture: Handle<Image>,
-    resolution: UVec2,
-    data: Vec<f32>,
-    dirty: bool,
-    tile_revision: Option<u64>,
-    pending_edge_distance_task: Option<Task<Vec<f32>>>,
+pub type FeatureTileEdgeDistanceTexture = TileTaskBased<FeatureTileEdgeDistanceTextureMeta>;
+
+pub struct FeatureTileEdgeDistanceTextureMeta;
+
+#[derive(Clone, Copy)]
+pub struct FeatureTileEdgeDistanceTextureConfig {
+    pub layer_id: &'static str,
+    pub resolution: UVec2,
 }
 
-impl FeatureTileBucketEdgeDistanceTexture {
-    pub fn new(resolution: UVec2, images: &mut Assets<Image>) -> Self {
+impl Default for FeatureTileEdgeDistanceTextureConfig {
+    fn default() -> Self {
+        Self {
+            layer_id: "",
+            resolution: UVec2::ONE,
+        }
+    }
+}
+
+pub struct FeatureTileEdgeDistanceTextureState {
+    texture: Handle<Image>,
+}
+
+impl FeatureTileEdgeDistanceTexture {
+    pub fn new(layer_id: &'static str, resolution: UVec2, images: &mut Assets<Image>) -> Self {
         let resolution = resolution.max(UVec2::ONE);
         let data = vec![0.0; (resolution.x * resolution.y) as usize];
         let texture = images.add(make_image(resolution, &data));
 
-        Self {
-            texture,
-            resolution,
-            data,
-            dirty: true,
-            tile_revision: None,
-            pending_edge_distance_task: None,
-        }
+        TileTaskBased::from_parts(
+            FeatureTileEdgeDistanceTextureConfig {
+                layer_id,
+                resolution,
+            },
+            FeatureTileEdgeDistanceTextureState { texture },
+        )
     }
 
-    fn clear_data(&mut self) {
-        self.data.fill(0.0);
-        self.dirty = true;
-        self.pending_edge_distance_task = None;
-    }
-
-    fn clear_component(&mut self) {
-        self.clear_data();
-        self.dirty = false;
-        self.tile_revision = None;
-        self.pending_edge_distance_task = None;
+    pub fn texture(&self) -> &Handle<Image> {
+        &self.state().texture
     }
 }
 
-fn sync_textures(
-    map_ints: Query<&MaplibreMapIntegration>,
-    task_pool: Res<AppTaskPool>,
-    mut buckets: Query<(
-        &FeatureTileBucket,
-        &mut FeatureTileBucketEdgeDistanceTexture,
-    )>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    for (bucket, mut edge_texture) in buckets.iter_mut() {
-        let Some(map_int) = map_ints.get(bucket.maplibre_int_id).ok() else {
-            continue;
-        };
+impl TileTaskBasedMeta for FeatureTileEdgeDistanceTextureMeta {
+    type Data = Vec<f32>;
+    type State = FeatureTileEdgeDistanceTextureState;
+    type Config = FeatureTileEdgeDistanceTextureConfig;
+    type ApplyParams = ResMut<'static, Assets<Image>>;
 
-        sync_texture(map_int, bucket, &mut edge_texture, &mut images, &task_pool);
-    }
-}
-
-fn sync_texture(
-    map_int: &MaplibreMapIntegration,
-    bucket: &FeatureTileBucket,
-    edge_texture: &mut FeatureTileBucketEdgeDistanceTexture,
-    images: &mut Assets<Image>,
-    task_pool: &AppTaskPool,
-) {
-    // apply texture from task returns
-    if let Some(data) = edge_texture
-        .pending_edge_distance_task
-        .as_mut()
-        .and_then(|pending_task| pending_task.poll_once())
-    {
-        edge_texture.pending_edge_distance_task = None;
-        edge_texture.data = data;
-        apply_texture(edge_texture, images);
+    fn use_terrain() -> bool {
+        false
     }
 
-    // delete texture if tile no longer exists
-    let Some(tile) = bucket.tile(map_int) else {
-        if edge_texture.tile_revision.is_some() {
-            edge_texture.clear_component();
-        }
-        return;
-    };
-
-    // check if tile or terrain data has changed
-
-    if edge_texture.tile_revision != Some(tile.revision) {
-        edge_texture.clear_data();
-        edge_texture.tile_revision = Some(tile.revision);
+    fn build_data(
+        tile: Arc<MlTile>,
+        _terrain_tile: Option<MlTerrainTile>,
+        config: Self::Config,
+    ) -> Self::Data {
+        build_texture(tile, config.layer_id, config.resolution)
     }
 
-    if !edge_texture.dirty {
-        return;
+    fn apply_data(
+        _entity: Entity,
+        images: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
+        config: &Self::Config,
+        state: &mut Self::State,
+        data: Option<&Self::Data>,
+    ) {
+        apply_texture(state, config.resolution, data.map(Vec::as_slice), images);
     }
-
-    // data has changed, start texture rebuild task
-
-    let bounds = get_tile_lnglat_bounds(bucket.tile_id);
-    let resolution = edge_texture.resolution;
-    let tile = Arc::clone(tile);
-    let task = task_pool.spawn(move || build_texture(tile, bounds, resolution));
-    edge_texture.pending_edge_distance_task = Some(task);
-    edge_texture.dirty = false;
 }
 
 // Texture Construction / Application
 
-fn apply_texture(edge_texture: &FeatureTileBucketEdgeDistanceTexture, images: &mut Assets<Image>) {
-    if let Some(image) = images.get_mut(&edge_texture.texture) {
-        *image = make_image(edge_texture.resolution, &edge_texture.data);
+fn apply_texture(
+    state: &FeatureTileEdgeDistanceTextureState,
+    resolution: UVec2,
+    data: Option<&[f32]>,
+    images: &mut Assets<Image>,
+) {
+    if let Some(image) = images.get_mut(&state.texture) {
+        let default_data;
+        let data = match data {
+            Some(data) => data,
+            None => {
+                default_data = vec![0.0; (resolution.x * resolution.y) as usize];
+                &default_data
+            }
+        };
+        *image = make_image(resolution, data);
     }
 }
 
-fn build_texture(
-    tile: Arc<MlTile>,
-    bounds: (bevy::math::DVec2, bevy::math::DVec2),
-    resolution: UVec2,
-) -> Vec<f32> {
+fn build_texture(tile: Arc<MlTile>, layer_id: &'static str, resolution: UVec2) -> Vec<f32> {
+    let bounds = get_tile_lnglat_bounds(tile.id);
     let mut data = vec![0.0; (resolution.x * resolution.y) as usize];
-    let edges = build_features_edge_segments(bounds, tile.features.values());
+    let edges = build_features_edge_segments(
+        bounds,
+        tile.layers
+            .get(layer_id)
+            .iter()
+            .flat_map(|layer| layer.features.values()),
+    );
     update_edge_distance_texture(
         &edges,
         &mut data,

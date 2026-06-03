@@ -1,4 +1,4 @@
-use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTile, MlTileFeature};
+use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTile, MlTileFeature, MlTileLayer};
 use geo_types::{
     Coord, Geometry as GeoGeometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point,
     Polygon,
@@ -11,16 +11,17 @@ use std::f64::consts::PI;
 
 const GENERATED_FEATURE_ID_BIT: u64 = 1 << 63;
 
-pub fn parse_tile_layers(
+pub fn parse_tile(
     tile_id: CanonicalTileId,
     tile_data: Vec<u8>,
     revision: u64,
-) -> Result<HashMap<String, MlTile>, String> {
+) -> Result<MlTile, String> {
     let reader =
         Reader::new(tile_data).map_err(|err| format!("Failed to decode MVT tile: {err:?}"))?;
     let layer_metadata = reader
         .get_layer_metadata()
         .map_err(|err| format!("Failed to read MVT layer metadata: {err:?}"))?;
+
     let mut layers = HashMap::with_capacity(layer_metadata.len());
 
     for layer in layer_metadata {
@@ -53,16 +54,19 @@ pub fn parse_tile_layers(
         }
 
         layers.insert(
-            layer.name,
-            MlTile {
-                id: tile_id,
-                revision,
+            layer.name.clone(),
+            MlTileLayer {
+                id: layer.name,
                 features,
             },
         );
     }
 
-    Ok(layers)
+    Ok(MlTile {
+        id: tile_id,
+        revision,
+        layers,
+    })
 }
 
 fn feature_id(

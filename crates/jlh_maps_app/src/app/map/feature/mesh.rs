@@ -1,17 +1,19 @@
-use crate::app::map::feature::bucket::FeatureTileBucket;
+use crate::app::map::feature::tile_task_based::{
+    TileTaskBased, TileTaskBasedMeta, TileTaskBasedPlugin,
+};
 use crate::app::map::feature::utils::poly::ring_without_closing_position;
-use crate::app::map::transform::{lng_lat_alt_to_world, lng_lat_bounds_contains, tile_uv};
-use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
+use crate::app::map::transform::{
+    lng_lat_alt_to_world, lng_lat_bounds_contains, tile_flat_center_world, tile_uv,
+};
 use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile, MlTile, MlTileFeature};
 use crate::app::maplibre_gl_js::utils::terrain::get_dem_elevation;
 use crate::app::maplibre_gl_js::utils::tile::get_tile_lnglat_bounds;
-use crate::app::task_pool::AppTaskPool;
-use crate::wasm_task_pool::Task;
 use bevy::app::App;
 use bevy::asset::{Assets, Handle, RenderAssetUsages};
+use bevy::ecs::system::SystemParamItem;
 use bevy::math::{DVec3, dvec2, vec2};
 use bevy::mesh::{Indices, Mesh, Mesh3d, PrimitiveTopology};
-use bevy::prelude::{Commands, Component, Entity, Plugin, Query, Res, ResMut, Update, Visibility};
+use bevy::prelude::{Commands, Entity, Plugin, ResMut};
 use geojson::{JsonValue, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,62 +22,67 @@ pub struct FeatureMeshPlugin;
 
 impl Plugin for FeatureMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, sync_meshes);
+        app.add_plugins(TileTaskBasedPlugin::<FeatureTileMeshMeta>::new());
     }
 }
 
 // ECS
 
-#[derive(Component, Clone, Copy, Default)]
-pub struct FeatureTileBucketPlaneMeshConfig {
+pub type FeatureTileMesh = TileTaskBased<FeatureTileMeshMeta>;
+
+pub struct FeatureTileMeshMeta;
+
+#[derive(Clone, Copy, Default)]
+pub struct FeatureTileMeshConfig {
+    pub layer_id: &'static str,
     pub base_property_keys: Option<&'static [&'static str]>,
     pub top_property_keys: Option<&'static [&'static str]>,
     pub wall_normal_smooth_angle: Option<f32>,
 }
 
-#[derive(Component)]
-pub struct FeatureTileBucketPlaneMesh {
+#[derive(Default)]
+pub struct FeatureTileMeshState {
     mesh_handle: Option<Handle<Mesh>>,
-    mesh_dirty: bool,
-    terrain_hash: Option<String>,
-    tile_revision: Option<u64>,
-    pending_mesh_task: Option<Task<FeaturePlaneMeshBuffers>>,
-    buffers: FeaturePlaneMeshBuffers,
 }
 
-impl Default for FeatureTileBucketPlaneMesh {
-    fn default() -> Self {
-        Self {
-            mesh_handle: None,
-            mesh_dirty: true,
-            terrain_hash: None,
-            tile_revision: None,
-            pending_mesh_task: None,
-            buffers: FeaturePlaneMeshBuffers::default(),
-        }
+impl FeatureTileMesh {
+    pub fn new(config: FeatureTileMeshConfig) -> Self {
+        TileTaskBased::from_parts(config, FeatureTileMeshState::default())
     }
 }
 
-impl FeatureTileBucketPlaneMesh {
-    fn clear_data(&mut self) {
-        self.buffers.clear();
-        self.mesh_dirty = true;
-        self.pending_mesh_task = None;
+impl TileTaskBasedMeta for FeatureTileMeshMeta {
+    type Data = FeaturePlaneMeshBuffers;
+    type State = FeatureTileMeshState;
+    type Config = FeatureTileMeshConfig;
+    type ApplyParams = (Commands<'static, 'static>, ResMut<'static, Assets<Mesh>>);
+
+    fn use_terrain() -> bool {
+        true
     }
 
-    fn clear_component(&mut self, commands: &mut Commands, entity: Entity) {
-        self.clear_data();
-        self.mesh_handle = None;
-        self.mesh_dirty = false;
-        self.terrain_hash = None;
-        self.tile_revision = None;
-        self.pending_mesh_task = None;
-        commands.entity(entity).try_remove::<Mesh3d>();
+    fn build_data(
+        tile: Arc<MlTile>,
+        terrain_data: Option<MlTerrainTile>,
+        config: Self::Config,
+    ) -> Self::Data {
+        build_mesh_buffers(tile, terrain_data, config)
+    }
+
+    fn apply_data(
+        entity: Entity,
+        params: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
+        _config: &Self::Config,
+        state: &mut Self::State,
+        data: Option<&Self::Data>,
+    ) {
+        let (commands, meshes) = params;
+        apply_mesh_buffers(commands, entity, state, data, meshes);
     }
 }
 
 #[derive(Default)]
-struct FeaturePlaneMeshBuffers {
+pub struct FeaturePlaneMeshBuffers {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
     uvs: Vec<[f32; 2]>,
@@ -84,14 +91,6 @@ struct FeaturePlaneMeshBuffers {
 }
 
 impl FeaturePlaneMeshBuffers {
-    fn clear(&mut self) {
-        self.positions.clear();
-        self.normals.clear();
-        self.uvs.clear();
-        self.feature_data.clear();
-        self.indices.clear();
-    }
-
     fn is_empty(&self) -> bool {
         self.positions.is_empty() || self.indices.is_empty()
     }
@@ -110,141 +109,49 @@ impl FeaturePlaneMeshBuffers {
     }
 }
 
-fn sync_meshes(
-    mut commands: Commands,
-    map_ints: Query<&MaplibreMapIntegration>,
-    task_pool: Res<AppTaskPool>,
-    mut buckets: Query<(
-        Entity,
-        &FeatureTileBucket,
-        &FeatureTileBucketPlaneMeshConfig,
-        &mut FeatureTileBucketPlaneMesh,
-        Option<&Visibility>,
-    )>,
-    mut meshes: ResMut<Assets<Mesh>>,
-) {
-    for (bucket_entity, bucket, config, mut plane_mesh, visibility) in buckets.iter_mut() {
-        if matches!(visibility, Some(Visibility::Hidden)) {
-            continue;
-        }
-
-        let Some(map_int) = map_ints.get(bucket.maplibre_int_id).ok() else {
-            continue;
-        };
-
-        sync_mesh(
-            &mut commands,
-            map_int,
-            bucket_entity,
-            bucket,
-            &mut plane_mesh,
-            &mut meshes,
-            *config,
-            &task_pool,
-        );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn sync_mesh(
-    commands: &mut Commands,
-    map_int: &MaplibreMapIntegration,
-    bucket_entity: Entity,
-    bucket: &FeatureTileBucket,
-    plane_mesh: &mut FeatureTileBucketPlaneMesh,
-    meshes: &mut Assets<Mesh>,
-    config: FeatureTileBucketPlaneMeshConfig,
-    task_pool: &AppTaskPool,
-) {
-    // apply mesh from task returns
-    if let Some(buffers) = plane_mesh
-        .pending_mesh_task
-        .as_mut()
-        .and_then(|pending_task| pending_task.poll_once())
-    {
-        plane_mesh.pending_mesh_task = None;
-        plane_mesh.buffers = buffers;
-        apply_mesh_buffers(commands, bucket_entity, plane_mesh, meshes);
-    }
-
-    // delete mesh if tile no longer exists
-    let Some(tile) = bucket.tile(map_int) else {
-        if plane_mesh.tile_revision.is_some() {
-            plane_mesh.clear_component(commands, bucket_entity);
-        }
-        return;
-    };
-
-    // check if tile or terrain data has changed
-
-    if plane_mesh.tile_revision != Some(tile.revision) {
-        plane_mesh.clear_data();
-        plane_mesh.tile_revision = Some(tile.revision);
-    }
-
-    let terrain_data = map_int.terrain.tiles.get(&bucket.tile_id);
-    let terrain_hash = terrain_data.map(|terrain_data| terrain_data.hash.clone());
-    if terrain_hash != plane_mesh.terrain_hash {
-        plane_mesh.clear_data();
-        plane_mesh.terrain_hash = terrain_hash.clone();
-    }
-
-    if !plane_mesh.mesh_dirty {
-        return;
-    }
-
-    // data has changed, start mesh rebuild task
-
-    let tile = Arc::clone(tile);
-    let terrain_data = terrain_data.cloned();
-    let tile_id = bucket.tile_id;
-    let center = bucket.center;
-
-    let task =
-        task_pool.spawn(move || build_mesh_buffers(tile, tile_id, center, terrain_data, config));
-    plane_mesh.pending_mesh_task = Some(task);
-    plane_mesh.mesh_dirty = false;
-}
-
 // Mesh Construction / Application
 
 fn apply_mesh_buffers(
     commands: &mut Commands,
     bucket_entity: Entity,
-    plane_mesh: &mut FeatureTileBucketPlaneMesh,
+    state: &mut FeatureTileMeshState,
+    buffers: Option<&FeaturePlaneMeshBuffers>,
     meshes: &mut Assets<Mesh>,
 ) {
-    if plane_mesh.buffers.is_empty() {
+    let Some(buffers) = buffers.filter(|buffers| !buffers.is_empty()) else {
         commands.entity(bucket_entity).try_remove::<Mesh3d>();
-        plane_mesh.mesh_handle = None;
-        plane_mesh.mesh_dirty = false;
+        state.mesh_handle = None;
         return;
-    }
+    };
 
-    let mesh = plane_mesh.buffers.to_mesh();
-    if let Some(mesh_handle) = &plane_mesh.mesh_handle {
+    let mesh = buffers.to_mesh();
+    if let Some(mesh_handle) = &state.mesh_handle {
         if let Some(existing_mesh) = meshes.get_mut(mesh_handle) {
             *existing_mesh = mesh;
         }
     } else {
         let mesh_handle = meshes.add(mesh);
-        plane_mesh.mesh_handle = Some(mesh_handle.clone());
+        state.mesh_handle = Some(mesh_handle.clone());
         commands.entity(bucket_entity).insert(Mesh3d(mesh_handle));
     }
-    plane_mesh.mesh_dirty = false;
 }
 
 fn build_mesh_buffers(
     tile: Arc<MlTile>,
-    tile_id: CanonicalTileId,
-    center: DVec3,
     terrain_data: Option<MlTerrainTile>,
-    config: FeatureTileBucketPlaneMeshConfig,
+    config: FeatureTileMeshConfig,
 ) -> FeaturePlaneMeshBuffers {
+    let tile_id = tile.id;
     let bounds = get_tile_lnglat_bounds(tile_id);
+    let center = tile_flat_center_world(tile_id);
     let mut buffers = FeaturePlaneMeshBuffers::default();
 
-    for feature in tile.features.values() {
+    for feature in tile
+        .layers
+        .get(config.layer_id)
+        .iter()
+        .flat_map(|layer| layer.features.values())
+    {
         push_feature_mesh(
             feature,
             tile_id,
@@ -265,7 +172,7 @@ fn push_feature_mesh(
     center: DVec3,
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
     terrain_data: Option<&MlTerrainTile>,
-    altitude_config: &FeatureTileBucketPlaneMeshConfig,
+    altitude_config: &FeatureTileMeshConfig,
     buffers: &mut FeaturePlaneMeshBuffers,
 ) -> bool {
     fn feature_altitude_property(

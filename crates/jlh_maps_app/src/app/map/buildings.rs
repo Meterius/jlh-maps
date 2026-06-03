@@ -1,9 +1,7 @@
 use crate::app::map::camera::MapViewCamera;
 use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MapViewSettings};
-use crate::app::map::feature::bucket::FeatureTileBucket;
-use crate::app::map::feature::mesh::{
-    FeatureTileBucketPlaneMesh, FeatureTileBucketPlaneMeshConfig,
-};
+use crate::app::map::feature::mesh::{FeatureTileMesh, FeatureTileMeshConfig};
+use crate::app::map::feature::tile::FeatureTile;
 use crate::app::map::transform::tile_flat_bounds_world;
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::maplibre_gl_js::types::CanonicalTileId;
@@ -172,15 +170,12 @@ fn sync_spawned_building_buckets(
         }
 
         for (source_id, source) in &map_int.data.sources {
-            let Some(layer) = source.layers.get(BUILDING_SOURCE_LAYER) else {
-                continue;
-            };
-
-            for tile_id in layer.tiles.keys() {
+            for tile_id in source.tiles.keys() {
                 let spawned_source = manager
                     .spawned_buildings
                     .entry(source_id.clone())
                     .or_default();
+
                 if spawned_source.tiles.contains_key(tile_id) {
                     continue;
                 }
@@ -211,11 +206,13 @@ fn remove_stale_building_buckets(
     spawned_buildings.retain(|source_id, spawned_source| {
         let source = (!remove_all)
             .then_some(map_int)
-            .and_then(|map_int| map_int.data.sources.get(source_id))
-            .and_then(|source| source.layers.get(BUILDING_SOURCE_LAYER));
+            .and_then(|map_int| map_int.data.sources.get(source_id));
 
         spawned_source.tiles.retain(|tile_id, bucket_entity| {
-            if source.and_then(|layer| layer.tiles.get(tile_id)).is_none() {
+            if source
+                .and_then(|source| source.tiles.get(tile_id))
+                .is_none()
+            {
                 commands.entity(*bucket_entity).despawn();
                 return false;
             }
@@ -251,19 +248,13 @@ fn spawn_building_bucket(
                 flat_half_extents,
             },
             BuildingTileBucket,
-            FeatureTileBucket::new(
-                maplibre_int_id,
-                source_id,
-                BUILDING_SOURCE_LAYER,
-                tile_id,
-                center,
-            ),
-            FeatureTileBucketPlaneMesh::default(),
-            FeatureTileBucketPlaneMeshConfig {
+            FeatureTile::new(maplibre_int_id, source_id, tile_id, center),
+            FeatureTileMesh::new(FeatureTileMeshConfig {
+                layer_id: BUILDING_SOURCE_LAYER,
                 base_property_keys: Some(BUILDING_BASE_ALTITUDE_PROPERTY_KEYS),
                 top_property_keys: Some(BUILDING_TOP_ALTITUDE_PROPERTY_KEYS),
                 wall_normal_smooth_angle: Some(35.0_f32.to_radians()),
-            },
+            }),
             MeshMaterial3d(material),
         ))
         .id();

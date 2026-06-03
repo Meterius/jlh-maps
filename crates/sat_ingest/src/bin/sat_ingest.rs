@@ -87,7 +87,6 @@ enum Commands {
         stitch_filter: StitchFilter,
         #[arg(long, default_value = "/")]
         tile_dir_url: String,
-
     },
 }
 
@@ -802,8 +801,9 @@ fn process_dist_img_into_tile_json(
 
                 let tile = match load_dist_img_web_mercator_tile(&dist_img, depth, x, y, resolution)
                     .with_context(|| format!("making tile z={depth} x={x} y={y}"))
-                    .inspect_err(|err| eprintln!("Error making tile z={depth} x={x} y={y}: {err:#}"))
-                {
+                    .inspect_err(|err| {
+                        eprintln!("Error making tile z={depth} x={x} y={y}: {err:#}")
+                    }) {
                     Ok(Some(tile)) => tile,
                     Ok(None) => return,
                     Err(_) => return,
@@ -901,6 +901,14 @@ fn main() -> anyhow::Result<()> {
             stitch_filter,
             resume_depth,
             tile_dir_url,
-        } => process_dist_img_into_tile_json(&input, &output, resolution, depth, stitch_filter, resume_depth, tile_dir_url),
+        } => process_dist_img_into_tile_json(
+            &input,
+            &output,
+            resolution,
+            depth,
+            stitch_filter,
+            resume_depth,
+            tile_dir_url,
+        ),
     }
 }

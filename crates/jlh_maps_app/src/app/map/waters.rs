@@ -1,9 +1,7 @@
 use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MapViewSettings};
-use crate::app::map::feature::bucket::FeatureTileBucket;
-use crate::app::map::feature::edge_distance_texture::FeatureTileBucketEdgeDistanceTexture;
-use crate::app::map::feature::mesh::{
-    FeatureTileBucketPlaneMesh, FeatureTileBucketPlaneMeshConfig,
-};
+use crate::app::map::feature::edge_distance_texture::FeatureTileEdgeDistanceTexture;
+use crate::app::map::feature::mesh::{FeatureTileMesh, FeatureTileMeshConfig};
+use crate::app::map::feature::tile::FeatureTile;
 use crate::app::map::transform::tile_flat_center_world;
 use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::maplibre_gl_js::types::CanonicalTileId;
@@ -117,11 +115,7 @@ fn sync_spawned_water_buckets(
         }
 
         for (source_id, source) in &map_int.data.sources {
-            let Some(layer) = source.layers.get(WATER_SOURCE_LAYER) else {
-                continue;
-            };
-
-            for tile_id in layer.tiles.keys() {
+            for tile_id in source.tiles.keys() {
                 let spawned_source = manager.spawned_waters.entry(source_id.clone()).or_default();
                 if spawned_source.tiles.contains_key(tile_id) {
                     continue;
@@ -153,11 +147,13 @@ fn remove_stale_water_buckets(
     spawned_waters.retain(|source_id, spawned_source| {
         let source = (!remove_all)
             .then_some(map_int)
-            .and_then(|map_int| map_int.data.sources.get(source_id))
-            .and_then(|source| source.layers.get(WATER_SOURCE_LAYER));
+            .and_then(|map_int| map_int.data.sources.get(source_id));
 
         spawned_source.tiles.retain(|tile_id, bucket_entity| {
-            if source.and_then(|layer| layer.tiles.get(tile_id)).is_none() {
+            if source
+                .and_then(|source| source.tiles.get(tile_id))
+                .is_none()
+            {
                 commands.entity(*bucket_entity).despawn();
                 return false;
             }
@@ -182,8 +178,11 @@ fn spawn_water_bucket(
 ) -> Entity {
     let center = tile_flat_center_world(tile_id);
     let (cell, translation) = grid.translation_to_grid(center.with_z(center.z));
-    let edge_distance_texture =
-        FeatureTileBucketEdgeDistanceTexture::new(WATER_EDGE_DISTANCE_TEXTURE_RESOLUTION, images);
+    let edge_distance_texture = FeatureTileEdgeDistanceTexture::new(
+        WATER_SOURCE_LAYER,
+        WATER_EDGE_DISTANCE_TEXTURE_RESOLUTION,
+        images,
+    );
     let material = materials.add(ExtendedMaterial {
         base: StandardMaterial {
             opaque_render_method: OpaqueRendererMethod::Forward,
@@ -192,7 +191,7 @@ fn spawn_water_bucket(
             ..default()
         },
         extension: WaterMaterialExtension {
-            edge_distance_texture: edge_distance_texture.texture.clone(),
+            edge_distance_texture: edge_distance_texture.texture().clone(),
             uniform: WaterMaterialUniform {
                 water_color: Srgba::from(WATER_COLOR).to_vec4(),
                 water2_color: Srgba::from(WATER2_COLOR).to_vec4(),
@@ -213,15 +212,11 @@ fn spawn_water_bucket(
             MeshMaterial3d(material.clone()),
             NotShadowCaster,
             WaterTileBucket,
-            FeatureTileBucket::new(
-                maplibre_int_id,
-                source_id,
-                WATER_SOURCE_LAYER,
-                tile_id,
-                center,
-            ),
-            FeatureTileBucketPlaneMesh::default(),
-            FeatureTileBucketPlaneMeshConfig::default(),
+            FeatureTile::new(maplibre_int_id, source_id, tile_id, center),
+            FeatureTileMesh::new(FeatureTileMeshConfig {
+                layer_id: WATER_SOURCE_LAYER,
+                ..default()
+            }),
             edge_distance_texture,
         ))
         .id();

@@ -217,8 +217,8 @@ impl DistributedMappedImage {
             .into_par_iter()
             .map(|entry| {
                 let img = image::open(&entry.path)
-                .with_context(|| format!("decoding {:?}", entry.path))?
-                .to_rgba8();
+                    .with_context(|| format!("decoding {:?}", entry.path))?
+                    .to_rgba8();
                 Ok((entry.bounds, img))
             })
             .collect::<anyhow::Result<_>>()?;
