@@ -5,6 +5,7 @@ import {
   type FilterSpecification,
   type GeoJSONSource,
   type MapGeoJSONFeature,
+  type MapEventType,
   type MapLayerEventType,
   type MapLibreMap,
   type RasterSourceSpecification,
@@ -14,7 +15,7 @@ import {
   type StyleImageMetadata,
 } from 'maplibre-gl'
 import { type MaybeRefOrGetter, ref, shallowRef, toValue, watch, type WatchSource } from 'vue'
-import { onScopeDisposeLifo, onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
+import { createToggledComposable, onScopeDisposeLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import type { GeoJSON } from 'geojson'
 
 let mapKeyCounter = 0
@@ -30,29 +31,36 @@ export function useMapExtended(key?: symbol | string) {
   const loaded = ref(false)
   const zoom = ref(0)
   const pitch = ref(0)
+  const terrainEnabled = ref(false)
 
   watchDefinedOnce(
     () => mapInstance.map,
     (map) => {
-      zoom.value = map.getZoom()
-      loaded.value = map.loaded()
-      pitch.value = map.getPitch()
+      const updateLoaded = () => {
+        loaded.value = map.loaded()
+      }
+      const updateZoom = () => {
+        zoom.value = map.getZoom()
+      }
+      const updatePitch = () => {
+        pitch.value = map.getPitch()
+      }
+      const updateTerrainEnabled = () => {
+        terrainEnabled.value = map.getTerrain() !== null
+      }
 
-      const subscriptions = [
-        map.on('load', () => {
-          loaded.value = true
-        }),
-        map.on('zoom', () => {
-          zoom.value = map.getZoom()
-        }),
-        map.on('pitch', () => {
-          pitch.value = map.getPitch()
-        }),
-      ]
+      updateLoaded()
+      updateZoom()
+      updatePitch()
+      updateTerrainEnabled()
 
-      onWatcherCleanupLifo(() => {
-        subscriptions.forEach((sub) => sub.unsubscribe())
+      onMapEvent(map, 'load', () => {
+        updateLoaded()
+        updateTerrainEnabled()
       })
+      onMapEvent(map, 'styledata', updateTerrainEnabled)
+      onMapEvent(map, 'zoom', updateZoom)
+      onMapEvent(map, 'pitch', updatePitch)
     },
   )
 
@@ -60,6 +68,7 @@ export function useMapExtended(key?: symbol | string) {
     loaded,
     zoom,
     pitch,
+    terrainEnabled,
     mapInstance,
   }
 }
@@ -296,10 +305,10 @@ export function useOnDemandImageProvider<T>(
 
 // Events
 
-export function onMapEvent<T extends keyof MapLayerEventType>(
+export function onMapEvent<T extends keyof MapEventType>(
   map: MapLibreMap,
   type: T,
-  listener: (ev: MapLayerEventType[T] & object) => void,
+  listener: (ev: MapEventType[T] & object) => void,
 ) {
   const sub = map.on(type, listener)
   onScopeDisposeLifo(() => {
@@ -348,6 +357,7 @@ export function useHoverFeatureState(
   map: MapLibreMap,
   layerId: string,
   isHoveredPropertyName: string,
+  enabled: MaybeRefOrGetter<boolean> = () => true,
 ) {
   const layer = map.getLayer(layerId)
   if (!layer) {
@@ -385,8 +395,20 @@ export function useHoverFeatureState(
     updateFeatureHoveredFeatureIds(nextHoveredFeatures)
   }
 
-  onMapLayerEvent(map, 'mousemove', layerId, onFeatures)
-  onMapLayerEvent(map, 'mouseleave', layerId, onFeatures)
+  createToggledComposable(
+    enabled,
+    () => {
+      onMapLayerEvent(map, 'mousemove', layerId, onFeatures)
+      onMapLayerEvent(map, 'mouseleave', layerId, onFeatures)
+      return {}
+    }
+  )
+
+  watch(() => toValue(enabled), (value) => {
+    if (!value) {
+      updateFeatureHoveredFeatureIds({})
+    }
+  })
 
   onScopeDisposeLifo(() => {
     updateFeatureHoveredFeatureIds({})

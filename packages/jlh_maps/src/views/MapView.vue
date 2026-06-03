@@ -443,7 +443,7 @@ import { provideMapViewStore } from '@/views/map-view/map-view-store.ts'
 import { MapViewBaseStyleType } from '@/views/map-view/map-view-types.ts'
 
 const mapKey = makeUniqueMapKey()
-const { mapInstance, loaded, zoom } = useMapExtended(mapKey)
+const { mapInstance, loaded, zoom, terrainEnabled } = useMapExtended(mapKey)
 
 // Persisted View
 
@@ -1029,7 +1029,9 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
           hoverFeatureStateProperty: 'isHovered',
         })
 
-        useHoverFeatureState(map, poiLayer.layerId, 'isHovered')
+        // disable hover as mouse events cause feature queries which are very expensive while terrain
+        // is active
+        useHoverFeatureState(map, poiLayer.layerId, 'isHovered', () => !terrainEnabled.value)
         useLayerFeatureIdExclusionFilter(map, poiLayer.layerId, () =>
           selected.value.map((item) => item.featureId),
         )
