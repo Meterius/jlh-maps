@@ -24,8 +24,8 @@ pub struct MlView {
 
 #[derive(Default)]
 pub struct MlTerrain {
-    pub active_tile_ids: HashSet<CanonicalTileId>,
     pub tiles: HashMap<CanonicalTileId, MlTerrainTile>,
+    pub active_tile_ids: HashSet<CanonicalTileId>,
 }
 
 #[derive(Clone, Debug)]
@@ -46,6 +46,7 @@ pub struct MlData {
 pub struct MlSource {
     pub id: String,
     pub tiles: HashMap<CanonicalTileId, Arc<MlTile>>,
+    pub renderable_tile_ids: HashSet<CanonicalTileId>,
 }
 
 #[derive(Default)]
@@ -134,11 +135,19 @@ impl MlData {
             }
 
             self.pending_tile_parse_tasks.remove(&tile_key);
-            self.remove_tile(&tile_key.source_id, &tile_key.tile_id);
 
-            let tile = match tile {
-                Ok(tile) => tile,
+            match tile {
+                Ok(tile) => {
+                    self.apply_tile(tile_key.source_id, tile);
+                },
                 Err(err) => {
+                    let source_id = &tile_key.source_id;
+                    let tile_id = &tile_key.tile_id;
+
+                    if let Some(source) = self.sources.get_mut(source_id) {
+                        source.tiles.remove(tile_id);
+                    }
+
                     tracing::warn!(
                         "Failed to parse MapLibre source tile {}/{:?}: {}",
                         tile_key.source_id,
@@ -148,8 +157,6 @@ impl MlData {
                     continue;
                 }
             };
-
-            self.apply_tile(tile_key.source_id, tile);
         }
     }
 
@@ -176,6 +183,18 @@ impl MlData {
         if let Some(source) = self.sources.get_mut(source_id) {
             source.tiles.remove(tile_id);
         }
+    }
+
+    pub fn set_renderable_tiles(&mut self, source_id: String, tile_ids: HashSet<CanonicalTileId>) {
+        let source = self
+            .sources
+            .entry(source_id.clone())
+            .or_insert_with(|| MlSource {
+                id: source_id,
+                ..default()
+            });
+
+        source.renderable_tile_ids = tile_ids;
     }
 }
 

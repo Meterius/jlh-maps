@@ -39,6 +39,7 @@
     "jlh_maps_app": "file:../../crates/jlh_maps_app/pkg",
     "jlh_maps_app_threaded": "file:../../crates/jlh_maps_app/pkg_threaded",
     "lodash": "^4.18.1",
+    "lru-cache": "^11.5.1",
     "lucide-static": "^1.16.0",
     "maplibre-gl": "github:Meterius/jlh-maps-maplibre-gl-js#19e07617",
     "opening_hours": "^3.12.0",

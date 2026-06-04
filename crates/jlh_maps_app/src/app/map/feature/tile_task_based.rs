@@ -5,7 +5,7 @@ use crate::app::task_pool::AppTaskPool;
 use crate::wasm_task_pool::Task;
 use bevy::app::{App, Plugin};
 use bevy::ecs::system::{StaticSystemParam, SystemParam, SystemParamItem};
-use bevy::prelude::{Component, Entity, Query, Res, Update, Visibility};
+use bevy::prelude::{Component, Entity, InheritedVisibility, Query, Res, Update};
 use std::sync::Arc;
 
 pub struct TileTaskBasedPlugin<C: TileTaskBasedMeta>(std::marker::PhantomData<C>);
@@ -136,7 +136,7 @@ fn sync_items<C: TileTaskBasedMeta>(
         Entity,
         &FeatureTile,
         &mut TileTaskBased<C>,
-        Option<&Visibility>,
+        Option<&InheritedVisibility>,
     )>,
 ) {
     for (id, tile, mut tile_tb, visibility) in buckets.iter_mut() {
@@ -144,11 +144,8 @@ fn sync_items<C: TileTaskBasedMeta>(
             continue;
         };
 
-        if matches!(visibility, Some(Visibility::Hidden)) {
-            continue;
-        }
-
-        sync_item(map_int, &mut *params, id, tile, &mut tile_tb, &task_pool);
+        // TODO: do not rely on visibility for task active status
+        sync_item(map_int, &mut *params, id, tile, &mut tile_tb, &task_pool, visibility == Some(&InheritedVisibility::VISIBLE));
     }
 }
 
@@ -159,6 +156,7 @@ fn sync_item<C: TileTaskBasedMeta>(
     tile: &FeatureTile,
     tile_tb: &mut TileTaskBased<C>,
     task_pool: &AppTaskPool,
+    active: bool,
 ) {
     // apply task returns
     if tile_tb
@@ -185,6 +183,9 @@ fn sync_item<C: TileTaskBasedMeta>(
         }
         return;
     };
+
+    // if not active, data will not be refreshed
+    if !active { return; }
 
     // check if tile or terrain data has changed
 

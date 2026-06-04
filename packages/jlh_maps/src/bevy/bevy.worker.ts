@@ -104,16 +104,20 @@ class WorkerMaplibreIntegration {
     }
   }
 
-  remove_source_tile(sourceId: string, z: number, x: number, y: number) {
-    this.integration.remove_source_tile(sourceId, z, x, y)
+  remove_source_tile(sourceId: string, serializedCanonicalTileId: string) {
+    this.integration.remove_source_tile(sourceId, serializedCanonicalTileId)
   }
 
-  remove_terrain_tile_data(tileKey: string) {
-    this.integration.remove_terrain_tile_data(tileKey)
+  remove_terrain_tile_data(serializedCanonicalTileId: string) {
+    this.integration.remove_terrain_tile_data(serializedCanonicalTileId)
   }
 
   sync_terrain_active_tile_ids(activeTileIds: string[]) {
     this.integration.sync_terrain_active_tile_ids(activeTileIds)
+  }
+
+  sync_source_renderable_tile_ids(sourceId: string, renderableTileIds: string[]) {
+    this.integration.sync_source_renderable_tile_ids(sourceId, renderableTileIds)
   }
 
   sync_view(
@@ -143,12 +147,12 @@ class WorkerMaplibreIntegration {
     }
   }
 
-  update_source_tile(sourceId: string, z: number, x: number, y: number, data: Uint8Array) {
-    this.integration.update_source_tile(sourceId, z, x, y, data)
+  update_source_tile(sourceId: string, serializedCanonicalTileId: string, data: Uint8Array) {
+    this.integration.update_source_tile(sourceId, serializedCanonicalTileId, data)
   }
 
   update_terrain_tile_data(
-    tileKey: string,
+    serializedCanonicalTileId: string,
     hash: string,
     stride: number,
     dim: number,
@@ -162,7 +166,7 @@ class WorkerMaplibreIntegration {
     data: Uint32Array,
   ) {
     this.integration.update_terrain_tile_data(
-      tileKey,
+      serializedCanonicalTileId,
       hash,
       stride,
       dim,

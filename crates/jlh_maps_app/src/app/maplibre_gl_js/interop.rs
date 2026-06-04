@@ -19,8 +19,8 @@ pub struct MaplibreIntegration {
     integration_id: u32,
 }
 
-fn parse_tile_key(tile: &str) -> anyhow::Result<CanonicalTileId> {
-    let mut parts = tile.split('/');
+fn parse_serialized_canonical_tile_id(tile_id: &str) -> anyhow::Result<CanonicalTileId> {
+    let mut parts = tile_id.split('/');
     let z = parts
         .next()
         .ok_or(anyhow!("Missing z coordinate in tile key"))?
@@ -112,7 +112,7 @@ impl MaplibreIntegration {
     #[allow(clippy::too_many_arguments)]
     pub fn update_terrain_tile_data(
         &self,
-        tile_key: String,
+        serialized_canonical_tile_id: String,
         hash: String,
         stride: u32,
         dim: u32,
@@ -125,7 +125,7 @@ impl MaplibreIntegration {
         terrain_matrix_json: String,
         data: Vec<u32>,
     ) -> Result<(), String> {
-        let tile_key = parse_tile_key(&tile_key).map_err(|err| err.to_string())?;
+        let tile_key = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id).map_err(|err| err.to_string())?;
         let terrain_matrix =
             parse_terrain_matrix(&terrain_matrix_json).map_err(|err| err.to_string())?;
 
@@ -156,13 +156,13 @@ impl MaplibreIntegration {
         })
     }
 
-    pub fn remove_terrain_tile_data(&self, tile_key: String) -> Result<(), String> {
-        let tile_key = parse_tile_key(&tile_key).map_err(|err| err.to_string())?;
+    pub fn remove_terrain_tile_data(&self, serialized_canonical_tile_id: String) -> Result<(), String> {
+        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id).map_err(|err| err.to_string())?;
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
             with_map_data_mut(world, integration_id, |map_data| {
-                map_data.terrain.tiles.remove(&tile_key);
+                map_data.terrain.tiles.remove(&tile_id);
             });
         })
     }
@@ -170,12 +170,11 @@ impl MaplibreIntegration {
     pub fn update_source_tile(
         &self,
         source_id: String,
-        z: u32,
-        x: u32,
-        y: u32,
+        serialized_canonical_tile_id: String,
         data: Vec<u8>,
     ) -> Result<(), String> {
-        let tile_id = CanonicalTileId { z, x, y };
+        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id).map_err(|err| err.to_string())?;
+
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
@@ -197,11 +196,10 @@ impl MaplibreIntegration {
     pub fn remove_source_tile(
         &self,
         source_id: String,
-        z: u32,
-        x: u32,
-        y: u32,
+        serialized_canonical_tile_id: String,
     ) -> Result<(), String> {
-        let tile_id = CanonicalTileId { z, x, y };
+        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id).map_err(|err| err.to_string())?;
+
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
@@ -211,12 +209,35 @@ impl MaplibreIntegration {
         })
     }
 
+    pub fn sync_source_renderable_tile_ids(
+        &self,
+        source_id: String,
+        renderable_tile_ids: Vec<String>,
+    ) -> Result<(), String> {
+        let renderable_tile_ids = renderable_tile_ids
+            .into_iter()
+            .map(|v| parse_serialized_canonical_tile_id(&v))
+            .collect::<Result<HashSet<_>, _>>()
+            .map_err(|err| err.to_string())?;
+
+        let integration_id = self.integration_id;
+
+        self.execute(move |world| {
+            with_map_data_mut(world, integration_id, |map_data| {
+                map_data
+                    .data
+                    .set_renderable_tiles(source_id, renderable_tile_ids);
+            });
+        })
+    }
+
     pub fn sync_terrain_active_tile_ids(&self, active_tile_ids: Vec<String>) -> Result<(), String> {
         let active_tile_ids = active_tile_ids
             .into_iter()
-            .map(|v| parse_tile_key(&v))
+            .map(|v| parse_serialized_canonical_tile_id(&v))
             .collect::<Result<HashSet<_>, _>>()
             .map_err(|err| err.to_string())?;
+
         let integration_id = self.integration_id;
 
         self.execute(move |world| {

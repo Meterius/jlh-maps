@@ -1,10 +1,7 @@
 use crate::app::map::feature::bucket_manager::{TileBucket, TileBucketSystems};
 use bevy::app::{App, Plugin};
 use bevy::ecs::system::{StaticSystemParam, SystemParam, SystemParamItem};
-use bevy::prelude::{
-    Commands, Component, Entity, EntityCommands, IntoScheduleConfigs, Query, Transform, Update,
-    With, Without,
-};
+use bevy::prelude::{Commands, Component, Entity, EntityCommands, IntoScheduleConfigs, Query, Transform, Update, Visibility, With, Without};
 use std::marker::PhantomData;
 
 pub trait TileBucketLayerMeta: Send + Sync + Sized + 'static {
@@ -109,7 +106,7 @@ fn spawn_tile<L: TileBucketLayerMeta>(
     bucket_id: Entity,
 ) {
     let child_id = commands
-        .spawn((Transform::default(), TileBucketLayerTile::<L>::new()))
+        .spawn((Transform::default(), Visibility::Inherited, TileBucketLayerTile::<L>::new()))
         .id();
 
     L::spawn(commands.entity(child_id), spawn_params, bucket_id, bucket);

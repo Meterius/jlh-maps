@@ -485,7 +485,7 @@ const bevyMount = createToggledComposable(
     const useBevyRet = useBevy(mountBevyRet.instanceId)
 
     const useMaplibreIntegrationRet = useMaplibreIntegration(mountBevyRet.instanceId, mapKey, {
-      featureSourceIds: ['openmaptiles'],
+      sourceIds: ['openmaptiles'],
     })
 
     syncRef(

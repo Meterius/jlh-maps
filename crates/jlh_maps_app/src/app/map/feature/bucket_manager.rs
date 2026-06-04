@@ -75,7 +75,11 @@ fn sync_spawned_buckets(
                 .entry(source_id.clone())
                 .or_default();
 
-            for tile_id in source.tiles.keys() {
+            for tile_id in source
+                .renderable_tile_ids
+                .iter()
+                .filter(|tile_id| source.tiles.contains_key(*tile_id))
+            {
                 if spawned_buckets.contains_key(tile_id) {
                     continue;
                 }
@@ -99,10 +103,22 @@ fn sync_spawned_buckets(
                 let source = map_int.data.sources.get(source_id);
 
                 spawned_buckets.retain(|tile_id, bucket_eid| {
-                    if source.is_none_or(|source| !source.tiles.contains_key(tile_id)) {
+                    let Some(source) = source else {
+                        commands.entity(*bucket_eid).despawn();
+                        return false;
+                    };
+
+                    if !source.tiles.contains_key(tile_id) {
                         commands.entity(*bucket_eid).despawn();
                         return false;
                     }
+
+                    let visibility = if source.renderable_tile_ids.contains(tile_id) {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    };
+                    commands.entity(*bucket_eid).insert(visibility);
 
                     true
                 });

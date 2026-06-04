@@ -59,13 +59,6 @@ fn sync_spawned_tiles(
             continue;
         };
 
-        for (_, tile_entity) in manager
-            .spawned_tiles
-            .extract_if(|tile_id, _| !map_int.terrain.active_tile_ids.contains(tile_id))
-        {
-            commands.entity(tile_entity).despawn();
-        }
-
         for &tile_id in map_int.terrain.active_tile_ids.iter() {
             if let Entry::Vacant(entry) = manager.spawned_tiles.entry(tile_id) {
                 let tile_e_id = commands
@@ -73,6 +66,7 @@ fn sync_spawned_tiles(
                         Name::new(format!("Terrain Tile {tile_id:?}")),
                         Transform::default(),
                         CellCoord::default(),
+                        Visibility::Inherited,
                         Mesh3d(meshes.add(Mesh::from(Plane3d::new(Vec3::Z, Vec2::ONE / 2.0)))),
                         MeshMaterial3d(material.0.clone()),
                         DebugAabbGizmo,
@@ -90,6 +84,22 @@ fn sync_spawned_tiles(
                 commands.entity(manager_id).add_child(tile_e_id);
                 entry.insert(tile_e_id);
             }
+        }
+
+        for (tile_id, tile_entity) in &manager.spawned_tiles {
+            let visibility = if map_int.terrain.active_tile_ids.contains(tile_id) {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            commands.entity(*tile_entity).insert(visibility);
+        }
+
+        for (_, tile_entity) in manager.spawned_tiles.extract_if(|tile_id, _| {
+            !map_int.terrain.active_tile_ids.contains(tile_id)
+                && !map_int.terrain.tiles.contains_key(tile_id)
+        }) {
+            commands.entity(tile_entity).despawn();
         }
     }
 }
