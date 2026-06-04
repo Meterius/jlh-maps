@@ -15,6 +15,7 @@ import {
   DEFAULT_MARKER_ICON_OPTIONS,
   type MarkerOptions,
 } from '@/maplibre-layers/common/marker-icon.ts'
+import type { UseLayerOptions } from '@/composables/maplibre'
 import {
   type MarkerLayerMarker,
   type MarkerLayerSpecification,
@@ -108,6 +109,7 @@ export const usePoiLayer = (
   map: MapLibreMap,
   baseLayer: SymbolLayerSpecification,
   additionalMarkerLayerMarkerFields?: Partial<Pick<MarkerLayerMarker, 'hoverFeatureStateProperty'>>,
+  options: Pick<UseLayerOptions, 'visible'> = {},
 ) => {
   const layerId = `${baseLayer.id}${POI_MARKER_LAYER_SUFFIX}`
   const poiMarkerImageProvider = usePoiMarkerImageProvider()
@@ -117,6 +119,7 @@ export const usePoiLayer = (
     makePoiMarkerLayer(baseLayer, additionalMarkerLayerMarkerFields ?? {}),
     poiMarkerImageProvider,
     {
+      ...options,
       beforeId: baseLayer.id,
     },
   )

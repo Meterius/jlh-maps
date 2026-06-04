@@ -203,6 +203,21 @@
                       !currentBaseStyleLayerSettings.treesEnabled
                   "
                 />
+
+                <UButton
+                  label="Cinematic"
+                  color="neutral"
+                  active-color="primary"
+                  variant="outline-solid"
+                  :active="currentBaseStyleLayerSettings.cinematicEnabled"
+                  size="md"
+                  class="cursor-pointer"
+                  icon="lucide:film"
+                  @click="
+                    currentBaseStyleLayerSettings.cinematicEnabled =
+                      !currentBaseStyleLayerSettings.cinematicEnabled
+                  "
+                />
               </div>
 
               <USeparator v-if="currentBaseStyleLayerSettings.bevyEnabled" />
@@ -408,6 +423,7 @@ import {
   useSource,
   onMapLayerFeatureEvent,
   onMapEvent,
+  useLayerVisibility,
 } from '@/composables/maplibre'
 import {
   useGeolocateControl,
@@ -443,7 +459,35 @@ import { provideMapViewStore } from '@/views/map-view/map-view-store.ts'
 import { MapViewBaseStyleType } from '@/views/map-view/map-view-types.ts'
 
 const mapKey = makeUniqueMapKey()
-const { mapInstance, loaded, zoom, terrainEnabled } = useMapExtended(mapKey)
+const { mapInstance, loaded, zoom, pitch, terrainEnabled } = useMapExtended(mapKey)
+
+const BEVY_LAYER_ID = 'bevy-texture'
+const CINEMATIC_OVERLAY_VISIBLE_MAX_PITCH_DEGREES = 25
+const BEVY_OVERLAY_LAYER_IDS = [
+  // 'Water labels',
+  'House number labels',
+  // 'Ferry line',
+  // 'Ferry labels',
+  // 'Road labels',
+  'Tertiary road shield',
+  'Secondary road shield',
+  'Primary road shield',
+  'Trunk road shield',
+  'Highway shield',
+  'Major airport labels',
+  'Airport labels',
+  'Airport gate labels',
+  'Other labels',
+  'National park labels',
+  'Volcano peak labels',
+  'Mountain peak labels',
+  'Village labels',
+  'Town labels',
+  'State labels',
+  'City labels',
+  'Capital city labels',
+  'Country labels',
+]
 
 // Persisted View
 
@@ -1003,6 +1047,11 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
   source: TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString(),
   options: { diff: false },
   instantiate: (map) => {
+    const poiOverlayLayerIds: string[] = []
+    const cinematicOverlayLayerVisible = () =>
+      !currentBaseStyleLayerSettings.value.cinematicEnabled ||
+      pitch.value <= CINEMATIC_OVERLAY_VISIBLE_MAX_PITCH_DEGREES
+
     // Context Menu
 
     onScopeDisposeLifo(registerTouchContextMenu(map))
@@ -1025,9 +1074,17 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       )
       .filter((layer) => layer['source-layer'] === 'poi')
       .forEach((baseLayer) => {
-        const poiLayer = usePoiLayer(map, baseLayer, {
-          hoverFeatureStateProperty: 'isHovered',
-        })
+        const poiLayer = usePoiLayer(
+          map,
+          baseLayer,
+          {
+            hoverFeatureStateProperty: 'isHovered',
+          },
+          {
+            visible: cinematicOverlayLayerVisible,
+          },
+        )
+        poiOverlayLayerIds.push(poiLayer.layerId)
 
         // disable hover as mouse events cause feature queries which are very expensive while terrain
         // is active
@@ -1045,6 +1102,10 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
         map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
       })
+
+    BEVY_OVERLAY_LAYER_IDS.forEach((layerId) => {
+      useLayerVisibility(map, layerId, cinematicOverlayLayerVisible)
+    })
 
     // Raster Base
 
@@ -1133,15 +1194,9 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
     useLayer(
       map,
       new BevyLayer(bevyFrameBitmap, {
-        id: 'bevy-texture',
+        id: BEVY_LAYER_ID,
       }),
-      { beforeId: 'Water labels' },
     )
-    ;['Oneway path', 'Oneway', 'Oneway opposite'].forEach((layerId) => {
-      if (map.getLayer(layerId)) {
-        map.moveLayer(layerId, 'bevy-texture')
-      }
-    })
 
     // Sky / Terrain / Hillshade
 
@@ -1188,9 +1243,25 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       {
         visible: () => currentBaseStyleLayerSettings.value.terrainEnabled,
         // insert hillshade before bevy as otherwise bevy depth mask will clip hillshade
-        beforeId: useRaster ? undefined : 'bevy-texture',
+        beforeId: useRaster ? undefined : BEVY_LAYER_ID,
       },
     )
+
+    // move bevy layer to the end, then move overlay layers above bevy
+    if (map.getLayer(BEVY_LAYER_ID)) {
+      const overlayLayerIds = new Set([...BEVY_OVERLAY_LAYER_IDS, ...poiOverlayLayerIds])
+      const orderedOverlayLayerIds = map
+        .getLayersOrder()
+        .filter((layerId) => overlayLayerIds.has(layerId))
+
+      map.moveLayer(BEVY_LAYER_ID)
+
+      orderedOverlayLayerIds.forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.moveLayer(layerId)
+        }
+      })
+    }
 
     map.setSky({
       'sky-color': '#199EF3',

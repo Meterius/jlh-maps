@@ -26,6 +26,7 @@ export type MapViewBaseStyleLayerSettings = {
   shadowsEnabled: boolean
   buildingsEnabled: boolean
   treesEnabled: boolean
+  cinematicEnabled: boolean
   terrainEnabled: boolean
 }
 
@@ -104,6 +105,7 @@ function createDefaultMapViewBaseStyleLayerSettings(): MapViewBaseStyleLayerSett
     shadowsEnabled: true,
     buildingsEnabled: true,
     treesEnabled: true,
+    cinematicEnabled: false,
     terrainEnabled: false,
   }
 }

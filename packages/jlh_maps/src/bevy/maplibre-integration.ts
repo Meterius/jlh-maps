@@ -168,6 +168,7 @@ function useTerrainSync(
       map
         .coveringTiles({
           tileSize: 512,
+          maxzoom: 14,
         })
         .forEach((tileId) => {
           activeTileIds.set(serializeCanonicalTileId(tileId.canonical), tileId.canonical)

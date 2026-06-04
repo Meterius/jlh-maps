@@ -159,21 +159,29 @@ export interface UseLayerOptions {
   visible?: WatchSource<boolean>
 }
 
+export function useLayerVisibility(
+  map: MapLibreMap,
+  layerId: string,
+  visible: WatchSource<boolean>,
+) {
+  watch(
+    visible,
+    (value) => {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, 'visibility', value ? 'visible' : 'none')
+      }
+    },
+    { immediate: true },
+  )
+}
+
 export function useLayer(map: MapLibreMap, layer: AddLayerObject, options: UseLayerOptions = {}) {
   const { beforeId, visible } = options
 
   map.addLayer(layer, beforeId)
 
   if (visible !== undefined) {
-    watch(
-      visible,
-      (value) => {
-        if (map.getLayer(layer.id)) {
-          map.setLayoutProperty(layer.id, 'visibility', value ? 'visible' : 'none')
-        }
-      },
-      { immediate: true },
-    )
+    useLayerVisibility(map, layer.id, visible)
   }
 
   onScopeDisposeLifo(() => {
