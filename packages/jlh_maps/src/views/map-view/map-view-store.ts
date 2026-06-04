@@ -15,10 +15,21 @@ export type MapViewStore = {
     azimuthDegrees: number
     elevationDegrees: number
   }
+  lod: MapLibreLodSettings
   rainfallEnabled: boolean
   baseStyleType: MapViewBaseStyleType
   projection?: ProjectionSpecification
   bevyCanvasEnabled: boolean
+}
+
+export type MapLibreLodSettings = {
+  maxZoomLevelsOnScreen: number
+  tileCountMaxMinRatio: number
+}
+
+export const DEFAULT_MAPLIBRE_LOD_SETTINGS: MapLibreLodSettings = {
+  maxZoomLevelsOnScreen: 9.314,
+  tileCountMaxMinRatio: 3,
 }
 
 export type MapViewBaseStyleLayerSettings = {
@@ -83,6 +94,7 @@ function createDefaultMapViewStore(): MapViewStore {
       azimuthDegrees: 11.31,
       elevationDegrees: 32.52,
     },
+    lod: { ...DEFAULT_MAPLIBRE_LOD_SETTINGS },
     rainfallEnabled: false,
     baseStyleType: MapViewBaseStyleType.Normal,
     projection: { type: 'mercator' },
@@ -126,6 +138,10 @@ function mergeMapViewStoreDefaults(
     sun: {
       ...defaults.sun,
       ...storageValue.sun,
+    },
+    lod: {
+      ...defaults.lod,
+      ...storageValue.lod,
     },
   }
 }
