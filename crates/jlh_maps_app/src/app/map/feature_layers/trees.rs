@@ -26,7 +26,7 @@ pub struct TreesPlugin;
 impl Plugin for TreesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TreeModelAssets>()
-            .add_systems(PostUpdate, sync_tree_models);
+            .add_systems(Update, sync_tree_models);
     }
 }
 
@@ -49,7 +49,7 @@ const TREE_MODEL_UNIFORM_SCALE_MIN: f32 = 0.9;
 const TREE_MODEL_UNIFORM_SCALE_MAX: f32 = 1.12;
 const TREE_MODEL_Z_SCALE_MIN: f32 = 0.9;
 const TREE_MODEL_Z_SCALE_MAX: f32 = 1.15;
-const TREE_MIN_ZOOM: u32 = 13;
+const TREE_MIN_ZOOM: u32 = 14;
 
 #[derive(Component)]
 pub(crate) struct TreeTileBucket;
