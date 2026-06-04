@@ -20,8 +20,7 @@ const SHADOW_MAX_DISTANCE_METERS: f64 = 10_000.0;
 const SHADOW_MIN_DISTANCE_METERS: f64 = 1.0;
 const SHADOW_DEPTH_BIAS: f32 = 0.01;
 const SHADOW_NORMAL_BIAS: f32 = 1.8;
-const DEFAULT_SUN_AZIMUTH_DEGREES: f32 = 11.31;
-const DEFAULT_SUN_ELEVATION_DEGREES: f32 = 32.52;
+
 pub const MAP_VIEW_COLOR_RENDER_LAYER: usize = 0;
 pub const MAP_VIEW_DEPTH_RENDER_LAYER: usize = 1;
 
@@ -47,6 +46,8 @@ pub struct MapViewSettings {
     pub enable_shadows: bool,
     pub sun_azimuth_degrees: f32,
     pub sun_elevation_degrees: f32,
+
+    pub feature_visibility_distance: f32,
 }
 
 impl Default for MapViewSettings {
@@ -57,8 +58,9 @@ impl Default for MapViewSettings {
             enable_waters: true,
             enable_trees: true,
             enable_shadows: true,
-            sun_azimuth_degrees: DEFAULT_SUN_AZIMUTH_DEGREES,
-            sun_elevation_degrees: DEFAULT_SUN_ELEVATION_DEGREES,
+            sun_azimuth_degrees: 11.31,
+            sun_elevation_degrees: 32.52,
+            feature_visibility_distance: 10.0,
         }
     }
 }

@@ -5,6 +5,7 @@ use crate::app::map::feature::scatter::{
     FeatureTileScatter, FeatureTileScatterConfig, FeatureTileScatterDensityConfig,
 };
 use crate::app::map::feature::tile::FeatureTile;
+use crate::app::map::feature_layers::MapFeatureDistanceVisibility;
 use crate::app::map::transform::tile_world_units_per_meter;
 use crate::app::maplibre_gl_js::types::CanonicalTileId;
 use bevy::asset::{AssetServer, Handle};
@@ -48,7 +49,7 @@ const TREE_MODEL_UNIFORM_SCALE_MIN: f32 = 0.9;
 const TREE_MODEL_UNIFORM_SCALE_MAX: f32 = 1.12;
 const TREE_MODEL_Z_SCALE_MIN: f32 = 0.9;
 const TREE_MODEL_Z_SCALE_MAX: f32 = 1.15;
-const TREE_MIN_ZOOM: u32 = 14;
+const TREE_MIN_ZOOM: u32 = 13;
 
 #[derive(Component)]
 pub(crate) struct TreeTileBucket;
@@ -84,6 +85,9 @@ impl TileBucketLayerMeta for TreeTileBucketLayer {
                     bucket.tile_id,
                     bucket.center,
                 ),
+                MapFeatureDistanceVisibility {
+                    flat_half_extents: bucket.half_extents,
+                },
                 FeatureTileScatter::new(FeatureTileScatterConfig {
                     layer_id: TREE_SOURCE_LAYER,
                     class_property_key: Some(TREE_CLASS_PROPERTY_KEY),

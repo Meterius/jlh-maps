@@ -218,6 +218,21 @@
                       !currentBaseStyleLayerSettings.cinematicEnabled
                   "
                 />
+
+                <label class="col-span-2 grid gap-2 px-1 pt-2">
+                  <span class="flex justify-between gap-4 text-sm">
+                    <span>Feature distance</span>
+                    <output class="text-muted tabular-nums">
+                      {{ featureVisibilityDistanceLabel }}
+                    </output>
+                  </span>
+                  <USlider
+                    v-model.number="currentBaseStyleLayerSettings.featureVisibilityDistance"
+                    :min="0"
+                    :max="40"
+                    :step="1"
+                  />
+                </label>
               </div>
 
               <USeparator v-if="currentBaseStyleLayerSettings.bevyEnabled" />
@@ -598,6 +613,22 @@ const bevyMount = createToggledComposable(
 
     syncRef(
       computed({
+        get: () => currentBaseStyleLayerSettings.value.featureVisibilityDistance,
+        set: (value) => {
+          currentBaseStyleLayerSettings.value.featureVisibilityDistance = value
+        },
+      }),
+      computed({
+        get: () => useBevyRet.mapViewSettings.value.featureVisibilityDistance,
+        set: (value) => {
+          useBevyRet.mapViewSettings.value.featureVisibilityDistance = value
+        },
+      }),
+      { immediate: true },
+    )
+
+    syncRef(
+      computed({
         get: () => mapViewStore.value.sun.azimuthDegrees,
         set: (value) => {
           mapViewStore.value.sun.azimuthDegrees = value
@@ -767,6 +798,9 @@ const sunElevationLabel = computed(() => {
   if (!bevyMapViewSettings.value) return 'N/A'
   return `${Math.round(bevyMapViewSettings.value.sunElevationDegrees)} deg`
 })
+const featureVisibilityDistanceLabel = computed(
+  () => `${Math.round(currentBaseStyleLayerSettings.value.featureVisibilityDistance)}`,
+)
 
 const rainfallRasterDataTime = rainfallRasterSourceProvider.rasterDataTime
 const rainfallRasterLoading = rainfallRasterSourceProvider.loading

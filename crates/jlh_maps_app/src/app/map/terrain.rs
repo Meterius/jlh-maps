@@ -156,19 +156,20 @@ fn sync_tiles(
 
         // apply task result or abort task if terrain has changed
         if let Some(mut task) = tile.pending_mesh_task.take()
-            && terrain_hash == Some(task.terrain_hash) {
-                if task.task.is_finished() {
-                    if let Some(mesh) = task.task.take_result() {
-                        tile.terrain_hash = Some(task.terrain_hash);
-                        *tile_mesh = Mesh3d(meshes.add(mesh));
-                    } else {
-                        tile.terrain_hash = None;
-                        *tile_mesh = Mesh3d(flat_mesh.0.clone());
-                    }
+            && terrain_hash == Some(task.terrain_hash)
+        {
+            if task.task.is_finished() {
+                if let Some(mesh) = task.task.take_result() {
+                    tile.terrain_hash = Some(task.terrain_hash);
+                    *tile_mesh = Mesh3d(meshes.add(mesh));
                 } else {
-                    tile.pending_mesh_task = Some(task);
+                    tile.terrain_hash = None;
+                    *tile_mesh = Mesh3d(flat_mesh.0.clone());
                 }
+            } else {
+                tile.pending_mesh_task = Some(task);
             }
+        }
 
         // check if terrain is different and no task is pending
         if terrain_hash == tile.terrain_hash || tile.pending_mesh_task.is_some() {

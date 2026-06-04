@@ -28,6 +28,7 @@ export type MapViewBaseStyleLayerSettings = {
   treesEnabled: boolean
   cinematicEnabled: boolean
   terrainEnabled: boolean
+  featureVisibilityDistance: number
 }
 
 export type MapViewBaseStyleLayerSettingsStore = Record<
@@ -107,6 +108,7 @@ function createDefaultMapViewBaseStyleLayerSettings(): MapViewBaseStyleLayerSett
     treesEnabled: true,
     cinematicEnabled: false,
     terrainEnabled: false,
+    featureVisibilityDistance: 10,
   }
 }
 
