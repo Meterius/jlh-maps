@@ -64,7 +64,7 @@ impl TileTaskBasedMeta for FeatureTileMeshMeta {
 
     fn build_data(
         tile: Arc<MlTile>,
-        terrain_data: Option<MlTerrainTile>,
+        terrain_data: Option<Arc<MlTerrainTile>>,
         config: Self::Config,
     ) -> Self::Data {
         build_mesh_data(tile, terrain_data, config)
@@ -155,7 +155,7 @@ fn apply_mesh(
 
 fn build_mesh_data(
     tile: Arc<MlTile>,
-    terrain_data: Option<MlTerrainTile>,
+    terrain_data: Option<Arc<MlTerrainTile>>,
     config: FeatureTileMeshConfig,
 ) -> FeatureTileMeshData {
     let tile_id = tile.id;
@@ -173,7 +173,7 @@ fn build_mesh_data(
             feature,
             center,
             bounds,
-            terrain_data.as_ref(),
+            terrain_data.as_deref(),
             &config,
             &mut buffers,
         );

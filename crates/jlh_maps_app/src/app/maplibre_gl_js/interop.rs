@@ -11,6 +11,7 @@ use bevy::math::DMat4;
 use bevy::prelude::{Name, World, default};
 use std::collections::HashSet;
 use std::rc::Weak;
+use std::sync::Arc;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 #[wasm_bindgen]
@@ -151,7 +152,7 @@ impl MaplibreIntegration {
 
         self.execute(move |world| {
             with_map_data_mut(world, integration_id, |map_data| {
-                map_data.terrain.tiles.insert(tile_key, tile_data);
+                map_data.terrain.tiles.insert(tile_key, Arc::new(tile_data));
             });
         })
     }

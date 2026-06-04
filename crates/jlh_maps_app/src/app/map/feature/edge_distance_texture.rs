@@ -81,7 +81,7 @@ impl TileTaskBasedMeta for FeatureTileEdgeDistanceTextureMeta {
 
     fn build_data(
         tile: Arc<MlTile>,
-        _terrain_tile: Option<MlTerrainTile>,
+        _terrain_tile: Option<Arc<MlTerrainTile>>,
         config: Self::Config,
     ) -> Self::Data {
         build_texture_image(tile, config.layer_id, config.resolution)

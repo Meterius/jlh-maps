@@ -105,10 +105,10 @@ export function useMaplibreIntegration(
   return {
     syncOnRender: (frameIdx: number) =>
       Promise.all([
-        viewSyncRet.value?.syncView(frameIdx) ?? Promise.resolve(),
         // source tile sync should run before terrain, so additional request terrain tiles is up to date
-        Promise.all((sourceSyncRet.value ?? []).map(ret => ret.syncSourceTiles())),
+        Promise.all((sourceSyncRet.value ?? []).map((ret) => ret.syncSourceTiles())),
         terrainSyncRet.value?.syncTerrain() ?? Promise.resolve(),
+        viewSyncRet.value?.syncView(frameIdx) ?? Promise.resolve(),
       ]),
   }
 }

@@ -24,11 +24,11 @@ pub struct MlView {
 
 #[derive(Default)]
 pub struct MlTerrain {
-    pub tiles: HashMap<CanonicalTileId, MlTerrainTile>,
+    pub tiles: HashMap<CanonicalTileId, Arc<MlTerrainTile>>,
     pub active_tile_ids: HashSet<CanonicalTileId>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MlTerrainTile {
     pub id: CanonicalTileId,
     pub hash: String,

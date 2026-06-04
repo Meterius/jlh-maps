@@ -112,10 +112,10 @@ impl TileTaskBasedMeta for FeatureTileScatterMeta {
 
     fn build_data(
         tile: Arc<MlTile>,
-        terrain_tile: Option<MlTerrainTile>,
+        terrain_tile: Option<Arc<MlTerrainTile>>,
         config: Self::Config,
     ) -> Self::Data {
-        build_scatter_points(tile, terrain_tile.as_ref(), config)
+        build_scatter_points(tile, terrain_tile.as_deref(), config)
     }
 
     fn apply_data(

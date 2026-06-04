@@ -39,7 +39,7 @@ pub trait TileTaskBasedMeta: Send + Sync + 'static {
 
     fn build_data(
         tile: Arc<MlTile>,
-        terrain_tile: Option<MlTerrainTile>,
+        terrain_tile: Option<Arc<MlTerrainTile>>,
         config: Self::Config,
     ) -> Self::Data;
 
@@ -199,11 +199,11 @@ fn sync_item<C: TileTaskBasedMeta>(
     } else {
         None
     };
-    let terrain_hash = terrain_data.map(|terrain_data| terrain_data.hash.clone());
+    let terrain_hash = terrain_data.map(|terrain_data| terrain_data.hash.as_str());
 
-    if tile_tb.revision.terrain_hash != terrain_hash {
+    if tile_tb.revision.terrain_hash.as_deref() != terrain_hash {
         tile_tb.clear_data();
-        tile_tb.revision.terrain_hash = terrain_hash.clone();
+        tile_tb.revision.terrain_hash = terrain_hash.map(str::to_owned);
     }
 
     if !tile_tb.dirty {
@@ -213,7 +213,7 @@ fn sync_item<C: TileTaskBasedMeta>(
     // data has changed, start rebuild task
 
     let tile = Arc::clone(tile);
-    let terrain_data = terrain_data.cloned();
+    let terrain_data = terrain_data.map(Arc::clone);
 
     tile_tb.pending_task = Some({
         let config = tile_tb.config.clone();
