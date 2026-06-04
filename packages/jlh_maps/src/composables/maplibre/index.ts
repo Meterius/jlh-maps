@@ -14,8 +14,16 @@ import {
   type StyleImageInterface,
   type StyleImageMetadata,
 } from 'maplibre-gl'
-import { type MaybeRefOrGetter, ref, shallowRef, toValue, watch, type WatchSource } from 'vue'
-import { createToggledComposable, onScopeDisposeLifo, watchDefinedOnce } from '@/composables/helper.ts'
+import {
+  effectScope,
+  type MaybeRefOrGetter,
+  ref,
+  shallowRef,
+  toValue,
+  watch,
+  type WatchSource,
+} from 'vue'
+import { createToggledComposable, onScopeDisposeLifo, onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
 import type { GeoJSON } from 'geojson'
 
 let mapKeyCounter = 0
@@ -54,13 +62,21 @@ export function useMapExtended(key?: symbol | string) {
       updatePitch()
       updateTerrainEnabled()
 
-      onMapEvent(map, 'load', () => {
-        updateLoaded()
-        updateTerrainEnabled()
+      const scope = effectScope(true)
+
+      scope.run(() => {
+        onMapEvent(map, 'load', () => {
+          updateLoaded()
+          updateTerrainEnabled()
+        })
+        onMapEvent(map, 'styledata', updateTerrainEnabled)
+        onMapEvent(map, 'zoom', updateZoom)
+        onMapEvent(map, 'pitch', updatePitch)
       })
-      onMapEvent(map, 'styledata', updateTerrainEnabled)
-      onMapEvent(map, 'zoom', updateZoom)
-      onMapEvent(map, 'pitch', updatePitch)
+
+      onWatcherCleanupLifo(() => {
+        scope.stop()
+      })
     },
   )
 
