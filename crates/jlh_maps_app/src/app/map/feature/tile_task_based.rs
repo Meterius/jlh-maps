@@ -54,7 +54,7 @@ pub trait TileTaskBasedMeta: Send + Sync + 'static {
 
 #[derive(Default, Clone)]
 pub struct TileTaskBasedRevision {
-    terrain_hash: Option<String>,
+    terrain_hash: Option<u64>,
     tile_revision: Option<u64>,
 }
 
@@ -145,7 +145,15 @@ fn sync_items<C: TileTaskBasedMeta>(
         };
 
         // TODO: do not rely on visibility for task active status
-        sync_item(map_int, &mut *params, id, tile, &mut tile_tb, &task_pool, visibility == Some(&InheritedVisibility::VISIBLE));
+        sync_item(
+            map_int,
+            &mut *params,
+            id,
+            tile,
+            &mut tile_tb,
+            &task_pool,
+            visibility == Some(&InheritedVisibility::VISIBLE),
+        );
     }
 }
 
@@ -185,7 +193,9 @@ fn sync_item<C: TileTaskBasedMeta>(
     };
 
     // if not active, data will not be refreshed
-    if !active { return; }
+    if !active {
+        return;
+    }
 
     // check if tile or terrain data has changed
 
@@ -199,11 +209,11 @@ fn sync_item<C: TileTaskBasedMeta>(
     } else {
         None
     };
-    let terrain_hash = terrain_data.map(|terrain_data| terrain_data.hash.as_str());
+    let terrain_hash = terrain_data.map(|terrain_data| terrain_data.hash);
 
-    if tile_tb.revision.terrain_hash.as_deref() != terrain_hash {
+    if tile_tb.revision.terrain_hash != terrain_hash {
         tile_tb.clear_data();
-        tile_tb.revision.terrain_hash = terrain_hash.map(str::to_owned);
+        tile_tb.revision.terrain_hash = terrain_hash;
     }
 
     if !tile_tb.dirty {

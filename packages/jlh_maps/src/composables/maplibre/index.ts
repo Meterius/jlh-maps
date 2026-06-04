@@ -23,7 +23,12 @@ import {
   watch,
   type WatchSource,
 } from 'vue'
-import { createToggledComposable, onScopeDisposeLifo, onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
+import {
+  createToggledComposable,
+  onScopeDisposeLifo,
+  onWatcherCleanupLifo,
+  watchDefinedOnce,
+} from '@/composables/helper.ts'
 import type { GeoJSON } from 'geojson'
 
 let mapKeyCounter = 0
@@ -411,20 +416,20 @@ export function useHoverFeatureState(
     updateFeatureHoveredFeatureIds(nextHoveredFeatures)
   }
 
-  createToggledComposable(
-    enabled,
-    () => {
-      onMapLayerEvent(map, 'mousemove', layerId, onFeatures)
-      onMapLayerEvent(map, 'mouseleave', layerId, onFeatures)
-      return {}
-    }
-  )
-
-  watch(() => toValue(enabled), (value) => {
-    if (!value) {
-      updateFeatureHoveredFeatureIds({})
-    }
+  createToggledComposable(enabled, () => {
+    onMapLayerEvent(map, 'mousemove', layerId, onFeatures)
+    onMapLayerEvent(map, 'mouseleave', layerId, onFeatures)
+    return {}
   })
+
+  watch(
+    () => toValue(enabled),
+    (value) => {
+      if (!value) {
+        updateFeatureHoveredFeatureIds({})
+      }
+    },
+  )
 
   onScopeDisposeLifo(() => {
     updateFeatureHoveredFeatureIds({})

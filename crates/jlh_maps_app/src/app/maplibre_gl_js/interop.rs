@@ -114,7 +114,7 @@ impl MaplibreIntegration {
     pub fn update_terrain_tile_data(
         &self,
         serialized_canonical_tile_id: String,
-        hash: String,
+        hash: u64,
         stride: u32,
         dim: u32,
         min: f64,
@@ -123,10 +123,12 @@ impl MaplibreIntegration {
         green_factor: f64,
         blue_factor: f64,
         base_shift: f64,
+        terrain_exaggeration: f64,
         terrain_matrix_json: String,
         data: Vec<u32>,
     ) -> Result<(), String> {
-        let tile_key = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id).map_err(|err| err.to_string())?;
+        let tile_key = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id)
+            .map_err(|err| err.to_string())?;
         let terrain_matrix =
             parse_terrain_matrix(&terrain_matrix_json).map_err(|err| err.to_string())?;
 
@@ -146,6 +148,7 @@ impl MaplibreIntegration {
                     base_shift,
                 },
                 terrain_matrix,
+                exaggeration: terrain_exaggeration,
             },
         };
         let integration_id = self.integration_id;
@@ -157,8 +160,12 @@ impl MaplibreIntegration {
         })
     }
 
-    pub fn remove_terrain_tile_data(&self, serialized_canonical_tile_id: String) -> Result<(), String> {
-        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id).map_err(|err| err.to_string())?;
+    pub fn remove_terrain_tile_data(
+        &self,
+        serialized_canonical_tile_id: String,
+    ) -> Result<(), String> {
+        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id)
+            .map_err(|err| err.to_string())?;
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
@@ -174,7 +181,8 @@ impl MaplibreIntegration {
         serialized_canonical_tile_id: String,
         data: Vec<u8>,
     ) -> Result<(), String> {
-        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id).map_err(|err| err.to_string())?;
+        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id)
+            .map_err(|err| err.to_string())?;
 
         let integration_id = self.integration_id;
 
@@ -199,7 +207,8 @@ impl MaplibreIntegration {
         source_id: String,
         serialized_canonical_tile_id: String,
     ) -> Result<(), String> {
-        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id).map_err(|err| err.to_string())?;
+        let tile_id = parse_serialized_canonical_tile_id(&serialized_canonical_tile_id)
+            .map_err(|err| err.to_string())?;
 
         let integration_id = self.integration_id;
 

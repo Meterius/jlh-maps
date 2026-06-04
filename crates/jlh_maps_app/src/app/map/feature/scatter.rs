@@ -10,7 +10,7 @@ use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile, MlTile, 
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{
     lng_lat_is_in_bounds, tile_uv_from_lng_lat,
 };
-use crate::app::maplibre_gl_js::utils::terrain::get_dem_elevation;
+use crate::app::maplibre_gl_js::utils::terrain::get_terrain_elevation;
 use crate::app::maplibre_gl_js::utils::tile::get_tile_lnglat_bounds;
 use bevy::app::App;
 use bevy::ecs::system::SystemParamItem;
@@ -200,7 +200,7 @@ fn build_scatter_points(
             let terrain_altitude = terrain_data
                 .filter(|_| lng_lat_is_in_bounds(bounds, lnglat))
                 .and_then(|terrain_data| {
-                    get_dem_elevation(
+                    get_terrain_elevation(
                         &terrain_data.terrain_data,
                         tile_uv_from_lng_lat(bounds, lnglat),
                     )

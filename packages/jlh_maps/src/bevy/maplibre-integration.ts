@@ -1,4 +1,4 @@
-import { releaseProxy, transfer, type Remote } from 'comlink'
+import { releaseProxy, type Remote, transfer } from 'comlink'
 import { type Map as MapLibreMap, type Tile } from 'maplibre-gl'
 import { effectScope, type MaybeRefOrGetter, shallowRef, toValue } from 'vue'
 import { onScopeDisposeLifo, onWatcherCleanupLifo, watchDefinedOnce } from '@/composables/helper.ts'
@@ -15,6 +15,7 @@ import { useBevy } from '@/bevy/index.ts'
 import type { MaplibreIntegration } from '@/bevy/bevy.worker.ts'
 import { LRUCache } from 'lru-cache'
 import { onMapEvent } from '@/composables/maplibre'
+import { U64Hasher } from '@/utils/hash.ts'
 
 type SerializedCanonicalTileID = string
 
@@ -48,7 +49,8 @@ export function useMaplibreIntegration(
   const viewSyncRet = shallowRef<ReturnType<typeof useViewSync> | null>(null)
   const sourceSyncRet = shallowRef<ReturnType<typeof useSourceSync>[] | null>(null)
 
-  const additionalRequestedTerrainTiles = () => (sourceSyncRet.value ?? []).flatMap((ret) => ret.transmittedRenderableTiles.value)
+  const additionalRequestedTerrainTiles = () =>
+    (sourceSyncRet.value ?? []).flatMap((ret) => ret.transmittedRenderableTiles.value)
 
   watchDefinedOnce(
     () => (bevyInstance.isMounted.value ? mapInstance.map : undefined),
@@ -79,13 +81,15 @@ export function useMaplibreIntegration(
               void remoteIntegration.free().finally(() => remoteIntegration[releaseProxy]())
             })
 
-            terrainSyncRet.value = useTerrainSync(map, remoteIntegration, additionalRequestedTerrainTiles)
-            viewSyncRet.value = useViewSync(map, remoteIntegration)
-            sourceSyncRet.value = options.sourceIds.map((sourceId) => useSourceSync(
+            terrainSyncRet.value = useTerrainSync(
               map,
               remoteIntegration,
-              sourceId,
-            ))
+              additionalRequestedTerrainTiles,
+            )
+            viewSyncRet.value = useViewSync(map, remoteIntegration)
+            sourceSyncRet.value = options.sourceIds.map((sourceId) =>
+              useSourceSync(map, remoteIntegration, sourceId),
+            )
 
             onScopeDisposeLifo(() => {
               terrainSyncRet.value = null
@@ -120,10 +124,12 @@ function useTerrainSync(
   bevyMapIntegration: Remote<MaplibreIntegration>,
   additionalRequestedTerrainTiles: MaybeRefOrGetter<CanonicalTileID[]>,
 ) {
-  type TerrainTileData = { hash: string, tileId: CanonicalTileID }
+  type TerrainTileData = { hash: bigint; tileId: CanonicalTileID }
+
+  const hasher = new U64Hasher()
 
   // invariant: any tile id has transmitted but not removed terrain tile data if and only if it contained in inactive or active
-  const activeTerrainTileData = new Map<SerializedCanonicalTileID, TerrainTileData>
+  const activeTerrainTileData = new Map<SerializedCanonicalTileID, TerrainTileData>()
   const inactiveTerrainTileDataCache = new LRUCache<string, TerrainTileData, unknown>({
     max: TERRAIN_TILE_LRU_CAPACITY,
     dispose: (_value, key, reason) => {
@@ -132,7 +138,7 @@ function useTerrainSync(
       if (reason !== 'delete' && reason !== 'set') {
         bevyMapIntegration.remove_terrain_tile_data(key).catch(console.error)
       }
-    }
+    },
   })
 
   const activateTerrainTileData = (tileIdSer: string) => {
@@ -155,54 +161,59 @@ function useTerrainSync(
     const activeTileIds = new Map<SerializedCanonicalTileID, CanonicalTileID>()
 
     if (map.terrain) {
-      (map.terrain.tileManager.getRenderableTiles() ?? []).forEach((tile) => {
+      ;(map.terrain.tileManager.getRenderableTiles() ?? []).forEach((tile) => {
         activeTileIds.set(serializeCanonicalTileId(tile.tileID.canonical), tile.tileID.canonical)
-      });
+      })
     } else {
-        map
-          .coveringTiles({
-            tileSize: 512,
-          })
-          .forEach((tileId) => {
-            activeTileIds.set(serializeCanonicalTileId(tileId.canonical), tileId.canonical)
-          })
+      map
+        .coveringTiles({
+          tileSize: 512,
+        })
+        .forEach((tileId) => {
+          activeTileIds.set(serializeCanonicalTileId(tileId.canonical), tileId.canonical)
+        })
     }
 
     return activeTileIds
   }
 
-  const makeTerrainDataHash = (
-      sourceTile: InternalTile | null | undefined,
-      dem: DEMData,
-  ) => {
-      const sourceTileID = sourceTile?.tileID?.key ?? sourceTile?.tileID?.toString?.() ?? 'none'
-      const rttStamp = sourceTile ? (makeRttContentStamp(sourceTile) ?? 'none') : 'none'
+  const makeDemContentHash = (sourceTile: InternalTile | null | undefined, dem: DEMData) => {
+    hasher.reset()
+    hasher.writeString('maplibre-dem-content')
+    hasher.writeUnknown(dem.uid)
 
-      return [
-        sourceTileID,
-        dem.uid,
-        dem.stride,
-        dem.dim,
-        dem.min,
-        dem.max,
-        dem.redFactor,
-        dem.greenFactor,
-        dem.blueFactor,
-        dem.baseShift,
-        rttStamp,
-      ].join('|')
+    const neighboringTiles = sourceTile?.neighboringTiles
+    const backfillEntries = neighboringTiles
+      ? Object.entries(neighboringTiles).sort(([left], [right]) => left.localeCompare(right))
+      : []
+
+    hasher.writeUint32(backfillEntries.length)
+    for (const [tileKey, state] of backfillEntries) {
+      hasher.writeString(tileKey)
+      hasher.writeBool(Boolean(state?.backfilled))
     }
 
-  const makeRttContentStamp = (tile: InternalTile) => {
-    if (!tile.rtt?.length) return undefined
+    return hasher.finish()
+  }
 
-    const fingerprints = tile.rttFingerprint ? Object.entries(tile.rttFingerprint) : []
-    if (fingerprints.length === 0) return undefined
+  const makeTerrainDataHash = (
+    sourceTile: InternalTile | null | undefined,
+    dem: DEMData,
+    terrainMatrix: readonly number[],
+    terrainExaggeration: number,
+  ) => {
+    hasher.reset()
+    hasher.writeString('maplibre-terrain-access')
+    hasher.writeBigUint64(makeDemContentHash(sourceTile, dem))
 
-    return fingerprints
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([source, fingerprint]) => `${source}:${fingerprint}`)
-      .join('|')
+    hasher.writeUint32(terrainMatrix.length)
+    for (const value of terrainMatrix) {
+      hasher.writeFloat64(value)
+    }
+
+    hasher.writeFloat64(terrainExaggeration)
+
+    return hasher.finish()
   }
 
   // checks whether terrain has changed, either due to terrain data changes or being removed,
@@ -219,8 +230,12 @@ function useTerrainSync(
       const dem = terrainData.tile?.dem
       if (!dem) return
 
-      const hash = makeTerrainDataHash(terrainData.tile, dem)
-      const data = active ? activeTerrainTileData.get(tileIdSer) : inactiveTerrainTileDataCache.get(tileIdSer)
+      const terrainExaggeration = terrainData.u_terrain_exaggeration ?? 1.0
+      const terrainMatrix = Array.from(terrainData.u_terrain_matrix)
+      const hash = makeTerrainDataHash(terrainData.tile, dem, terrainMatrix, terrainExaggeration)
+      const data = active
+        ? activeTerrainTileData.get(tileIdSer)
+        : inactiveTerrainTileDataCache.get(tileIdSer)
 
       if (data?.hash === hash) return
 
@@ -242,7 +257,8 @@ function useTerrainSync(
         dem.greenFactor,
         dem.blueFactor,
         dem.baseShift,
-        JSON.stringify(Array.from(terrainData.u_terrain_matrix)),
+        terrainExaggeration,
+        JSON.stringify(terrainMatrix),
         transfer(terrainDataBuffer, [terrainDataBuffer.buffer]),
       )
     } else {
@@ -254,7 +270,7 @@ function useTerrainSync(
         await bevyMapIntegration.remove_terrain_tile_data(tileIdSer)
       }
     }
-  };
+  }
 
   // synchronizes terrain data:
   // - updates the active terrain tile list of the integration
@@ -263,10 +279,12 @@ function useTerrainSync(
   // guarantees:
   // - all update messages are sent before yielding
   const syncTerrain = async () => {
-    const activeTileIds = getActiveTileIds();
+    const activeTileIds = getActiveTileIds()
 
     // only sync as active tiles those used for terrain tiles
-    const activeTileIdSyncPromise = bevyMapIntegration.sync_terrain_active_tile_ids([...activeTileIds.keys()])
+    const activeTileIdSyncPromise = bevyMapIntegration.sync_terrain_active_tile_ids([
+      ...activeTileIds.keys(),
+    ])
 
     // additionally make the requested tile ids be synchronized
     toValue(additionalRequestedTerrainTiles).forEach((tileId) => {
@@ -274,7 +292,9 @@ function useTerrainSync(
     })
 
     // move from or into inactive cache (also handles removing transmitted tile data on LRU dispose)
-    for (const tileIdSer of activeTileIds.keys()) { activateTerrainTileData(tileIdSer) }
+    for (const tileIdSer of activeTileIds.keys()) {
+      activateTerrainTileData(tileIdSer)
+    }
     activeTerrainTileData.forEach((_value, tileIdSer) => {
       if (!activeTileIds.has(tileIdSer)) {
         deactivateTerrainTileData(tileIdSer)
@@ -283,15 +303,19 @@ function useTerrainSync(
 
     await Promise.all([
       activeTileIdSyncPromise,
-        ...[...activeTileIds.values()].map(syncTerrainDataForTile),
-      ...[...inactiveTerrainTileDataCache.values()].map((data) => syncTerrainDataForTile(data.tileId)),
+      ...[...activeTileIds.values()].map(syncTerrainDataForTile),
+      ...[...inactiveTerrainTileDataCache.values()].map((data) =>
+        syncTerrainDataForTile(data.tileId),
+      ),
     ])
-  };
+  }
 
   onScopeDisposeLifo(() => {
-    [...activeTerrainTileData.keys(), ...inactiveTerrainTileDataCache.keys()].forEach((tileIdSer) => {
-      bevyMapIntegration.remove_terrain_tile_data(tileIdSer).catch(console.error)
-    })
+    ;[...activeTerrainTileData.keys(), ...inactiveTerrainTileDataCache.keys()].forEach(
+      (tileIdSer) => {
+        bevyMapIntegration.remove_terrain_tile_data(tileIdSer).catch(console.error)
+      },
+    )
     bevyMapIntegration.sync_terrain_active_tile_ids([]).catch(console.error)
     activeTerrainTileData.clear()
     inactiveTerrainTileDataCache.clear()
@@ -333,7 +357,7 @@ function useViewSync(map: MapLibreMap, bevyMapIntegration: Remote<MaplibreIntegr
   }
 
   return {
-    syncView
+    syncView,
   }
 }
 
@@ -466,7 +490,7 @@ function useSourceSync(
   // - all update messages are sent before yielding
   const syncSourceTiles = async () => {
     const renderableTiles = getRenderableTiles()
-    transmittedRenderableTiles.value = renderableTiles.map(tile => tile.tileID.canonical)
+    transmittedRenderableTiles.value = renderableTiles.map((tile) => tile.tileID.canonical)
 
     const activeTileIdsSer = new Set(
       renderableTiles.map((tile) => serializeCanonicalTileId(tile.tileID.canonical)),
@@ -489,7 +513,7 @@ function useSourceSync(
   }
 
   onScopeDisposeLifo(() => {
-    [...activeSourceTiles.values(), ...inactiveSourceTileCache.keys()].forEach((tileIdSer) => {
+    ;[...activeSourceTiles.values(), ...inactiveSourceTileCache.keys()].forEach((tileIdSer) => {
       bevyMapIntegration.remove_source_tile(sourceId, tileIdSer).catch(console.error)
     })
     bevyMapIntegration.sync_source_renderable_tile_ids(sourceId, []).catch(console.error)

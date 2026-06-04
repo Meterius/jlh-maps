@@ -7,13 +7,14 @@ use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile};
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{
     EARTH_CIRCUMFERENCE, LngLat, MercatorCoordinate,
 };
-use crate::app::maplibre_gl_js::utils::terrain::get_dem_elevation;
+use crate::app::maplibre_gl_js::utils::terrain::get_terrain_elevation;
 use crate::app::maplibre_gl_js::utils::tile::{get_tile_lnglat_bounds, tile_transform_d};
 use crate::app::task_pool::AppTaskPool;
 use crate::utils::debug::SoftExpect;
 use crate::utils::terrain_mesh::build_terrain_mesh_with_skirts;
 use crate::wasm_task_pool::Task;
 use bevy::camera::visibility::RenderLayers;
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use big_space::grid::Grid;
 use big_space::prelude::CellCoord;
@@ -89,6 +90,7 @@ fn sync_spawned_tiles(
                         Mesh3d(flat_mesh.0.clone()),
                         MeshMaterial3d(material.0.clone()),
                         DebugAabbGizmo,
+                        NotShadowCaster,
                         TerrainTile {
                             maplibre_int_id,
                             maplibre_tile_id: tile_id,
@@ -128,12 +130,12 @@ fn sync_spawned_tiles(
 pub struct TerrainTile {
     pub maplibre_int_id: Entity,
     pub maplibre_tile_id: CanonicalTileId,
-    pub terrain_hash: Option<String>,
+    pub terrain_hash: Option<u64>,
     pending_mesh_task: Option<PendingTerrainMeshTask>,
 }
 
 struct PendingTerrainMeshTask {
-    terrain_hash: String,
+    terrain_hash: u64,
     task: Task<Mesh>,
 }
 
@@ -150,12 +152,11 @@ fn sync_tiles(
         };
 
         let terrain_data = map_int.terrain.tiles.get(&tile.maplibre_tile_id);
-        let terrain_hash = terrain_data
-            .map(|terrain_data| terrain_data.hash.as_str());
+        let terrain_hash = terrain_data.map(|terrain_data| terrain_data.hash);
 
         // apply task result or abort task if terrain has changed
-        if let Some(mut task) = tile.pending_mesh_task.take() {
-            if terrain_hash == Some(task.terrain_hash.as_str()) {
+        if let Some(mut task) = tile.pending_mesh_task.take()
+            && terrain_hash == Some(task.terrain_hash) {
                 if task.task.is_finished() {
                     if let Some(mesh) = task.task.take_result() {
                         tile.terrain_hash = Some(task.terrain_hash);
@@ -168,17 +169,16 @@ fn sync_tiles(
                     tile.pending_mesh_task = Some(task);
                 }
             }
-        }
 
         // check if terrain is different and no task is pending
-        if terrain_hash == tile.terrain_hash.as_deref() || tile.pending_mesh_task.is_some() {
+        if terrain_hash == tile.terrain_hash || tile.pending_mesh_task.is_some() {
             continue;
         }
 
         // either enqueue task to generate terrain, or if terrain is empty, apply flat mesh
         if let Some(terrain_data) = terrain_data {
             tile.pending_mesh_task = Some(PendingTerrainMeshTask {
-                terrain_hash: terrain_data.hash.clone(),
+                terrain_hash: terrain_data.hash,
                 task: {
                     let tile_id = tile.maplibre_tile_id;
                     let terrain_data = Arc::clone(terrain_data);
@@ -209,7 +209,7 @@ fn build_terrain_tile_mesh(tile_id: CanonicalTileId, terrain_data: Arc<MlTerrain
 
         let lnglat = bounds.0 + (bounds.1 - bounds.0) * uv.as_dvec2();
 
-        let dem_elev = get_dem_elevation(&terrain_data.terrain_data, uv).unwrap_or(0.0) as f64;
+        let dem_elev = get_terrain_elevation(&terrain_data.terrain_data, uv).unwrap_or(0.0) as f64;
 
         (MercatorCoordinate::from_lng_lat(LngLat::new(lnglat.x, lnglat.y), dem_elev).z
             * MERCATOR_WORLD_SIZE) as f32

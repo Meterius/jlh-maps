@@ -153,7 +153,7 @@ class WorkerMaplibreIntegration {
 
   update_terrain_tile_data(
     serializedCanonicalTileId: string,
-    hash: string,
+    hash: bigint,
     stride: number,
     dim: number,
     min: number,
@@ -162,6 +162,7 @@ class WorkerMaplibreIntegration {
     greenFactor: number,
     blueFactor: number,
     baseShift: number,
+    terrainExaggeration: number,
     terrainMatrixJson: string,
     data: Uint32Array,
   ) {
@@ -176,6 +177,7 @@ class WorkerMaplibreIntegration {
       greenFactor,
       blueFactor,
       baseShift,
+      terrainExaggeration,
       terrainMatrixJson,
       data,
     )

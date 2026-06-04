@@ -31,7 +31,7 @@ pub struct MlTerrain {
 #[derive(Debug)]
 pub struct MlTerrainTile {
     pub id: CanonicalTileId,
-    pub hash: String,
+    pub hash: u64,
     pub terrain_data: TerrainData,
 }
 
@@ -139,7 +139,7 @@ impl MlData {
             match tile {
                 Ok(tile) => {
                     self.apply_tile(tile_key.source_id, tile);
-                },
+                }
                 Err(err) => {
                     let source_id = &tile_key.source_id;
                     let tile_id = &tile_key.tile_id;

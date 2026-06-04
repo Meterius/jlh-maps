@@ -17,6 +17,7 @@ export interface Tile extends Partial<MapLibreTile> {
   rtt?: unknown[] | null
   rttFingerprint?: Record<string, string | number | boolean | null | undefined> | null
   dem?: DEMData
+  neighboringTiles?: Record<string, { backfilled?: boolean } | undefined>
 }
 
 export interface MapProjectionTransform {

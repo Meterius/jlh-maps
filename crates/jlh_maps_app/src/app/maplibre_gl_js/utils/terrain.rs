@@ -7,9 +7,10 @@ pub const EXTENT: u32 = 8192;
 pub struct TerrainData {
     pub dem_data: DEMData,
     pub terrain_matrix: DMat4,
+    pub exaggeration: f64,
 }
 
-pub fn get_dem_elevation(data: &TerrainData, pos: Vec2) -> Option<f32> {
+pub fn get_terrain_elevation(data: &TerrainData, pos: Vec2) -> Option<f32> {
     let pos = pos * EXTENT as f32;
     let pos = (data.terrain_matrix.as_mat4() * vec4(pos.x, pos.y, 0., 1.)).xy();
 
@@ -32,4 +33,5 @@ pub fn get_dem_elevation(data: &TerrainData, pos: Vec2) -> Option<f32> {
             + data.dem_data.get(c.x, cn.y)? * (1. - t.x) * (t.y)
             + data.dem_data.get(cn.x, cn.y)? * (t.x) * (t.y),
     )
+    .map(|elevation| elevation * data.exaggeration as f32)
 }

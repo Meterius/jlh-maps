@@ -9,6 +9,7 @@ export interface Terrain {
   getTerrainData(tileId: OverscaledTileID): {
     tile?: (Tile & { dem?: DEMData }) | null
     u_terrain_matrix: Iterable<number> | ArrayLike<number>
+    u_terrain_exaggeration: number
   }
   getElevationForLngLatZoom?(lngLat: unknown, zoom: number): number | null | undefined
 }
