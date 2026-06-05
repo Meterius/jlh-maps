@@ -15,15 +15,17 @@ use fixedbitset::FixedBitSet;
 
 use crate::{
     change_detection::{CheckChangeTicks, Tick},
+    component::ComponentId,
     error::{BevyError, ErrorContext, Result},
     prelude::{IntoSystemSet, SystemSet},
     query::FilteredAccessSet,
+    resource::Resource,
     schedule::{
         ConditionWithAccess, InternedSystemSet, SystemKey, SystemSetKey, SystemTypeSet,
         SystemWithAccess,
     },
     system::{RunSystemError, System, SystemIn, SystemParamValidationError, SystemStateFlags},
-    world::{unsafe_world_cell::UnsafeWorldCell, DeferredWorld, World},
+    world::{DeferredWorld, World, unsafe_world_cell::UnsafeWorldCell},
 };
 
 /// Types that can run a [`SystemSchedule`] on a [`World`].
@@ -44,7 +46,7 @@ pub(super) trait SystemExecutor: Send + Sync {
 ///
 /// The default depends on the target platform:
 ///  - [`SingleThreaded`](ExecutorKind::SingleThreaded) on Wasm.
-///  - [`MultiThreaded`](ExecutorKind::MultiThreaded) everywhere else.
+///  - [`MultiThreaded`](ExecutorKind::MultiThreaded) everywhere else when available.
 #[derive(PartialEq, Eq, Default, Debug, Copy, Clone)]
 pub enum ExecutorKind {
     /// Runs the schedule using a single thread.
@@ -64,6 +66,61 @@ pub enum ExecutorKind {
     #[cfg(feature = "std")]
     #[cfg_attr(all(not(target_arch = "wasm32"), feature = "multi_threaded"), default)]
     MultiThreaded,
+}
+
+/// Resource ids whose systems must run on the executor's local thread.
+///
+/// This is intended for resources that are technically [`Send`] but are thread-affine at runtime,
+/// such as wasm render wrappers that panic when dereferenced from a different worker.
+#[derive(Clone, Debug, Default)]
+pub struct ThreadLocalResources {
+    resources: FixedBitSet,
+}
+
+impl Resource for ThreadLocalResources {}
+
+impl ThreadLocalResources {
+    /// Marks a resource id as requiring local-thread system execution.
+    #[inline]
+    pub fn insert(&mut self, resource_id: ComponentId) {
+        self.resources.grow_and_insert(resource_id.index());
+    }
+
+    /// Removes a resource id from the local-thread execution set.
+    #[inline]
+    pub fn remove(&mut self, resource_id: ComponentId) {
+        let index = resource_id.index();
+        if index < self.resources.len() {
+            self.resources.set(index, false);
+        }
+    }
+
+    /// Returns true if the resource id is marked as requiring local-thread execution.
+    #[inline]
+    pub fn contains(&self, resource_id: ComponentId) -> bool {
+        self.resources.contains(resource_id.index())
+    }
+
+    /// Returns true if no resources are marked.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.resources.is_clear()
+    }
+
+    pub(crate) fn matches_system_access(&self, access: &FilteredAccessSet) -> bool {
+        if self.is_empty() {
+            return false;
+        }
+
+        let access = access.combined_access();
+        if access.has_read_all_resources() || access.has_write_all_resources() {
+            return true;
+        }
+
+        access
+            .resource_reads_and_writes()
+            .any(|resource_id| self.contains(resource_id))
+    }
 }
 
 /// Holds systems and conditions of a [`Schedule`](super::Schedule) sorted in topological order

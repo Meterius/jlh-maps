@@ -17,7 +17,7 @@ use crate::{
     prelude::Resource,
     schedule::{
         is_apply_deferred, ConditionWithAccess, ExecutorKind, SystemExecutor, SystemSchedule,
-        SystemWithAccess,
+        SystemWithAccess, ThreadLocalResources,
     },
     system::{RunSystemError, ScheduleSystem},
     world::{unsafe_world_cell::UnsafeWorldCell, World},
@@ -78,6 +78,14 @@ struct SystemTaskMetadata {
     is_send: bool,
     /// Is `true` if the system is exclusive.
     is_exclusive: bool,
+    /// Is `true` if the system accesses a resource that must run on the local thread.
+    accesses_thread_local_resources: bool,
+}
+
+impl SystemTaskMetadata {
+    fn requires_local_thread(&self) -> bool {
+        !self.is_send || self.accesses_thread_local_resources
+    }
 }
 
 /// The result of running a system that is sent across a channel.
@@ -177,6 +185,7 @@ impl SystemExecutor for MultiThreadedExecutor {
                 dependents: schedule.system_dependents[index].clone(),
                 is_send: schedule.systems[index].system.is_send(),
                 is_exclusive: schedule.systems[index].system.is_exclusive(),
+                accesses_thread_local_resources: false,
             });
             if schedule.system_dependencies[index] == 0 {
                 self.starting_systems.insert(index);
@@ -242,6 +251,11 @@ impl SystemExecutor for MultiThreadedExecutor {
         _skip_systems: Option<&FixedBitSet>,
         error_handler: ErrorHandler,
     ) {
+        let thread_local_resources = world
+            .get_resource::<ThreadLocalResources>()
+            .cloned()
+            .unwrap_or_default();
+
         let state = self.state.get_mut().unwrap();
         // reset counts
         if schedule.systems.is_empty() {
@@ -252,6 +266,15 @@ impl SystemExecutor for MultiThreadedExecutor {
             .num_dependencies_remaining
             .clone_from(&schedule.system_dependencies);
         state.ready_systems.clone_from(&self.starting_systems);
+
+        for (system_meta, system) in state
+            .system_task_metadata
+            .iter_mut()
+            .zip(schedule.systems.iter())
+        {
+            system_meta.accesses_thread_local_resources =
+                thread_local_resources.matches_system_access(&system.access);
+        }
 
         // If stepping is enabled, make sure we skip those systems that should
         // not be run.
@@ -542,7 +565,7 @@ impl ExecutorState {
             return false;
         }
 
-        if !system_meta.is_send && self.local_thread_running {
+        if system_meta.requires_local_thread() && self.local_thread_running {
             return false;
         }
 
@@ -703,11 +726,11 @@ impl ExecutorState {
             context.system_completed(system_index, res, system);
         };
 
-        if system_meta.is_send {
-            context.scope.spawn(task);
-        } else {
+        if system_meta.requires_local_thread() {
             self.local_thread_running = true;
             context.scope.spawn_on_external(task);
+        } else {
+            context.scope.spawn(task);
         }
     }
 
@@ -763,11 +786,13 @@ impl ExecutorState {
     fn finish_system_and_handle_dependents(&mut self, result: SystemResult) {
         let SystemResult { system_index, .. } = result;
 
-        if self.system_task_metadata[system_index].is_exclusive {
+        let system_meta = &self.system_task_metadata[system_index];
+
+        if system_meta.is_exclusive {
             self.exclusive_running = false;
         }
 
-        if !self.system_task_metadata[system_index].is_send {
+        if system_meta.is_exclusive || system_meta.requires_local_thread() {
             self.local_thread_running = false;
         }
 
