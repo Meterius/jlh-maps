@@ -1984,6 +1984,7 @@ dependencies = [
  "futures-lite",
  "heapless 0.9.3",
  "pin-project",
+ "rayon",
 ]
 
 [[package]]
@@ -4818,6 +4819,8 @@ dependencies = [
  "anyhow",
  "bevy",
  "bevy-inspector-egui",
+ "bevy_ecs",
+ "bevy_tasks",
  "bevy_winit",
  "big_space",
  "console_error_panic_hook",

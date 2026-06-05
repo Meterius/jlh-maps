@@ -113,6 +113,8 @@ pub struct MultiThreadedExecutor {
 pub struct ExecutorState {
     /// Metadata for scheduling and running system tasks.
     system_task_metadata: Vec<SystemTaskMetadata>,
+    /// [`ThreadLocalResources`] version used to compute local-thread routing.
+    accesses_thread_local_resources_version: Option<u64>,
     /// The set of systems whose `component_access_set()` conflicts with this system set's conditions.
     set_condition_conflicting_systems: Vec<FixedBitSet>,
     /// Returns `true` if a system with non-`Send` access is running.
@@ -178,6 +180,7 @@ impl SystemExecutor for MultiThreadedExecutor {
         state.unapplied_systems = FixedBitSet::with_capacity(sys_count);
 
         state.system_task_metadata = Vec::with_capacity(sys_count);
+        state.accesses_thread_local_resources_version = None;
         for index in 0..sys_count {
             state.system_task_metadata.push(SystemTaskMetadata {
                 conflicting_systems: FixedBitSet::with_capacity(sys_count),
@@ -251,10 +254,9 @@ impl SystemExecutor for MultiThreadedExecutor {
         _skip_systems: Option<&FixedBitSet>,
         error_handler: ErrorHandler,
     ) {
-        let thread_local_resources = world
-            .get_resource::<ThreadLocalResources>()
-            .cloned()
-            .unwrap_or_default();
+        let thread_local_resources = world.get_resource::<ThreadLocalResources>();
+        let thread_local_resources_version =
+            thread_local_resources.map( ThreadLocalResources::version);
 
         let state = self.state.get_mut().unwrap();
         // reset counts
@@ -267,13 +269,18 @@ impl SystemExecutor for MultiThreadedExecutor {
             .clone_from(&schedule.system_dependencies);
         state.ready_systems.clone_from(&self.starting_systems);
 
-        for (system_meta, system) in state
-            .system_task_metadata
-            .iter_mut()
-            .zip(schedule.systems.iter())
-        {
-            system_meta.accesses_thread_local_resources =
-                thread_local_resources.matches_system_access(&system.access);
+        if state.accesses_thread_local_resources_version != thread_local_resources_version {
+            for (system_meta, system) in state
+                .system_task_metadata
+                .iter_mut()
+                .zip(schedule.systems.iter())
+            {
+                system_meta.accesses_thread_local_resources = thread_local_resources
+                    .is_some_and(|thread_local_resources| {
+                        thread_local_resources.matches_system_access(&system.access)
+                    });
+            }
+            state.accesses_thread_local_resources_version = thread_local_resources_version;
         }
 
         // If stepping is enabled, make sure we skip those systems that should
@@ -429,6 +436,7 @@ impl ExecutorState {
     fn new() -> Self {
         Self {
             system_task_metadata: Vec::new(),
+            accesses_thread_local_resources_version: None,
             set_condition_conflicting_systems: Vec::new(),
             num_running_systems: 0,
             num_dependencies_remaining: Vec::new(),

@@ -18,7 +18,7 @@ use crate::{
     component::ComponentId,
     error::{BevyError, ErrorContext, Result},
     prelude::{IntoSystemSet, SystemSet},
-    query::FilteredAccessSet,
+    query::{ComponentAccessKind, FilteredAccessSet},
     resource::Resource,
     schedule::{
         ConditionWithAccess, InternedSystemSet, SystemKey, SystemSetKey, SystemTypeSet,
@@ -68,13 +68,15 @@ pub enum ExecutorKind {
     MultiThreaded,
 }
 
-/// Resource ids whose systems must run on the executor's local thread.
+/// Resource and component ids whose systems must run on the executor's local thread.
 ///
-/// This is intended for resources that are technically [`Send`] but are thread-affine at runtime,
-/// such as wasm render wrappers that panic when dereferenced from a different worker.
+/// This is intended for data that is technically [`Send`] but is thread-affine at runtime,
+/// such as wasm render wrappers that panic when dereferenced or dropped from a different worker.
 #[derive(Clone, Debug, Default)]
 pub struct ThreadLocalResources {
     resources: FixedBitSet,
+    components: FixedBitSet,
+    version: u64,
 }
 
 impl Resource for ThreadLocalResources {}
@@ -83,28 +85,88 @@ impl ThreadLocalResources {
     /// Marks a resource id as requiring local-thread system execution.
     #[inline]
     pub fn insert(&mut self, resource_id: ComponentId) {
-        self.resources.grow_and_insert(resource_id.index());
+        self.insert_resource(resource_id);
+    }
+
+    /// Marks a resource id as requiring local-thread system execution.
+    #[inline]
+    pub fn insert_resource(&mut self, resource_id: ComponentId) {
+        let index = resource_id.index();
+        if !self.resources.contains(index) {
+            self.resources.grow_and_insert(index);
+            self.bump_version();
+        }
     }
 
     /// Removes a resource id from the local-thread execution set.
     #[inline]
     pub fn remove(&mut self, resource_id: ComponentId) {
+        self.remove_resource(resource_id);
+    }
+
+    /// Removes a resource id from the local-thread execution set.
+    #[inline]
+    pub fn remove_resource(&mut self, resource_id: ComponentId) {
         let index = resource_id.index();
-        if index < self.resources.len() {
+        if self.resources.contains(index) {
             self.resources.set(index, false);
+            self.bump_version();
         }
     }
 
     /// Returns true if the resource id is marked as requiring local-thread execution.
     #[inline]
     pub fn contains(&self, resource_id: ComponentId) -> bool {
+        self.contains_resource(resource_id)
+    }
+
+    /// Returns true if the resource id is marked as requiring local-thread execution.
+    #[inline]
+    pub fn contains_resource(&self, resource_id: ComponentId) -> bool {
         self.resources.contains(resource_id.index())
     }
 
-    /// Returns true if no resources are marked.
+    /// Marks a component id as requiring local-thread system execution.
+    #[inline]
+    pub fn insert_component(&mut self, component_id: ComponentId) {
+        let index = component_id.index();
+        if !self.components.contains(index) {
+            self.components.grow_and_insert(index);
+            self.bump_version();
+        }
+    }
+
+    /// Removes a component id from the local-thread execution set.
+    #[inline]
+    pub fn remove_component(&mut self, component_id: ComponentId) {
+        let index = component_id.index();
+        if self.components.contains(index) {
+            self.components.set(index, false);
+            self.bump_version();
+        }
+    }
+
+    /// Returns true if the component id is marked as requiring local-thread execution.
+    #[inline]
+    pub fn contains_component(&self, component_id: ComponentId) -> bool {
+        self.components.contains(component_id.index())
+    }
+
+    /// Returns true if no resources or components are marked.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.resources.is_clear()
+        self.resources.is_clear() && self.components.is_clear()
+    }
+
+    /// Increments whenever the logical local-thread marker set changes.
+    #[inline]
+    pub(crate) fn version(&self) -> u64 {
+        self.version
+    }
+
+    #[inline]
+    fn bump_version(&mut self) {
+        self.version = self.version.wrapping_add(1);
     }
 
     pub(crate) fn matches_system_access(&self, access: &FilteredAccessSet) -> bool {
@@ -113,13 +175,38 @@ impl ThreadLocalResources {
         }
 
         let access = access.combined_access();
-        if access.has_read_all_resources() || access.has_write_all_resources() {
+        if !self.resources.is_clear()
+            && (access.has_read_all_resources() || access.has_write_all_resources())
+        {
             return true;
         }
 
-        access
+        if access
             .resource_reads_and_writes()
             .any(|resource_id| self.contains(resource_id))
+        {
+            return true;
+        }
+
+        if self.components.is_clear() {
+            return false;
+        }
+
+        if access.has_read_all_components() || access.has_write_all_components() {
+            return true;
+        }
+
+        let Ok(mut component_access) = access.try_iter_component_access() else {
+            // Be conservative for unbounded component access: if the access set
+            // cannot be enumerated, assume it may touch thread-affine components.
+            return true;
+        };
+
+        component_access.any(|kind| match kind {
+            ComponentAccessKind::Archetypal(component_id)
+            | ComponentAccessKind::Shared(component_id)
+            | ComponentAccessKind::Exclusive(component_id) => self.contains_component(component_id),
+        })
     }
 }
 
