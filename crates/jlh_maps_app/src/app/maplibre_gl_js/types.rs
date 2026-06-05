@@ -1,7 +1,7 @@
 use crate::app::maplibre_gl_js::mvt::parse_tile;
 use crate::app::task_pool::AppTaskPool;
 use crate::wasm_task_pool::Task;
-use bevy::prelude::{Reflect, default};
+use bevy::prelude::{Component, Reflect, default};
 use geojson::Geometry;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::app::maplibre_gl_js::utils::terrain::TerrainData;
 
-#[derive(Default)]
+#[derive(Component, Default)]
 #[allow(dead_code)]
 pub struct MlView {
     pub width: f64,
@@ -22,7 +22,7 @@ pub struct MlView {
     pub main_matrix: Vec<f64>,
 }
 
-#[derive(Default)]
+#[derive(Component, Default)]
 pub struct MlTerrain {
     pub tiles: HashMap<CanonicalTileId, Arc<MlTerrainTile>>,
     pub active_tile_ids: HashSet<CanonicalTileId>,
@@ -35,7 +35,7 @@ pub struct MlTerrainTile {
     pub terrain_data: TerrainData,
 }
 
-#[derive(Default)]
+#[derive(Component, Default)]
 pub struct MlData {
     pub sources: HashMap<String, MlSource>,
     next_revision: u64,

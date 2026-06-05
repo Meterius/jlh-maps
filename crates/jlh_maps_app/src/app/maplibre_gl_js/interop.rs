@@ -1,14 +1,16 @@
 use crate::app::instance::{BevyInstance, BevyInstanceInner};
 use crate::app::maplibre_gl_js::integration::{
-    MaplibreMapIntegration, NEXT_INTEGRATION_ID, find_map_integration, with_map_data_mut,
+    MaplibreMapIntegration, NEXT_INTEGRATION_ID, find_map_integration, with_map_entity,
 };
-use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile, MlView};
+use crate::app::maplibre_gl_js::types::{
+    CanonicalTileId, MlData, MlTerrain, MlTerrainTile, MlView,
+};
 use crate::app::maplibre_gl_js::utils::dem_data::DEMData;
 use crate::app::maplibre_gl_js::utils::terrain::TerrainData;
 use crate::app::task_pool::AppTaskPool;
 use anyhow::anyhow;
 use bevy::math::DMat4;
-use bevy::prelude::{Name, World, default};
+use bevy::prelude::{Name, World};
 use std::collections::HashSet;
 use std::rc::Weak;
 use std::sync::Arc;
@@ -58,7 +60,10 @@ impl BevyInstance {
 
         self.execute(move |world| {
             world.spawn((
-                MaplibreMapIntegration { id, ..default() },
+                MaplibreMapIntegration { id },
+                MlView::default(),
+                MlTerrain::default(),
+                MlData::default(),
                 Name::new(format!("MapLibre map integration {id}")),
             ));
         })?;
@@ -104,8 +109,10 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_data_mut(world, integration_id, |map_data| {
-                map_data.view = view;
+            with_map_entity(world, integration_id, |world, entity| {
+                if let Some(mut current_view) = world.get_mut::<MlView>(entity) {
+                    *current_view = view;
+                }
             });
         })
     }
@@ -154,8 +161,10 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_data_mut(world, integration_id, |map_data| {
-                map_data.terrain.tiles.insert(tile_key, Arc::new(tile_data));
+            with_map_entity(world, integration_id, |world, entity| {
+                if let Some(mut terrain) = world.get_mut::<MlTerrain>(entity) {
+                    terrain.tiles.insert(tile_key, Arc::new(tile_data));
+                }
             });
         })
     }
@@ -169,8 +178,10 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_data_mut(world, integration_id, |map_data| {
-                map_data.terrain.tiles.remove(&tile_id);
+            with_map_entity(world, integration_id, |world, entity| {
+                if let Some(mut terrain) = world.get_mut::<MlTerrain>(entity) {
+                    terrain.tiles.remove(&tile_id);
+                }
             });
         })
     }
@@ -194,10 +205,10 @@ impl MaplibreIntegration {
                 return;
             };
 
-            with_map_data_mut(world, integration_id, |map_data| {
-                map_data
-                    .data
-                    .update_tile(source_id, tile_id, data, &task_pool);
+            with_map_entity(world, integration_id, |world, entity| {
+                if let Some(mut ml_data) = world.get_mut::<MlData>(entity) {
+                    ml_data.update_tile(source_id, tile_id, data, &task_pool);
+                }
             });
         })
     }
@@ -213,8 +224,10 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_data_mut(world, integration_id, |map_data| {
-                map_data.data.remove_tile(&source_id, &tile_id);
+            with_map_entity(world, integration_id, |world, entity| {
+                if let Some(mut ml_data) = world.get_mut::<MlData>(entity) {
+                    ml_data.remove_tile(&source_id, &tile_id);
+                }
             });
         })
     }
@@ -233,10 +246,10 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_data_mut(world, integration_id, |map_data| {
-                map_data
-                    .data
-                    .set_renderable_tiles(source_id, renderable_tile_ids);
+            with_map_entity(world, integration_id, |world, entity| {
+                if let Some(mut ml_data) = world.get_mut::<MlData>(entity) {
+                    ml_data.set_renderable_tiles(source_id, renderable_tile_ids);
+                }
             });
         })
     }
@@ -251,8 +264,10 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_data_mut(world, integration_id, |map_data| {
-                map_data.terrain.active_tile_ids = active_tile_ids;
+            with_map_entity(world, integration_id, |world, entity| {
+                if let Some(mut terrain) = world.get_mut::<MlTerrain>(entity) {
+                    terrain.active_tile_ids = active_tile_ids;
+                }
             });
         })
     }

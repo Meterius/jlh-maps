@@ -1,6 +1,5 @@
 use crate::app::map::transform::tile_flat_world_bounds;
-use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
-use crate::app::maplibre_gl_js::types::CanonicalTileId;
+use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlData};
 use crate::utils::debug::SoftExpect;
 use bevy::app::{App, Plugin};
 use bevy::math::DVec3;
@@ -59,17 +58,21 @@ pub struct TileBucket {
 
 fn sync_spawned_buckets(
     mut commands: Commands,
-    map_ints: Query<&MaplibreMapIntegration>,
+    ml_data_query: Query<&MlData>,
     mut managers: Query<(Entity, &Grid, &mut TileBucketManager)>,
 ) {
     for (manager_id, grid, mut manager) in managers.iter_mut() {
-        let Some(map_int) = map_ints.get(manager.maplibre_int_id).ok().soft_expect("") else {
+        let Some(ml_data) = ml_data_query
+            .get(manager.maplibre_int_id)
+            .ok()
+            .soft_expect("")
+        else {
             continue;
         };
 
         let maplibre_int_id = manager.maplibre_int_id;
         let on_spawn = manager.on_spawn;
-        for (source_id, source) in &map_int.data.sources {
+        for (source_id, source) in &ml_data.sources {
             let spawned_buckets = manager
                 .spawned_buckets_by_source
                 .entry(source_id.clone())
@@ -100,7 +103,7 @@ fn sync_spawned_buckets(
         manager
             .spawned_buckets_by_source
             .retain(|source_id, spawned_buckets| {
-                let source = map_int.data.sources.get(source_id);
+                let source = ml_data.sources.get(source_id);
 
                 spawned_buckets.retain(|tile_id, bucket_eid| {
                     let Some(source) = source else {

@@ -1,6 +1,5 @@
 use crate::app::map::feature::tile::FeatureTile;
-use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
-use crate::app::maplibre_gl_js::types::{MlTerrainTile, MlTile};
+use crate::app::maplibre_gl_js::types::{MlData, MlTerrain, MlTerrainTile, MlTile};
 use crate::app::task_pool::AppTaskPool;
 use crate::wasm_task_pool::Task;
 use bevy::app::{App, Plugin};
@@ -24,7 +23,11 @@ impl<C: TileTaskBasedMeta> TileTaskBasedPlugin<C> {
 
 impl<C: TileTaskBasedMeta> Plugin for TileTaskBasedPlugin<C> {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, sync_items::<C>);
+        if C::use_terrain() {
+            app.add_systems(Update, sync_items_with_terrain::<C>);
+        } else {
+            app.add_systems(Update, sync_items_without_terrain::<C>);
+        }
     }
 }
 
@@ -128,8 +131,8 @@ where
     }
 }
 
-fn sync_items<C: TileTaskBasedMeta>(
-    map_ints: Query<&MaplibreMapIntegration>,
+fn sync_items_without_terrain<C: TileTaskBasedMeta>(
+    ml_data_query: Query<&MlData>,
     task_pool: Res<AppTaskPool>,
     mut params: StaticSystemParam<C::ApplyParams>,
     mut buckets: Query<(
@@ -140,13 +143,46 @@ fn sync_items<C: TileTaskBasedMeta>(
     )>,
 ) {
     for (id, tile, mut tile_tb, visibility) in buckets.iter_mut() {
-        let Some(map_int) = map_ints.get(tile.maplibre_int_id).ok() else {
+        let Some(ml_data) = ml_data_query.get(tile.maplibre_int_id).ok() else {
             continue;
         };
 
         // TODO: do not rely on visibility for task active status
         sync_item(
-            map_int,
+            ml_data,
+            None,
+            &mut *params,
+            id,
+            tile,
+            &mut tile_tb,
+            &task_pool,
+            visibility == Some(&InheritedVisibility::VISIBLE),
+        );
+    }
+}
+
+fn sync_items_with_terrain<C: TileTaskBasedMeta>(
+    ml_data_query: Query<&MlData>,
+    ml_terrains: Query<&MlTerrain>,
+    task_pool: Res<AppTaskPool>,
+    mut params: StaticSystemParam<C::ApplyParams>,
+    mut buckets: Query<(
+        Entity,
+        &FeatureTile,
+        &mut TileTaskBased<C>,
+        Option<&InheritedVisibility>,
+    )>,
+) {
+    for (id, tile, mut tile_tb, visibility) in buckets.iter_mut() {
+        let Some(ml_data) = ml_data_query.get(tile.maplibre_int_id).ok() else {
+            continue;
+        };
+        let ml_terrain = ml_terrains.get(tile.maplibre_int_id).ok();
+
+        // TODO: do not rely on visibility for task active status
+        sync_item(
+            ml_data,
+            ml_terrain,
             &mut *params,
             id,
             tile,
@@ -158,7 +194,8 @@ fn sync_items<C: TileTaskBasedMeta>(
 }
 
 fn sync_item<C: TileTaskBasedMeta>(
-    map_int: &MaplibreMapIntegration,
+    ml_data: &MlData,
+    ml_terrain: Option<&MlTerrain>,
     params: &mut SystemParamItem<'_, '_, C::ApplyParams>,
     id: Entity,
     tile: &FeatureTile,
@@ -181,7 +218,7 @@ fn sync_item<C: TileTaskBasedMeta>(
     }
 
     // clear if tile no longer exists
-    let Some(tile) = tile.tile(map_int) else {
+    let Some(source_tile) = tile.tile(ml_data) else {
         if !tile_tb.revision.is_empty() {
             tile_tb.clear_data();
             tile_tb.data = C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, None);
@@ -199,17 +236,17 @@ fn sync_item<C: TileTaskBasedMeta>(
 
     // check if tile or terrain data has changed
 
-    if tile_tb.revision.tile_revision != Some(tile.revision) {
+    if tile_tb.revision.tile_revision != Some(source_tile.revision) {
         tile_tb.clear_data();
-        tile_tb.revision.tile_revision = Some(tile.revision);
+        tile_tb.revision.tile_revision = Some(source_tile.revision);
     }
 
-    let terrain_data = if C::use_terrain() {
-        map_int.terrain.tiles.get(&tile.id)
+    let terrain_tile = if C::use_terrain() {
+        ml_terrain.and_then(|ml_terrain| ml_terrain.tiles.get(&source_tile.id))
     } else {
         None
     };
-    let terrain_hash = terrain_data.map(|terrain_data| terrain_data.hash);
+    let terrain_hash = terrain_tile.map(|terrain_tile| terrain_tile.hash);
 
     if tile_tb.revision.terrain_hash != terrain_hash {
         tile_tb.clear_data();
@@ -222,8 +259,8 @@ fn sync_item<C: TileTaskBasedMeta>(
 
     // data has changed, start rebuild task
 
-    let tile = Arc::clone(tile);
-    let terrain_data = terrain_data.map(Arc::clone);
+    let tile = Arc::clone(source_tile);
+    let terrain_data = terrain_tile.map(Arc::clone);
 
     tile_tb.pending_task = Some({
         let config = tile_tb.config.clone();

@@ -1,6 +1,5 @@
 use crate::app::map::transform;
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
-use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::maplibre_gl_js::types::MlView;
 use crate::utils::debug::SoftExpect;
 use bevy::anti_alias::taa::TemporalAntiAliasing;
@@ -40,7 +39,7 @@ pub struct MapViewCamera {
 }
 
 fn sync_camera(
-    maps: Query<&MaplibreMapIntegration>,
+    ml_views: Query<&MlView>,
     mut cameras: Query<(
         &MapViewCamera,
         &mut CellCoord,
@@ -51,7 +50,7 @@ fn sync_camera(
     grids: Query<&Grid>,
 ) {
     for (camera, mut cell, mut transform, mut projection, child_of) in &mut cameras {
-        let Some(map_int) = maps.get(camera.maplibre_int_id).ok().soft_expect("") else {
+        let Some(view) = ml_views.get(camera.maplibre_int_id).ok().soft_expect("") else {
             continue;
         };
 
@@ -59,7 +58,7 @@ fn sync_camera(
             continue;
         };
 
-        let semantic_camera = maplibre_semantic_camera_transform(&map_int.view);
+        let semantic_camera = maplibre_semantic_camera_transform(view);
         let (camera_cell, camera_translation) =
             grid.translation_to_grid(semantic_camera.translation);
 
@@ -68,7 +67,7 @@ fn sync_camera(
             .with_rotation(semantic_camera.rotation.as_quat());
 
         let Some(maplibre_projection) = MapLibreMercatorProjection::from_main_matrix(
-            &map_int.view.main_matrix,
+            &view.main_matrix,
             semantic_camera.world_from_view,
         ) else {
             warn!("Failed to create projection from main matrix");

@@ -2,8 +2,7 @@ use crate::app::common::debug_gizmos::DebugAabbGizmo;
 use crate::app::common::materials::TransparentOverwriteMaterial;
 use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MAP_VIEW_DEPTH_RENDER_LAYER};
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
-use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
-use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrainTile};
+use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrain, MlTerrainTile};
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{
     EARTH_CIRCUMFERENCE, LngLat, MercatorCoordinate,
 };
@@ -62,7 +61,7 @@ pub struct TerrainTileManager {
 
 fn sync_spawned_tiles(
     mut commands: Commands,
-    map_ints: Query<&MaplibreMapIntegration>,
+    ml_terrains: Query<&MlTerrain>,
     mut managers: Query<(Entity, &mut TerrainTileManager)>,
     grids: Query<&Grid>,
     flat_mesh: Res<TerrainFlatMesh>,
@@ -71,14 +70,14 @@ fn sync_spawned_tiles(
     for (manager_id, mut manager) in managers.iter_mut() {
         let maplibre_int_id = manager.maplibre_int_id;
 
-        let Some(map_int) = map_ints.get(maplibre_int_id).ok().soft_expect("") else {
+        let Some(ml_terrain) = ml_terrains.get(maplibre_int_id).ok().soft_expect("") else {
             continue;
         };
         let Some(grid) = grids.get(manager_id).ok().soft_expect("") else {
             continue;
         };
 
-        for &tile_id in map_int.terrain.active_tile_ids.iter() {
+        for &tile_id in ml_terrain.active_tile_ids.iter() {
             if let Entry::Vacant(entry) = manager.spawned_tiles.entry(tile_id) {
                 let (tile_cell, tile_transform) = terrain_tile_transform(grid, tile_id);
                 let tile_e_id = commands
@@ -109,7 +108,7 @@ fn sync_spawned_tiles(
         }
 
         for (tile_id, tile_entity) in &manager.spawned_tiles {
-            let visibility = if map_int.terrain.active_tile_ids.contains(tile_id) {
+            let visibility = if ml_terrain.active_tile_ids.contains(tile_id) {
                 Visibility::Inherited
             } else {
                 Visibility::Hidden
@@ -118,8 +117,7 @@ fn sync_spawned_tiles(
         }
 
         for (_, tile_entity) in manager.spawned_tiles.extract_if(|tile_id, _| {
-            !map_int.terrain.active_tile_ids.contains(tile_id)
-                && !map_int.terrain.tiles.contains_key(tile_id)
+            !ml_terrain.active_tile_ids.contains(tile_id) && !ml_terrain.tiles.contains_key(tile_id)
         }) {
             commands.entity(tile_entity).despawn();
         }
@@ -140,18 +138,18 @@ struct PendingTerrainMeshTask {
 }
 
 fn sync_tiles(
-    map_ints: Query<&MaplibreMapIntegration>,
+    ml_terrains: Query<&MlTerrain>,
     mut tiles: Query<(&mut TerrainTile, &mut Mesh3d)>,
     task_pool: Res<AppTaskPool>,
     flat_mesh: Res<TerrainFlatMesh>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     for (mut tile, mut tile_mesh) in tiles.iter_mut() {
-        let Some(map_int) = map_ints.get(tile.maplibre_int_id).ok().soft_expect("") else {
+        let Some(ml_terrain) = ml_terrains.get(tile.maplibre_int_id).ok().soft_expect("") else {
             continue;
         };
 
-        let terrain_data = map_int.terrain.tiles.get(&tile.maplibre_tile_id);
+        let terrain_data = ml_terrain.tiles.get(&tile.maplibre_tile_id);
         let terrain_hash = terrain_data.map(|terrain_data| terrain_data.hash);
 
         // apply task result or abort task if terrain has changed

@@ -1,5 +1,4 @@
-use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
-use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTile};
+use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlData, MlTile};
 use bevy::math::DVec3;
 use bevy::prelude::{Component, Entity};
 use std::sync::Arc;
@@ -27,9 +26,8 @@ impl FeatureTile {
         }
     }
 
-    pub fn tile<'a>(&self, map_int: &'a MaplibreMapIntegration) -> Option<&'a Arc<MlTile>> {
-        map_int
-            .data
+    pub fn tile<'a>(&self, ml_data: &'a MlData) -> Option<&'a Arc<MlTile>> {
+        ml_data
             .sources
             .get(&self.source_id)
             .and_then(|source| source.tiles.get(&self.tile_id))

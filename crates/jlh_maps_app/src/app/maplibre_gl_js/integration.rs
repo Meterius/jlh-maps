@@ -1,4 +1,3 @@
-use crate::app::maplibre_gl_js::types::{MlData, MlTerrain, MlView};
 use bevy::prelude::*;
 use std::cell::Cell;
 
@@ -9,24 +8,18 @@ thread_local! {
 #[derive(Component, Default)]
 pub struct MaplibreMapIntegration {
     pub id: u32,
-    pub view: MlView,
-    pub terrain: MlTerrain,
-    pub data: MlData,
 }
 
-pub(super) fn with_map_data_mut(
+pub(super) fn with_map_entity(
     world: &mut World,
     integration_id: u32,
-    callback: impl FnOnce(&mut MaplibreMapIntegration),
+    callback: impl FnOnce(&mut World, Entity),
 ) {
     let Some(entity) = find_map_integration(world, integration_id) else {
         return;
     };
-    let Some(mut map_data) = world.get_mut::<MaplibreMapIntegration>(entity) else {
-        return;
-    };
 
-    callback(&mut map_data);
+    callback(world, entity);
 }
 
 pub(super) fn find_map_integration(world: &mut World, integration_id: u32) -> Option<Entity> {
