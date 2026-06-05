@@ -1,3 +1,4 @@
+use crate::app::common::entity_spawner::{EntitySpawner, EntitySpawnerMeta, EntitySpawnerPlugin};
 use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MapViewSettings};
 use crate::app::map::feature::bucket_layer::TileBucketLayerMeta;
 use crate::app::map::feature::bucket_manager::TileBucket;
@@ -26,7 +27,8 @@ pub struct TreesPlugin;
 impl Plugin for TreesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TreeModelAssets>()
-            .add_systems(Update, sync_tree_models);
+            .add_plugins(EntitySpawnerPlugin::<TreeEntitySpawner>::default())
+            .add_systems(Update, sync_trees);
     }
 }
 
@@ -59,7 +61,7 @@ pub(super) struct TreeTileBucketLayer;
 impl TileBucketLayerMeta for TreeTileBucketLayer {
     type BucketMarker = TreeTileBucket;
     type EnabledParams = Res<'static, MapViewSettings>;
-    type SpawnParams = ();
+    type SpawnParams = Res<'static, TreeModelAssets>;
 
     fn is_enabled(settings: &SystemParamItem<'_, '_, Self::EnabledParams>) -> bool {
         settings.enable_trees
@@ -67,14 +69,13 @@ impl TileBucketLayerMeta for TreeTileBucketLayer {
 
     fn spawn(
         mut e_commands: EntityCommands,
-        _params: &mut SystemParamItem<'_, '_, Self::SpawnParams>,
+        tree_assets: &mut SystemParamItem<'_, '_, Self::SpawnParams>,
         _: Entity,
         bucket: &TileBucket,
     ) {
-        e_commands.insert(Name::new(format!(
-            "Tree tile {}/{:?}",
-            bucket.source_id, bucket.tile_id
-        )));
+        let entity = e_commands.id();
+
+        e_commands.insert(Name::new("Tree"));
 
         if bucket.tile_id.z >= TREE_MIN_ZOOM {
             e_commands.insert((
@@ -88,6 +89,16 @@ impl TileBucketLayerMeta for TreeTileBucketLayer {
                 MapFeatureDistanceVisibility {
                     flat_half_extents: bucket.half_extents,
                 },
+                EntitySpawner::<TreeEntitySpawner>::new(
+                    entity,
+                    TreeSpawnerParams {
+                        tile_id: bucket.tile_id,
+                        scale: tile_world_units_per_meter(bucket.tile_id) as f32
+                            * TREE_MODEL_SCALE_METERS,
+                        models: tree_assets.models.clone(),
+                    },
+                    Vec::new(),
+                ),
                 FeatureTileScatter::new(FeatureTileScatterConfig {
                     layer_id: TREE_SOURCE_LAYER,
                     class_property_key: Some(TREE_CLASS_PROPERTY_KEY),
@@ -111,7 +122,6 @@ impl TileBucketLayerMeta for TreeTileBucketLayer {
 #[derive(Component, Default)]
 struct TreeTile {
     scatter_revision: Option<u64>,
-    spawned_trees: Vec<Entity>,
 }
 
 #[derive(Clone)]
@@ -121,8 +131,49 @@ struct TreeModelAsset {
 }
 
 #[derive(Resource)]
-struct TreeModelAssets {
+pub(super) struct TreeModelAssets {
     models: Vec<TreeModelAsset>,
+}
+
+struct TreeEntitySpawner;
+
+struct TreeSpawnerParams {
+    tile_id: CanonicalTileId,
+    scale: f32,
+    models: Vec<TreeModelAsset>,
+}
+
+impl EntitySpawnerMeta for TreeEntitySpawner {
+    type Item = Vec3;
+    type Params = TreeSpawnerParams;
+    type SpawnBundle = (Name, Visibility, RenderLayers);
+    type UpdateBundle = (Transform, Mesh3d, MeshMaterial3d<StandardMaterial>);
+
+    fn spawn_bundle(_params: &Self::Params, index: usize, _item: &Self::Item) -> Self::SpawnBundle {
+        (
+            Name::new(format!("Tree model {index}")),
+            Visibility::default(),
+            RenderLayers::layer(MAP_VIEW_COLOR_RENDER_LAYER),
+        )
+    }
+
+    fn update_bundle(params: &Self::Params, index: usize, item: &Self::Item) -> Self::UpdateBundle {
+        let mut rng = StdRng::seed_from_u64(tree_instance_seed(params.tile_id, index));
+        let model = &params.models[rng.random_range(0..params.models.len())];
+        let uniform_scale =
+            rng.random_range(TREE_MODEL_UNIFORM_SCALE_MIN..TREE_MODEL_UNIFORM_SCALE_MAX);
+        let z_scale = rng.random_range(TREE_MODEL_Z_SCALE_MIN..TREE_MODEL_Z_SCALE_MAX);
+        let rotation_z = rng.random_range(0.0..TAU);
+        let model_scale = params.scale * uniform_scale;
+
+        (
+            Transform::from_translation(*item)
+                .with_rotation(Quat::from_rotation_z(rotation_z))
+                .with_scale(Vec3::new(model_scale, model_scale, model_scale * z_scale)),
+            Mesh3d(model.mesh.clone()),
+            MeshMaterial3d(model.material.clone()),
+        )
+    }
 }
 
 impl FromWorld for TreeModelAssets {
@@ -151,60 +202,31 @@ impl FromWorld for TreeModelAssets {
     }
 }
 
-fn sync_tree_models(
-    mut commands: Commands,
-    tree_assets: Res<TreeModelAssets>,
-    mut tree_tiles: Query<(Entity, &FeatureTile, &FeatureTileScatter, &mut TreeTile)>,
+fn sync_trees(
+    mut tree_tiles: Query<(
+        &FeatureTileScatter,
+        &mut TreeTile,
+        &mut EntitySpawner<TreeEntitySpawner>,
+    )>,
 ) {
-    for (entity, feature_tile, scatter, mut tree_tile) in tree_tiles.iter_mut() {
+    for (scatter, mut tree_tile, mut spawner) in tree_tiles.iter_mut() {
         let scatter_revision = scatter.data_revision();
         if tree_tile.scatter_revision == Some(scatter_revision) {
             continue;
         }
 
-        for tree in tree_tile.spawned_trees.drain(..) {
-            commands.entity(tree).despawn();
-        }
-
-        if let Some(positions) = scatter.positions() {
-            let scale =
-                tile_world_units_per_meter(feature_tile.tile_id) as f32 * TREE_MODEL_SCALE_METERS;
-
-            let mut model_rng = StdRng::seed_from_u64(tree_model_seed(feature_tile.tile_id));
-
-            for (index, position) in positions.iter().enumerate() {
-                let model =
-                    &tree_assets.models[model_rng.random_range(0..tree_assets.models.len())];
-                let uniform_scale = model_rng
-                    .random_range(TREE_MODEL_UNIFORM_SCALE_MIN..TREE_MODEL_UNIFORM_SCALE_MAX);
-                let z_scale =
-                    model_rng.random_range(TREE_MODEL_Z_SCALE_MIN..TREE_MODEL_Z_SCALE_MAX);
-                let rotation_z = model_rng.random_range(0.0..TAU);
-                let model_scale = scale * uniform_scale;
-
-                let tree = commands
-                    .spawn((
-                        Name::new(format!("Tree model {index}")),
-                        Transform::from_translation(*position)
-                            .with_rotation(Quat::from_rotation_z(rotation_z))
-                            .with_scale(Vec3::new(model_scale, model_scale, model_scale * z_scale)),
-                        Visibility::default(),
-                        RenderLayers::layer(MAP_VIEW_COLOR_RENDER_LAYER),
-                        Mesh3d(model.mesh.clone()),
-                        MeshMaterial3d(model.material.clone()),
-                    ))
-                    .id();
-                commands.entity(entity).add_child(tree);
-                tree_tile.spawned_trees.push(tree);
-            }
-        }
+        spawner.items = scatter
+            .positions()
+            .map(|positions| positions.to_vec())
+            .unwrap_or_default();
 
         tree_tile.scatter_revision = Some(scatter_revision);
     }
 }
 
-fn tree_model_seed(tile_id: CanonicalTileId) -> u64 {
+fn tree_instance_seed(tile_id: CanonicalTileId, index: usize) -> u64 {
     let mut hasher = DefaultHasher::new();
     tile_id.hash(&mut hasher);
+    index.hash(&mut hasher);
     hasher.finish()
 }
