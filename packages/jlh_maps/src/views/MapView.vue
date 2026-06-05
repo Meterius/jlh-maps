@@ -136,6 +136,10 @@
         />
       </div>
 
+      <div v-if="frameDiagnosticsVisible" class="absolute left-2 top-2 z-10">
+        <FrameDiagnosticsPanel :diagnostics="frameDiagnostics" />
+      </div>
+
       <div
         class="pointer-events-none absolute z-10 flex gap-2 p-2 transition-[bottom,left] duration-200 ease-out"
         :style="layersControlStyle"
@@ -518,6 +522,8 @@ import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.
 import { useRainfallRasterProvider } from '@/composables/rainfall-raster-provider.ts'
 import { useSelectedMarkerLayer } from '@/maplibre-layers/selected-marker-layer.ts'
 import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
+import FrameDiagnosticsPanel from '@/components/FrameDiagnosticsPanel.vue'
+import { useFrameDiagnostics } from '@/composables/frame-diagnostics.ts'
 import {
   type MapStyleLifecycleConfig,
   useMapStyleLifecycle,
@@ -593,6 +599,10 @@ const bevyCanvasId = `bevy-canvas-${mapKey}`
 const bevyDebugCanvas = ref<HTMLCanvasElement | null>(null)
 const debugCanvasVisible = computed(
   () => currentBaseStyleLayerSettings.value.bevyEnabled && mapViewStore.value.bevyCanvasEnabled,
+)
+const frameDiagnosticsVisible = computed(
+  () =>
+    currentBaseStyleLayerSettings.value.bevyEnabled && mapViewStore.value.frameStatisticsEnabled,
 )
 
 const bevyMount = createDynamicComposable(
@@ -731,6 +741,23 @@ const closePendingBevyFrameBitmap = () => {
 
 let pendingBevyFrame = 0
 let bevyTickFailure = false
+
+const frameDiagnostics = useFrameDiagnostics()
+
+watch(bevyMount, () => {
+  bevyTickFailure = false
+  frameDiagnostics.reset()
+  closePendingBevyFrameBitmap()
+  // incrementing frame to invalidate potential pending frame
+  ++pendingBevyFrame
+})
+
+watch(frameDiagnosticsVisible, (visible) => {
+  if (!visible) {
+    frameDiagnostics.reset()
+  }
+})
+
 const tickBevyAndProduceFrame = async (transform?: unknown) => {
   const mountedBevy = bevyMount.value
   if (!mountedBevy) {
@@ -739,46 +766,54 @@ const tickBevyAndProduceFrame = async (transform?: unknown) => {
   }
 
   const frameIdx = ++pendingBevyFrame
+  const frameStartedAt = performance.now()
 
-  let frame: Awaited<ReturnType<UseBevyReturn['tick']>> | null = null
   try {
-    frame = bevyTickFailure
-      ? null
-      : (
-          await Promise.all([
-            mountedBevy.useMaplibreIntegrationRet.syncOnRender(frameIdx),
-            mountedBevy.useBevyRet.tick(frameIdx),
-          ])
-        )[1]
-  } catch (error) {
-    bevyTickFailure = true
-    console.error('Bevy worker tick failed', error)
-  }
-
-  if (!frame) {
-    closePendingBevyFrameBitmap()
-    return
-  }
-
-  if (frameIdx !== pendingBevyFrame) {
-    frame.textureBitmap.close()
-    frame.debugBitmap?.close()
-    return
-  }
-
-  const previousFrameBitmap = bevyFrameBitmap.value
-  bevyFrameBitmap.value = frame.textureBitmap
-  previousFrameBitmap?.close()
-
-  if (frame.debugBitmap && bevyDebugCanvas.value) {
-    const context = bevyDebugCanvas.value.getContext('bitmaprenderer')
-    if (context) {
-      context.transferFromImageBitmap(frame.debugBitmap)
-    } else {
-      frame.debugBitmap.close()
+    let frame: Awaited<ReturnType<UseBevyReturn['tick']>> | null = null
+    try {
+      frame = bevyTickFailure
+        ? null
+        : (
+            await Promise.all([
+              mountedBevy.useMaplibreIntegrationRet.syncOnRender(frameIdx),
+              mountedBevy.useBevyRet.tick(frameIdx),
+            ])
+          )[1]
+    } catch (error) {
+      bevyTickFailure = true
+      console.error('Bevy worker tick failed', error)
     }
-  } else {
-    frame.debugBitmap?.close()
+
+    if (!frame) {
+      closePendingBevyFrameBitmap()
+      return
+    }
+
+    if (frameIdx !== pendingBevyFrame) {
+      frame.textureBitmap.close()
+      frame.debugBitmap?.close()
+      return
+    }
+
+    const previousFrameBitmap = bevyFrameBitmap.value
+    bevyFrameBitmap.value = frame.textureBitmap
+    previousFrameBitmap?.close()
+
+    if (frame.debugBitmap && bevyDebugCanvas.value) {
+      const context = bevyDebugCanvas.value.getContext('bitmaprenderer')
+      if (context) {
+        context.transferFromImageBitmap(frame.debugBitmap)
+      } else {
+        frame.debugBitmap.close()
+      }
+    } else {
+      frame.debugBitmap?.close()
+    }
+  } finally {
+    frameDiagnostics.pushFrame({
+      startedAtMs: frameStartedAt,
+      endedAtMs: performance.now(),
+    })
   }
 }
 

@@ -20,6 +20,7 @@ export type MapViewStore = {
   baseStyleType: MapViewBaseStyleType
   projection?: ProjectionSpecification
   bevyCanvasEnabled: boolean
+  frameStatisticsEnabled: boolean
 }
 
 export type MapLibreLodSettings = {
@@ -99,6 +100,7 @@ function createDefaultMapViewStore(): MapViewStore {
     baseStyleType: MapViewBaseStyleType.Normal,
     projection: { type: 'mercator' },
     bevyCanvasEnabled: false,
+    frameStatisticsEnabled: true,
   }
 }
 

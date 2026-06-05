@@ -16,6 +16,10 @@
             <input v-model="showPadding" type="checkbox" />
             <span>Padding</span>
           </label>
+          <label class="debug-toggle">
+            <input v-model="mapViewStore.frameStatisticsEnabled" type="checkbox" />
+            <span>Frame statistics</span>
+          </label>
         </div>
       </div>
     </div>
