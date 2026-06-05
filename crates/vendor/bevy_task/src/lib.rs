@@ -18,6 +18,11 @@ pub mod cfg {
             async_executor
         }
 
+        #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))] => {
+            /// Indicates wasm task scopes use a Rayon worker pool.
+            wasm_threads
+        }
+
         #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))] => {
             /// Indicates multithreading support.
             multi_threaded
@@ -100,14 +105,20 @@ cfg::web! {
     }
 }
 
-cfg::multi_threaded! {
-    if {
+cfg::switch! {
+    cfg::wasm_threads => {
+        mod wasm_threaded_task_pool;
+
+        pub use wasm_threaded_task_pool::{Scope, TaskPool, TaskPoolBuilder, ThreadExecutor};
+    }
+    cfg::multi_threaded => {
         mod task_pool;
         mod thread_executor;
 
         pub use task_pool::{Scope, TaskPool, TaskPoolBuilder};
         pub use thread_executor::{ThreadExecutor, ThreadExecutorTicker};
-    } else {
+    }
+    _ => {
         mod single_threaded_task_pool;
 
         pub use single_threaded_task_pool::{Scope, TaskPool, TaskPoolBuilder, ThreadExecutor};

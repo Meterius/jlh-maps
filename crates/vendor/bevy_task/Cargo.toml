@@ -58,6 +58,15 @@ multi_threaded = [
     "dep:concurrent-queue",
     "async_executor",
 ]
+wasm_threads = [
+    "bevy_platform/std",
+    "bevy_platform/web",
+    "dep:async-channel",
+    "dep:concurrent-queue",
+    "dep:rayon",
+    "futures-lite",
+    "multi_threaded",
+]
 
 [lib]
 name = "bevy_tasks"
@@ -117,6 +126,10 @@ default-features = false
 version = "2.0.1"
 features = ["alloc"]
 default-features = false
+
+[dependencies.rayon]
+version = "1.11.0"
+optional = true
 
 [dev-dependencies.async-channel]
 version = "2.3.0"
