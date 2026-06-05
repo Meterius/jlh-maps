@@ -48,6 +48,7 @@ let bevyInstanceCounter = 0
 export function mountBevy(
   getDebugCanvas: () => HTMLCanvasElement | null,
   getMaplibreCanvas: () => HTMLCanvasElement | null,
+  mountDebugWindow: boolean,
 ) {
   if (!getCurrentScope()) {
     throw new Error('mountBevy must be called within an active effect scope')
@@ -62,7 +63,6 @@ export function mountBevy(
     bevyInstance: shallowRef(null),
     bevyWorker: shallowRef(null),
     mapViewSettings: ref({
-      enableWindowCameras: false,
       enableBuildings: true,
       enableWaters: true,
       enableTrees: true,
@@ -84,7 +84,6 @@ export function mountBevy(
 
       if (
         state.bevyInstance.value &&
-        debugSize &&
         maplibreSize &&
         (!isEqual(appliedWindowSize.debug.value, debugSize) ||
           !isEqual(appliedWindowSize.maplibre.value, maplibreSize))
@@ -116,7 +115,10 @@ export function mountBevy(
 
   const updateDebugCanvasRenderSize = () => {
     const canvas = state.debugCanvas.value
-    if (!canvas) return
+    if (!canvas) {
+      targetWindowSize.debug.value = null
+      return
+    }
 
     targetWindowSize.debug.value = canvasRenderSize(canvas)
   }
@@ -135,15 +137,19 @@ export function mountBevy(
   useResizeObserver(state.maplibreCanvas, updateMaplibreCanvasRenderSize)
 
   watchDefinedOnce(
-    () =>
-      state.debugCanvas.value && state.maplibreCanvas.value
-        ? {
-            debugCanvas: state.debugCanvas.value,
-            maplibreCanvas: state.maplibreCanvas.value,
-          }
-        : undefined,
+    () => {
+      const maplibreCanvas = state.maplibreCanvas.value
+      const debugCanvas = mountDebugWindow ? state.debugCanvas.value : null
+
+      if (!maplibreCanvas || (mountDebugWindow && !debugCanvas)) return undefined
+
+      return {
+        debugCanvas,
+        maplibreCanvas,
+      }
+    },
     ({ debugCanvas, maplibreCanvas }) => {
-      const debugSize = canvasRenderSize(debugCanvas)
+      const debugSize = debugCanvas ? canvasRenderSize(debugCanvas) : null
       const maplibreSize = canvasRenderSize(maplibreCanvas)
 
       targetWindowSize.maplibre.value = maplibreSize
@@ -296,31 +302,37 @@ function useStaticCanvasSource(
 
 async function mountRegisteredBevyInstance(
   state: BevyInstanceState,
-  debugSize: CanvasRenderSize,
+  debugSize: CanvasRenderSize | null,
   maplibreSize: CanvasRenderSize,
 ) {
   const debugCanvas = state.debugCanvas.value
   const maplibreCanvas = state.maplibreCanvas.value
 
-  if (!debugCanvas || !maplibreCanvas) return
+  if (!maplibreCanvas) return
 
-  if (debugCanvas === maplibreCanvas) {
+  if (debugCanvas && debugCanvas === maplibreCanvas) {
     throw new Error('Bevy debug canvas and MapLibre canvas must be different canvases')
   }
 
   try {
-    debugCanvas.tabIndex = 0
+    if (debugCanvas) {
+      debugCanvas.tabIndex = 0
+    }
 
     const worker = new BevyWorker()
     state.bevyWorker.value = worker
 
-    const debugOffscreenCanvas = new OffscreenCanvas(debugSize.width, debugSize.height)
+    const debugOffscreenCanvas = debugSize
+      ? new OffscreenCanvas(debugSize.width, debugSize.height)
+      : null
     const textureOffscreenCanvas = new OffscreenCanvas(maplibreSize.width, maplibreSize.height)
 
     state.bevyInstance.value = wrap<BevyInstance>(worker)
     await state.bevyInstance.value.mount(
       transfer(textureOffscreenCanvas, [textureOffscreenCanvas]),
-      transfer(debugOffscreenCanvas, [debugOffscreenCanvas]),
+      debugOffscreenCanvas
+        ? transfer(debugOffscreenCanvas, [debugOffscreenCanvas])
+        : debugOffscreenCanvas,
       bevyAssetBaseUrl(),
       { ...state.mapViewSettings.value },
       { ...state.mapViewCameraSettings.value },
@@ -359,17 +371,17 @@ async function disposeBevyInstance(instanceId: string) {
   const bevyWorker = state.bevyWorker.value
   state.bevyWorker.value = null
 
-  if (bevyInstance) {
-    await releaseRemoteBevyInstance(bevyInstance, bevyWorker)
-  } else {
-    bevyWorker?.terminate()
-  }
-
   releaseAttachedCanvas(state.debugCanvas.value, instanceId)
   releaseAttachedCanvas(state.maplibreCanvas.value, instanceId)
 
   state.debugCanvas.value = null
   state.maplibreCanvas.value = null
+
+  if (bevyInstance) {
+    await releaseRemoteBevyInstance(bevyInstance, bevyWorker)
+  } else {
+    bevyWorker?.terminate()
+  }
 }
 
 async function releaseMountedBevyInstance(state: BevyInstanceState) {

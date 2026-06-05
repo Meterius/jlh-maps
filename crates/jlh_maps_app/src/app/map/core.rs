@@ -30,7 +30,7 @@ impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MapViewSettings::default());
 
-        app.add_systems(PreUpdate, (sync_window_cameras, sync_map_sun));
+        app.add_systems(PreUpdate, sync_map_sun);
     }
 }
 
@@ -38,8 +38,6 @@ impl Plugin for CorePlugin {
 #[serde(rename_all = "camelCase")]
 #[tsify(from_wasm_abi)]
 pub struct MapViewSettings {
-    pub enable_window_cameras: bool,
-
     pub enable_buildings: bool,
     pub enable_waters: bool,
     pub enable_trees: bool,
@@ -53,7 +51,6 @@ pub struct MapViewSettings {
 impl Default for MapViewSettings {
     fn default() -> Self {
         Self {
-            enable_window_cameras: false,
             enable_buildings: true,
             enable_waters: true,
             enable_trees: true,
@@ -67,15 +64,6 @@ impl Default for MapViewSettings {
 
 #[derive(Debug, Reflect, Component)]
 struct MapViewShadowLight;
-
-fn sync_window_cameras(
-    mv_settings: Res<MapViewSettings>,
-    mut cams: Query<&mut Camera, With<GameViewCamera>>,
-) {
-    for mut cam in cams.iter_mut() {
-        cam.is_active = mv_settings.enable_window_cameras;
-    }
-}
 
 fn sync_map_sun(
     mv_settings: Res<MapViewSettings>,
@@ -163,31 +151,29 @@ pub fn spawn_map_view(
         ..default()
     };
 
-    commands.entity(map_view_eid).with_children(|parent| {
-        parent.spawn((
-            Transform::default(),
-            CellCoord::default(),
-            Camera3d::default(),
-            Camera {
-                clear_color: ClearColorConfig::Custom(Color::NONE),
-                output_mode: CameraOutputMode::Write {
+    if let Some(debug_eid) = app_windows.debug_eid {
+        commands.entity(map_view_eid).with_children(|parent| {
+            parent.spawn((
+                Transform::default(),
+                CellCoord::default(),
+                Camera3d::default(),
+                Camera {
                     clear_color: ClearColorConfig::Custom(Color::NONE),
-                    blend_state: None,
+                    output_mode: CameraOutputMode::Write {
+                        clear_color: ClearColorConfig::Custom(Color::NONE),
+                        blend_state: None,
+                    },
+                    ..default()
                 },
-                ..default()
-            },
-            ambient_light.clone(),
-            RenderTarget::Window(WindowRef::Entity(
-                app_windows
-                    .debug_eid
-                    .expect("debug offscreen window to be set"),
-            )),
-            GameViewCamera,
-            MapViewCamera {
-                maplibre_int_eid: maplibre_integration_eid,
-            },
-        ));
-    });
+                ambient_light.clone(),
+                RenderTarget::Window(WindowRef::Entity(debug_eid)),
+                GameViewCamera,
+                MapViewCamera {
+                    maplibre_int_eid: maplibre_integration_eid,
+                },
+            ));
+        });
+    }
 
     commands.entity(map_view_eid).with_children(|parent| {
         parent.spawn((

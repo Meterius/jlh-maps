@@ -55,7 +55,7 @@ struct ManagedBevyApp {
 impl BevyInstance {
     #[wasm_bindgen(constructor)]
     pub fn new(
-        debug_canvas: OffscreenCanvas,
+        debug_canvas: Option<OffscreenCanvas>,
         texture_canvas: OffscreenCanvas,
         asset_base_url: String,
     ) -> Self {

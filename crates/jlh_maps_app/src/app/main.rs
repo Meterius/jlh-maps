@@ -13,6 +13,8 @@ use crate::app::offscreen_window_handle::OffscreenWindowHandle;
 use crate::app::window_events::WindowInstanceRef;
 use bevy::asset::{AssetMetaCheck, AssetPlugin};
 use bevy::audio::AudioPlugin;
+use bevy::gizmos::GizmoPlugin;
+use bevy::gizmos_render::GizmoRenderPlugin;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
@@ -22,6 +24,8 @@ use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use bevy::render::view::ExtractedWindows;
 use bevy::render::{Render, RenderApp};
 use bevy::render::{RenderPlugin, RenderSystems};
+use bevy::ui::UiPlugin;
+use bevy::ui_render::UiRenderPlugin;
 use bevy::window::{
     CompositeAlphaMode, ExitCondition, PresentMode, PrimaryWindow, RawHandleWrapper, Window,
     WindowPlugin, WindowResolution, WindowWrapper,
@@ -69,7 +73,7 @@ pub struct AppWindows {
 }
 
 pub struct OffscreenCanvases {
-    pub debug: OffscreenCanvas,
+    pub debug: Option<OffscreenCanvas>,
     pub texture: OffscreenCanvas,
 }
 
@@ -83,10 +87,17 @@ impl ExtractResource for AppWindows {
 
 pub fn setup_app(
     app: &mut App,
-    debug_canvas: OffscreenCanvas,
+    debug_canvas: Option<OffscreenCanvas>,
     texture_canvas: OffscreenCanvas,
     asset_base_url: String,
 ) {
+    let debug_window_enabled = debug_canvas.is_some();
+    let primary_window = if let Some(debug_canvas) = debug_canvas.as_ref() {
+        make_offscreen_window("Debug Offscreen Window", debug_canvas)
+    } else {
+        make_offscreen_window("Map Texture Offscreen Window", &texture_canvas)
+    };
+
     app.add_plugins((
         DefaultPlugins
             .set(AssetPlugin {
@@ -95,19 +106,7 @@ pub fn setup_app(
                 ..default()
             })
             .set(WindowPlugin {
-                primary_window: Some(Window {
-                    canvas: None,
-                    title: "Debug Offscreen Window".to_string(),
-                    resolution: WindowResolution::new(debug_canvas.width(), debug_canvas.height()),
-                    present_mode: PresentMode::AutoNoVsync,
-                    transparent: true,
-                    composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
-                    // used by winit which is not used, if enabled causes bevy_egui
-                    // to try to install hidden input in DOM which is unavailable in workers causing
-                    // a panic
-                    prevent_default_event_handling: false,
-                    ..default()
-                }),
+                primary_window: Some(primary_window),
                 exit_condition: ExitCondition::DontExit,
                 ..default()
             })
@@ -123,13 +122,14 @@ pub fn setup_app(
             .disable::<WinitPlugin>()
             .disable::<TransformPlugin>()
             .disable::<GilrsPlugin>()
-            .disable::<AudioPlugin>(),
+            .disable::<AudioPlugin>()
+            .disable::<UiPlugin>()
+            .disable::<UiRenderPlugin>()
+            .disable::<GizmoPlugin>()
+            .disable::<GizmoRenderPlugin>(),
         MaterialsPlugin,
         BigSpaceDefaultPlugins,
-        EguiPlugin::default(),
         SettingsPlugin {},
-        DebugGizmosPlugin,
-        EditorPlugin {},
         MaplibreGlJsPlugin,
         MapPlugin,
         ExtractResourcePlugin::<AppWindows>::default(),
@@ -137,7 +137,25 @@ pub fn setup_app(
         WasmThreadedAppPlugin,
     ));
 
-    if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+    if debug_window_enabled {
+        app.add_plugins((
+            UiPlugin,
+            UiRenderPlugin,
+            GizmoPlugin,
+            GizmoRenderPlugin,
+            EguiPlugin::default(),
+            DebugGizmosPlugin,
+            EditorPlugin {},
+        ));
+
+        app.insert_resource(EguiGlobalSettings {
+            // requires winit which is disabled as windows need manual management
+            enable_ime: false,
+            ..default()
+        });
+    }
+
+    if debug_window_enabled && let Some(render_app) = app.get_sub_app_mut(RenderApp) {
         render_app.add_systems(
             Render,
             release_inactive_debug_window_surface
@@ -149,12 +167,6 @@ pub fn setup_app(
     app.insert_resource(ClearColor(Color::NONE));
 
     app.insert_resource(DirectionalLightShadowMap { size: 4096 });
-
-    app.insert_resource(EguiGlobalSettings {
-        // requires winit which is disabled as windows need manual management
-        enable_ime: false,
-        ..default()
-    });
 
     app.insert_resource(AppWindows {
         debug_eid: None,
@@ -170,6 +182,22 @@ pub fn setup_app(
     app.add_systems(PreUpdate, setup_map_for_integration);
 }
 
+fn make_offscreen_window(title: &str, canvas: &OffscreenCanvas) -> Window {
+    Window {
+        canvas: None,
+        title: title.to_string(),
+        resolution: WindowResolution::new(canvas.width(), canvas.height()),
+        present_mode: PresentMode::AutoNoVsync,
+        transparent: true,
+        composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
+        // used by winit which is not used, if enabled causes bevy_egui
+        // to try to install hidden input in DOM which is unavailable in workers causing
+        // a panic
+        prevent_default_event_handling: false,
+        ..default()
+    }
+}
+
 fn raw_handle(canvas: &OffscreenCanvas) -> RawHandleWrapper {
     RawHandleWrapper::new(&WindowWrapper::new(OffscreenWindowHandle::new(canvas))).expect(
         "to create offscreen raw handle wrapper. If this fails, multiple threads are trying to access the same canvas!",
@@ -182,30 +210,28 @@ fn setup_offscreen_windows(
     mut app_windows: ResMut<AppWindows>,
     primary_windows: Query<Entity, (Added<Window>, With<PrimaryWindow>)>,
 ) {
-    if app_windows.debug_eid.is_none()
-        && let Some(window_eid) = primary_windows.iter().next()
-    {
+    let Some(primary_window_eid) = primary_windows.iter().next() else {
+        return;
+    };
+
+    if let Some(debug_canvas) = canvases.debug.as_ref() {
+        if app_windows.debug_eid.is_none() {
+            commands
+                .entity(primary_window_eid)
+                .insert(raw_handle(debug_canvas));
+            app_windows.debug_eid = Some(primary_window_eid);
+        }
+    } else if app_windows.texture_eid.is_none() {
         commands
-            .entity(window_eid)
-            .insert(raw_handle(&canvases.debug));
-        app_windows.debug_eid = Some(window_eid);
+            .entity(primary_window_eid)
+            .insert(raw_handle(&canvases.texture));
+        app_windows.texture_eid = Some(primary_window_eid);
     }
 
-    if app_windows.texture_eid.is_none() {
+    if canvases.debug.is_some() && app_windows.texture_eid.is_none() {
         let texture_window_eid = commands
             .spawn((
-                Window {
-                    canvas: None,
-                    title: "Map Texture Offscreen Window".to_string(),
-                    resolution: WindowResolution::new(
-                        canvases.texture.width(),
-                        canvases.texture.height(),
-                    ),
-                    present_mode: PresentMode::AutoNoVsync,
-                    transparent: true,
-                    composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
-                    ..default()
-                },
+                make_offscreen_window("Map Texture Offscreen Window", &canvases.texture),
                 raw_handle(&canvases.texture),
             ))
             .id();
@@ -237,11 +263,11 @@ fn setup_map_for_integration(
     windows: Res<AppWindows>,
     integrations: Query<(Entity, &MaplibreMapIntegration), Added<MaplibreMapIntegration>>,
 ) {
-    let (Some(debug_eid), Some(texture_eid)) = (windows.debug_eid, windows.texture_eid) else {
+    let Some(texture_eid) = windows.texture_eid else {
         return;
     };
     let app_windows = AppWindows {
-        debug_eid: Some(debug_eid),
+        debug_eid: windows.debug_eid,
         texture_eid: Some(texture_eid),
     };
     for (integration_eid, _) in integrations.iter() {

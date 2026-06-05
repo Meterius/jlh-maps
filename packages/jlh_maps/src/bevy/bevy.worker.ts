@@ -193,18 +193,17 @@ class WorkerBevyInstance {
   private debugWindow: BevyWindowInstanceRef | null = null
   private textureWindow: BevyWindowInstanceRef | null = null
 
-  private mapViewSettings: MapViewSettings | null = null
   private secondaryTickScheduled = false
 
   private readonly tickGate = new TickGate()
 
   async mount(
     textureCanvas: OffscreenCanvas,
-    debugCanvas: OffscreenCanvas,
+    debugCanvas: OffscreenCanvas | null,
     assetBaseUrl: string,
     mapViewSettings: MapViewSettings,
     mapViewCameraSettings: MapViewCameraSettings,
-    debugSize: CanvasRenderSize,
+    debugSize: CanvasRenderSize | null,
     textureSize: CanvasRenderSize,
   ) {
     const wasmModule = await ensureInitialized()
@@ -235,13 +234,16 @@ class WorkerBevyInstance {
     this.debugCanvas = null
   }
 
-  resize(debugSize: CanvasRenderSize, textureSize: CanvasRenderSize): boolean {
+  resize(debugSize: CanvasRenderSize | null, textureSize: CanvasRenderSize): boolean {
     this.refreshWindowRefs()
 
-    if (!this.debugWindow || !this.textureWindow) return false
+    if (!this.textureWindow) return false
+    if (this.debugCanvas && !this.debugWindow) return false
 
     this.resizeCanvases(debugSize, textureSize)
-    this.debugWindow.resize(debugSize.width, debugSize.height, debugSize.scaleFactor)
+    if (this.debugWindow && debugSize) {
+      this.debugWindow.resize(debugSize.width, debugSize.height, debugSize.scaleFactor)
+    }
     this.textureWindow.resize(textureSize.width, textureSize.height, textureSize.scaleFactor)
 
     return true
@@ -250,8 +252,7 @@ class WorkerBevyInstance {
   async tick(frameIdx: number) {
     const bevyInstance = this.bevyInstance
     const textureCanvas = this.textureCanvas
-    const debugCanvas = this.debugCanvas
-    if (!bevyInstance || !textureCanvas || !debugCanvas) return null
+    if (!bevyInstance || !textureCanvas) return null
 
     // since instance and integration messages are handled by separate event listeners,
     // even if the messages are sent in order from the main thread, they may be processed out-of-order
@@ -269,7 +270,7 @@ class WorkerBevyInstance {
     try {
       const [textureBitmap, debugBitmap] = await Promise.all([
         createImageBitmap(textureCanvas),
-        this.mapViewSettings?.enableWindowCameras ? createImageBitmap(debugCanvas) : null,
+        this.debugCanvas ? createImageBitmap(this.debugCanvas) : null,
       ])
 
       return transfer(
@@ -315,14 +316,11 @@ class WorkerBevyInstance {
   }
 
   set_map_view_settings(settings: MapViewSettings) {
-    if (this.bevyInstance) {
-      this.bevyInstance.set_map_view_settings(settings)
-      this.mapViewSettings = settings
-    }
+    this.bevyInstance?.set_map_view_settings(settings)
   }
 
-  private resizeCanvases(debugSize: CanvasRenderSize, textureSize: CanvasRenderSize) {
-    if (this.debugCanvas) {
+  private resizeCanvases(debugSize: CanvasRenderSize | null, textureSize: CanvasRenderSize) {
+    if (this.debugCanvas && debugSize) {
       this.debugCanvas.width = debugSize.width
       this.debugCanvas.height = debugSize.height
     }

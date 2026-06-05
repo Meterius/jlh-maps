@@ -41,7 +41,7 @@
             <span>Shadows</span>
           </label>
           <label class="debug-toggle">
-            <input v-model="useBevyRet.mapViewSettings.value.enableWindowCameras" type="checkbox" />
+            <input v-model="mapViewStore.bevyCanvasEnabled" type="checkbox" />
             <span>Debug canvas</span>
           </label>
         </div>
@@ -105,6 +105,7 @@ import type { TreeItem } from '@nuxt/ui'
 import { useSortable } from '@vueuse/integrations/useSortable'
 import { useBevy } from '@/bevy'
 import { createDynamicComposable } from '@/composables/helper.ts'
+import { useMapViewStoreOrThrow } from '@/views/map-view/map-view-store.ts'
 
 const props = defineProps<{
   map: MapLibreMap
@@ -115,6 +116,8 @@ const useBevyRet = createDynamicComposable(
   () => props.bevyInstanceId,
   (instanceId) => (instanceId !== undefined ? useBevy(instanceId) : null),
 )
+
+const { mapViewStore } = useMapViewStoreOrThrow()
 
 const showTileBoundaries = computed({
   get: () => props.map.showTileBoundaries,

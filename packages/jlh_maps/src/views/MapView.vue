@@ -1,7 +1,7 @@
 <template>
   <div style="position: absolute; left: 0; right: 0; top: 0; bottom: 0">
     <div
-      :style="`position: absolute; width: 100%; height: ${bevyMapViewSettings?.enableWindowCameras ? '50%' : '100%'}; top: 0`"
+      :style="`position: absolute; width: 100%; height: ${debugCanvasVisible ? '50%' : '100%'}; top: 0`"
     >
       <mgl-map
         :map-key="mapKey"
@@ -120,18 +120,17 @@
           color="neutral"
           active-color="primary"
           variant="outline-solid"
-          :active="bevyMapViewSettings?.enableWindowCameras"
+          :active="debugCanvasVisible"
           size="xl"
           class="pointer-events-auto cursor-pointer"
           icon="lucide:bug"
           title="Show bevy"
           aria-label="Show bevy"
-          :aria-pressed="bevyMapViewSettings?.enableWindowCameras"
-          :disabled="!bevyMapViewSettings"
+          :aria-pressed="debugCanvasVisible"
+          :disabled="!currentBaseStyleLayerSettings.bevyEnabled"
           @click="
             () => {
-              if (bevyMapViewSettings)
-                bevyMapViewSettings.enableWindowCameras = !bevyMapViewSettings.enableWindowCameras
+              mapViewStore.bevyCanvasEnabled = !mapViewStore.bevyCanvasEnabled
             }
           "
         />
@@ -436,10 +435,7 @@
       </div>
     </div>
 
-    <div
-      v-show="bevyMapViewSettings?.enableWindowCameras"
-      :style="`position: absolute; width: ${bevyMapViewSettings?.enableWindowCameras ? '100%' : '10px'}; height: ${bevyMapViewSettings?.enableWindowCameras ? '50%' : '1px'}; bottom: 0`"
-    >
+    <div v-if="debugCanvasVisible" style="position: absolute; width: 100%; height: 50%; bottom: 0">
       <canvas
         ref="bevyDebugCanvas"
         :id="bevyCanvasId"
@@ -506,7 +502,7 @@ import {
   useNavigationControl,
 } from '@/composables/maplibre/controls'
 import {
-  createToggledComposable,
+  createDynamicComposable,
   onScopeDisposeLifo,
   watchDefinedOnce,
 } from '@/composables/helper.ts'
@@ -595,13 +591,22 @@ const rainfallRasterSourceProvider = useRainfallRasterProvider({
 
 const bevyCanvasId = `bevy-canvas-${mapKey}`
 const bevyDebugCanvas = ref<HTMLCanvasElement | null>(null)
+const debugCanvasVisible = computed(
+  () => currentBaseStyleLayerSettings.value.bevyEnabled && mapViewStore.value.bevyCanvasEnabled,
+)
 
-const bevyMount = createToggledComposable(
-  () => currentBaseStyleLayerSettings.value.bevyEnabled,
-  () => {
+const bevyMount = createDynamicComposable(
+  () => ({
+    enabled: currentBaseStyleLayerSettings.value.bevyEnabled,
+    debugEnabled: mapViewStore.value.bevyCanvasEnabled,
+  }),
+  ({ enabled, debugEnabled }) => {
+    if (!enabled) return null
+
     const mountBevyRet = mountBevy(
-      () => bevyDebugCanvas.value ?? null,
+      () => (debugEnabled ? (bevyDebugCanvas.value ?? null) : null),
       () => mapInstance.map?.getCanvas() ?? null,
+      debugEnabled,
     )
 
     const useBevyRet = useBevy(mountBevyRet.instanceId)
@@ -609,22 +614,6 @@ const bevyMount = createToggledComposable(
     const useMaplibreIntegrationRet = useMaplibreIntegration(mountBevyRet.instanceId, mapKey, {
       sourceIds: ['openmaptiles'],
     })
-
-    syncRef(
-      computed({
-        get: () => mapViewStore.value.bevyCanvasEnabled,
-        set: (value) => {
-          mapViewStore.value.bevyCanvasEnabled = value
-        },
-      }),
-      computed({
-        get: () => useBevyRet.mapViewSettings.value.enableWindowCameras,
-        set: (value) => {
-          useBevyRet.mapViewSettings.value.enableWindowCameras = value
-        },
-      }),
-      { immediate: true },
-    )
 
     syncRef(
       computed({
@@ -742,7 +731,6 @@ const closePendingBevyFrameBitmap = () => {
 
 let pendingBevyFrame = 0
 let bevyTickFailure = false
-
 const tickBevyAndProduceFrame = async (transform?: unknown) => {
   const mountedBevy = bevyMount.value
   if (!mountedBevy) {
@@ -782,13 +770,15 @@ const tickBevyAndProduceFrame = async (transform?: unknown) => {
   bevyFrameBitmap.value = frame.textureBitmap
   previousFrameBitmap?.close()
 
-  if (bevyDebugCanvas.value) {
+  if (frame.debugBitmap && bevyDebugCanvas.value) {
     const context = bevyDebugCanvas.value.getContext('bitmaprenderer')
     if (context) {
       context.transferFromImageBitmap(frame.debugBitmap)
     } else {
-      frame.debugBitmap?.close()
+      frame.debugBitmap.close()
     }
+  } else {
+    frame.debugBitmap?.close()
   }
 }
 
