@@ -31,24 +31,24 @@ pub enum TileBucketSystems {
 
 #[derive(Component)]
 pub struct TileBucketManager {
-    pub maplibre_int_id: Entity,
+    pub maplibre_int_eid: Entity,
     on_spawn: TileBucketOnSpawn,
-    spawned_buckets_by_source: HashMap<String, HashMap<CanonicalTileId, Entity>>,
+    spawned_bucket_eids_by_source: HashMap<String, HashMap<CanonicalTileId, Entity>>,
 }
 
 impl TileBucketManager {
-    pub fn new(maplibre_int_id: Entity, on_spawn: TileBucketOnSpawn) -> Self {
+    pub fn new(maplibre_int_eid: Entity, on_spawn: TileBucketOnSpawn) -> Self {
         Self {
-            maplibre_int_id,
+            maplibre_int_eid,
             on_spawn,
-            spawned_buckets_by_source: HashMap::default(),
+            spawned_bucket_eids_by_source: HashMap::default(),
         }
     }
 }
 
 #[derive(Clone, Component)]
 pub struct TileBucket {
-    pub maplibre_int_id: Entity,
+    pub maplibre_int_eid: Entity,
     pub source_id: String,
     pub tile_id: CanonicalTileId,
 
@@ -61,20 +61,20 @@ fn sync_spawned_buckets(
     ml_data_query: Query<&MlData>,
     mut managers: Query<(Entity, &Grid, &mut TileBucketManager)>,
 ) {
-    for (manager_id, grid, mut manager) in managers.iter_mut() {
+    for (manager_eid, grid, mut manager) in managers.iter_mut() {
         let Some(ml_data) = ml_data_query
-            .get(manager.maplibre_int_id)
+            .get(manager.maplibre_int_eid)
             .ok()
             .soft_expect("")
         else {
             continue;
         };
 
-        let maplibre_int_id = manager.maplibre_int_id;
+        let maplibre_int_eid = manager.maplibre_int_eid;
         let on_spawn = manager.on_spawn;
         for (source_id, source) in &ml_data.sources {
-            let spawned_buckets = manager
-                .spawned_buckets_by_source
+            let spawned_bucket_eids = manager
+                .spawned_bucket_eids_by_source
                 .entry(source_id.clone())
                 .or_default();
 
@@ -83,29 +83,29 @@ fn sync_spawned_buckets(
                 .iter()
                 .filter(|tile_id| source.tiles.contains_key(*tile_id))
             {
-                if spawned_buckets.contains_key(tile_id) {
+                if spawned_bucket_eids.contains_key(tile_id) {
                     continue;
                 }
 
                 let bucket_eid = spawn_bucket(
                     &mut commands,
-                    maplibre_int_id,
-                    manager_id,
+                    maplibre_int_eid,
+                    manager_eid,
                     grid,
                     source_id,
                     *tile_id,
                     on_spawn,
                 );
-                spawned_buckets.insert(*tile_id, bucket_eid);
+                spawned_bucket_eids.insert(*tile_id, bucket_eid);
             }
         }
 
         manager
-            .spawned_buckets_by_source
-            .retain(|source_id, spawned_buckets| {
+            .spawned_bucket_eids_by_source
+            .retain(|source_id, spawned_bucket_eids| {
                 let source = ml_data.sources.get(source_id);
 
-                spawned_buckets.retain(|tile_id, bucket_eid| {
+                spawned_bucket_eids.retain(|tile_id, bucket_eid| {
                     let Some(source) = source else {
                         commands.entity(*bucket_eid).despawn();
                         return false;
@@ -133,8 +133,8 @@ fn sync_spawned_buckets(
 
 fn spawn_bucket(
     commands: &mut Commands,
-    maplibre_int_id: Entity,
-    manager_id: Entity,
+    maplibre_int_eid: Entity,
+    manager_eid: Entity,
     grid: &Grid,
     source_id: &str,
     tile_id: CanonicalTileId,
@@ -144,14 +144,14 @@ fn spawn_bucket(
     let (cell, translation) = grid.translation_to_grid(center);
 
     let bucket = TileBucket {
-        maplibre_int_id,
+        maplibre_int_eid,
         source_id: source_id.to_owned(),
         tile_id,
         center,
         half_extents,
     };
 
-    let bucket_id = commands
+    let bucket_eid = commands
         .spawn((
             Name::new(format!("Bucket {tile_id:?} ({source_id})")),
             cell,
@@ -161,8 +161,8 @@ fn spawn_bucket(
         ))
         .id();
 
-    on_spawn(commands.entity(bucket_id), &bucket);
-    commands.entity(manager_id).add_child(bucket_id);
+    on_spawn(commands.entity(bucket_eid), &bucket);
+    commands.entity(manager_eid).add_child(bucket_eid);
 
-    bucket_id
+    bucket_eid
 }

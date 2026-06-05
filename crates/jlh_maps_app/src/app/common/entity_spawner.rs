@@ -36,7 +36,7 @@ impl<M: EntitySpawnerMeta> Plugin for EntitySpawnerPlugin<M> {
 #[derive(Component)]
 pub struct EntitySpawner<M: EntitySpawnerMeta> {
     // entity which entities are spawned into
-    pub container_id: Entity,
+    pub container_eid: Entity,
     // global parameter
     pub params: M::Params,
     // item-level parameters for which entities are spawned/despawned
@@ -45,9 +45,9 @@ pub struct EntitySpawner<M: EntitySpawnerMeta> {
 }
 
 impl<M: EntitySpawnerMeta> EntitySpawner<M> {
-    pub fn new(container_id: Entity, params: M::Params, items: Vec<M::Item>) -> Self {
+    pub fn new(container_eid: Entity, params: M::Params, items: Vec<M::Item>) -> Self {
         Self {
-            container_id,
+            container_eid,
             params,
             items,
             _marker: PhantomData,
@@ -59,8 +59,8 @@ impl<M: EntitySpawnerMeta> EntitySpawner<M>
 where
     M::Params: Default,
 {
-    pub fn default(container_id: Entity, items: Vec<M::Item>) -> Self {
-        Self::new(container_id, Default::default(), items)
+    pub fn default(container_eid: Entity, items: Vec<M::Item>) -> Self {
+        Self::new(container_eid, Default::default(), items)
     }
 }
 
@@ -69,8 +69,8 @@ where
 pub struct EntitySpawnerChildOf<C: EntitySpawnerMeta>(#[relationship] Entity, PhantomData<C>);
 
 impl<C: EntitySpawnerMeta> EntitySpawnerChildOf<C> {
-    pub fn new(spawner: Entity) -> Self {
-        Self(spawner, PhantomData)
+    pub fn new(spawner_eid: Entity) -> Self {
+        Self(spawner_eid, PhantomData)
     }
 
     pub fn spawner(&self) -> Entity {
@@ -96,7 +96,7 @@ fn sync_entity_spawners<M: EntitySpawnerMeta>(
         Option<Ref<EntitySpawnerChildren<M>>>,
     )>,
 ) {
-    for (spawner_entity, spawner, children) in spawners.iter() {
+    for (spawner_eid, spawner, children) in spawners.iter() {
         if !spawner.is_changed() {
             continue;
         }
@@ -115,7 +115,7 @@ fn sync_entity_spawners<M: EntitySpawnerMeta>(
                     existing_children[index],
                     (
                         M::update_bundle(&spawner.params, index, &spawner.items[index]),
-                        ChildOf(spawner.container_id),
+                        ChildOf(spawner.container_eid),
                     ),
                 )
             })
@@ -129,8 +129,8 @@ fn sync_entity_spawners<M: EntitySpawnerMeta>(
                 (
                     M::spawn_bundle(&spawner.params, index, &spawner.items[index]),
                     M::update_bundle(&spawner.params, index, &spawner.items[index]),
-                    ChildOf(spawner.container_id),
-                    EntitySpawnerChildOf::<M>::new(spawner_entity),
+                    ChildOf(spawner.container_eid),
+                    EntitySpawnerChildOf::<M>::new(spawner_eid),
                 )
             })
             .collect::<Vec<_>>();
@@ -138,8 +138,8 @@ fn sync_entity_spawners<M: EntitySpawnerMeta>(
 
         // despawn children for removed items
 
-        for child in existing_children.iter().skip(target_len).copied() {
-            commands.entity(child).despawn();
+        for child_eid in existing_children.iter().skip(target_len).copied() {
+            commands.entity(child_eid).despawn();
         }
     }
 }

@@ -71,14 +71,14 @@ impl TileTaskBasedMeta for FeatureTileMeshMeta {
     }
 
     fn apply_data(
-        entity: Entity,
+        entity_eid: Entity,
         params: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
         _config: &Self::Config,
         state: &mut Self::State,
         data: Option<Self::Data>,
     ) -> Option<Self::Data> {
         let (commands, meshes) = params;
-        apply_mesh(commands, entity, state, data, meshes);
+        apply_mesh(commands, entity_eid, state, data, meshes);
         None
     }
 }
@@ -131,13 +131,13 @@ impl FeaturePlaneMeshBuffers {
 
 fn apply_mesh(
     commands: &mut Commands,
-    bucket_entity: Entity,
+    bucket_eid: Entity,
     state: &mut FeatureTileMeshState,
     data: Option<FeatureTileMeshData>,
     meshes: &mut Assets<Mesh>,
 ) {
     let Some(mesh) = data.and_then(FeatureTileMeshData::into_mesh) else {
-        commands.entity(bucket_entity).try_remove::<Mesh3d>();
+        commands.entity(bucket_eid).try_remove::<Mesh3d>();
         state.mesh_handle = None;
         return;
     };
@@ -149,7 +149,7 @@ fn apply_mesh(
     } else {
         let mesh_handle = meshes.add(mesh);
         state.mesh_handle = Some(mesh_handle.clone());
-        commands.entity(bucket_entity).insert(Mesh3d(mesh_handle));
+        commands.entity(bucket_eid).insert(Mesh3d(mesh_handle));
     }
 }
 

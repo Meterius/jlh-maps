@@ -16,7 +16,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 #[wasm_bindgen]
 pub struct WindowInstanceRef {
     pub(crate) instance: Weak<BevyInstanceInner>,
-    pub(crate) window_id: Entity,
+    pub(crate) window_eid: Entity,
 }
 
 impl WindowInstanceRef {
@@ -38,14 +38,14 @@ impl WindowInstanceRef {
         scale_factor: f32,
     ) -> prelude::Result<(), String> {
         self.execute(|world| {
-            resize_window(world, self.window_id, width, height, scale_factor);
+            resize_window(world, self.window_eid, width, height, scale_factor);
         })
     }
 
     pub fn forward_focus(&self, focused: bool) -> prelude::Result<(), String> {
         self.execute(|world| {
             let event = WindowFocused {
-                window: self.window_id,
+                window: self.window_eid,
                 focused,
             };
             world.write_message(event.clone());
@@ -56,7 +56,7 @@ impl WindowInstanceRef {
     pub fn forward_cursor_entered(&self) -> prelude::Result<(), String> {
         self.execute(|world| {
             let event = CursorEntered {
-                window: self.window_id,
+                window: self.window_eid,
             };
             world.write_message(event.clone());
             world.write_message(BevyWindowEvent::CursorEntered(event));
@@ -65,12 +65,12 @@ impl WindowInstanceRef {
 
     pub fn forward_cursor_left(&self) -> prelude::Result<(), String> {
         self.execute(|world| {
-            if let Some(mut window_component) = world.get_mut::<Window>(self.window_id) {
+            if let Some(mut window_component) = world.get_mut::<Window>(self.window_eid) {
                 window_component.set_cursor_position(None);
             }
 
             let event = CursorLeft {
-                window: self.window_id,
+                window: self.window_eid,
             };
             world.write_message(event.clone());
             world.write_message(BevyWindowEvent::CursorLeft(event));
@@ -88,12 +88,12 @@ impl WindowInstanceRef {
             let position = Vec2::new(x, y);
             let delta = Vec2::new(delta_x, delta_y);
 
-            if let Some(mut window_component) = world.get_mut::<Window>(self.window_id) {
+            if let Some(mut window_component) = world.get_mut::<Window>(self.window_eid) {
                 window_component.set_cursor_position(Some(position));
             }
 
             let event = CursorMoved {
-                window: self.window_id,
+                window: self.window_eid,
                 position,
                 delta: Some(delta),
             };
@@ -109,7 +109,7 @@ impl WindowInstanceRef {
             let event = MouseButtonInput {
                 button: web_mouse_button(button),
                 state: button_state(pressed),
-                window: self.window_id,
+                window: self.window_eid,
             };
             world.write_message(event);
             world.write_message(BevyWindowEvent::MouseButtonInput(event));
@@ -131,7 +131,7 @@ impl WindowInstanceRef {
                 },
                 x: delta_x,
                 y: -delta_y,
-                window: self.window_id,
+                window: self.window_eid,
             };
             world.write_message(event);
             world.write_message(BevyWindowEvent::MouseWheel(event));
@@ -157,7 +157,7 @@ impl WindowInstanceRef {
                 state: button_state(pressed),
                 text,
                 repeat,
-                window: self.window_id,
+                window: self.window_eid,
             };
             world.write_message(event.clone());
             world.write_message(BevyWindowEvent::KeyboardInput(event));
@@ -165,9 +165,15 @@ impl WindowInstanceRef {
     }
 }
 
-fn resize_window(world: &mut World, entity: Entity, width: u32, height: u32, scale_factor: f32) {
+fn resize_window(
+    world: &mut World,
+    window_eid: Entity,
+    width: u32,
+    height: u32,
+    scale_factor: f32,
+) {
     let Some((scale_factor_changed, resized)) =
-        world.get_mut::<Window>(entity).map(|mut window| {
+        world.get_mut::<Window>(window_eid).map(|mut window| {
             let scale_factor = scale_factor.max(1.0);
             let scale_factor_changed = (window.scale_factor() - scale_factor).abs() > f32::EPSILON;
             let size_changed = window.width() as u32 != width || window.height() as u32 != height;
@@ -180,7 +186,7 @@ fn resize_window(world: &mut World, entity: Entity, width: u32, height: u32, sca
             window.resolution.set(width as f32, height as f32);
 
             let resized = WindowResized {
-                window: entity,
+                window: window_eid,
                 width: window.width(),
                 height: window.height(),
             };
@@ -192,7 +198,7 @@ fn resize_window(world: &mut World, entity: Entity, width: u32, height: u32, sca
 
     if scale_factor_changed {
         let event = WindowScaleFactorChanged {
-            window: entity,
+            window: window_eid,
             scale_factor: scale_factor.max(1.0) as f64,
         };
         world.write_message(event.clone());

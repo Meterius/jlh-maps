@@ -36,36 +36,36 @@ use web_sys::OffscreenCanvas;
 #[wasm_bindgen]
 impl BevyInstance {
     pub fn get_debug_window(&self) -> Result<Option<WindowInstanceRef>, String> {
-        let window_id = self.execute(|world| {
+        let window_eid = self.execute(|world| {
             world
                 .get_resource::<AppWindows>()
-                .and_then(|windows| windows.debug)
+                .and_then(|windows| windows.debug_eid)
         })?;
 
-        Ok(window_id.map(|window_id| WindowInstanceRef {
+        Ok(window_eid.map(|window_eid| WindowInstanceRef {
             instance: self.weak_inner(),
-            window_id,
+            window_eid,
         }))
     }
 
     pub fn get_texture_window(&self) -> Result<Option<WindowInstanceRef>, String> {
-        let window_id = self.execute(|world| {
+        let window_eid = self.execute(|world| {
             world
                 .get_resource::<AppWindows>()
-                .and_then(|windows| windows.texture)
+                .and_then(|windows| windows.texture_eid)
         })?;
 
-        Ok(window_id.map(|window_id| WindowInstanceRef {
+        Ok(window_eid.map(|window_eid| WindowInstanceRef {
             instance: self.weak_inner(),
-            window_id,
+            window_eid,
         }))
     }
 }
 
 #[derive(Clone, Resource)]
 pub struct AppWindows {
-    pub debug: Option<Entity>,
-    pub texture: Option<Entity>,
+    pub debug_eid: Option<Entity>,
+    pub texture_eid: Option<Entity>,
 }
 
 pub struct OffscreenCanvases {
@@ -157,8 +157,8 @@ pub fn setup_app(
     });
 
     app.insert_resource(AppWindows {
-        debug: None,
-        texture: None,
+        debug_eid: None,
+        texture_eid: None,
     });
 
     app.insert_non_send_resource(OffscreenCanvases {
@@ -182,15 +182,17 @@ fn setup_offscreen_windows(
     mut app_windows: ResMut<AppWindows>,
     primary_windows: Query<Entity, (Added<Window>, With<PrimaryWindow>)>,
 ) {
-    if app_windows.debug.is_none()
-        && let Some(entity) = primary_windows.iter().next()
+    if app_windows.debug_eid.is_none()
+        && let Some(window_eid) = primary_windows.iter().next()
     {
-        commands.entity(entity).insert(raw_handle(&canvases.debug));
-        app_windows.debug = Some(entity);
+        commands
+            .entity(window_eid)
+            .insert(raw_handle(&canvases.debug));
+        app_windows.debug_eid = Some(window_eid);
     }
 
-    if app_windows.texture.is_none() {
-        let entity = commands
+    if app_windows.texture_eid.is_none() {
+        let texture_window_eid = commands
             .spawn((
                 Window {
                     canvas: None,
@@ -207,7 +209,7 @@ fn setup_offscreen_windows(
                 raw_handle(&canvases.texture),
             ))
             .id();
-        app_windows.texture = Some(entity);
+        app_windows.texture_eid = Some(texture_window_eid);
     }
 
     info!("Setup offscreen Bevy windows");
@@ -217,10 +219,10 @@ fn release_inactive_debug_window_surface(
     offscreen_windows: Res<AppWindows>,
     mut extracted_windows: ResMut<ExtractedWindows>,
 ) {
-    let Some(debug_window) = offscreen_windows.debug else {
+    let Some(debug_window_eid) = offscreen_windows.debug_eid else {
         return;
     };
-    let Some(window) = extracted_windows.get_mut(&debug_window) else {
+    let Some(window) = extracted_windows.get_mut(&debug_window_eid) else {
         return;
     };
 
@@ -235,14 +237,14 @@ fn setup_map_for_integration(
     windows: Res<AppWindows>,
     integrations: Query<(Entity, &MaplibreMapIntegration), Added<MaplibreMapIntegration>>,
 ) {
-    let (Some(debug), Some(texture)) = (windows.debug, windows.texture) else {
+    let (Some(debug_eid), Some(texture_eid)) = (windows.debug_eid, windows.texture_eid) else {
         return;
     };
     let app_windows = AppWindows {
-        debug: Some(debug),
-        texture: Some(texture),
+        debug_eid: Some(debug_eid),
+        texture_eid: Some(texture_eid),
     };
-    for (int_entity, _) in integrations.iter() {
-        spawn_map_view(&mut commands, int_entity, &app_windows);
+    for (integration_eid, _) in integrations.iter() {
+        spawn_map_view(&mut commands, integration_eid, &app_windows);
     }
 }

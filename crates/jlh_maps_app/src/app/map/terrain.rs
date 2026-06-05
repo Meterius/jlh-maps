@@ -55,8 +55,8 @@ impl FromWorld for TerrainMaterial {
 
 #[derive(Component)]
 pub struct TerrainTileManager {
-    pub maplibre_int_id: Entity,
-    pub spawned_tiles: HashMap<CanonicalTileId, Entity>,
+    pub maplibre_int_eid: Entity,
+    pub spawned_tile_eids: HashMap<CanonicalTileId, Entity>,
 }
 
 fn sync_spawned_tiles(
@@ -67,20 +67,20 @@ fn sync_spawned_tiles(
     flat_mesh: Res<TerrainFlatMesh>,
     material: Res<TerrainMaterial>,
 ) {
-    for (manager_id, mut manager) in managers.iter_mut() {
-        let maplibre_int_id = manager.maplibre_int_id;
+    for (manager_eid, mut manager) in managers.iter_mut() {
+        let maplibre_int_eid = manager.maplibre_int_eid;
 
-        let Some(ml_terrain) = ml_terrains.get(maplibre_int_id).ok().soft_expect("") else {
+        let Some(ml_terrain) = ml_terrains.get(maplibre_int_eid).ok().soft_expect("") else {
             continue;
         };
-        let Some(grid) = grids.get(manager_id).ok().soft_expect("") else {
+        let Some(grid) = grids.get(manager_eid).ok().soft_expect("") else {
             continue;
         };
 
         for &tile_id in ml_terrain.active_tile_ids.iter() {
-            if let Entry::Vacant(entry) = manager.spawned_tiles.entry(tile_id) {
+            if let Entry::Vacant(entry) = manager.spawned_tile_eids.entry(tile_id) {
                 let (tile_cell, tile_transform) = terrain_tile_transform(grid, tile_id);
-                let tile_e_id = commands
+                let tile_eid = commands
                     .spawn((
                         Name::new(format!("Terrain Tile {tile_id:?}")),
                         tile_transform,
@@ -91,7 +91,7 @@ fn sync_spawned_tiles(
                         DebugAabbGizmo,
                         NotShadowCaster,
                         TerrainTile {
-                            maplibre_int_id,
+                            maplibre_int_eid,
                             maplibre_tile_id: tile_id,
                             terrain_hash: None,
                             pending_mesh_task: None,
@@ -102,31 +102,31 @@ fn sync_spawned_tiles(
                         ]),
                     ))
                     .id();
-                commands.entity(manager_id).add_child(tile_e_id);
-                entry.insert(tile_e_id);
+                commands.entity(manager_eid).add_child(tile_eid);
+                entry.insert(tile_eid);
             }
         }
 
-        for (tile_id, tile_entity) in &manager.spawned_tiles {
+        for (tile_id, tile_eid) in &manager.spawned_tile_eids {
             let visibility = if ml_terrain.active_tile_ids.contains(tile_id) {
                 Visibility::Inherited
             } else {
                 Visibility::Hidden
             };
-            commands.entity(*tile_entity).insert(visibility);
+            commands.entity(*tile_eid).insert(visibility);
         }
 
-        for (_, tile_entity) in manager.spawned_tiles.extract_if(|tile_id, _| {
+        for (_, tile_eid) in manager.spawned_tile_eids.extract_if(|tile_id, _| {
             !ml_terrain.active_tile_ids.contains(tile_id) && !ml_terrain.tiles.contains_key(tile_id)
         }) {
-            commands.entity(tile_entity).despawn();
+            commands.entity(tile_eid).despawn();
         }
     }
 }
 
 #[derive(Component)]
 pub struct TerrainTile {
-    pub maplibre_int_id: Entity,
+    pub maplibre_int_eid: Entity,
     pub maplibre_tile_id: CanonicalTileId,
     pub terrain_hash: Option<u64>,
     pending_mesh_task: Option<PendingTerrainMeshTask>,
@@ -145,7 +145,7 @@ fn sync_tiles(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     for (mut tile, mut tile_mesh) in tiles.iter_mut() {
-        let Some(ml_terrain) = ml_terrains.get(tile.maplibre_int_id).ok().soft_expect("") else {
+        let Some(ml_terrain) = ml_terrains.get(tile.maplibre_int_eid).ok().soft_expect("") else {
             continue;
         };
 

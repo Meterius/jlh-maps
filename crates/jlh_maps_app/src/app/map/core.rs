@@ -104,27 +104,27 @@ fn map_sun_direction(settings: &MapViewSettings) -> Vec3 {
 
 #[derive(Debug, Reflect, Component)]
 pub struct MapView {
-    pub maplibre_int_id: Entity,
+    pub maplibre_int_eid: Entity,
 }
 
 pub fn spawn_map_view(
     commands: &mut Commands,
-    maplibre_integration_id: Entity,
+    maplibre_integration_eid: Entity,
     app_windows: &AppWindows,
 ) {
-    let map_view_id = commands
+    let map_view_eid = commands
         .spawn((
             Name::new("Map View"),
             BigSpaceRootBundle::default(),
             Visibility::default(),
             MapView {
-                maplibre_int_id: maplibre_integration_id,
+                maplibre_int_eid: maplibre_integration_eid,
             },
             TerrainTileManager {
-                maplibre_int_id: maplibre_integration_id,
-                spawned_tiles: HashMap::default(),
+                maplibre_int_eid: maplibre_integration_eid,
+                spawned_tile_eids: HashMap::default(),
             },
-            make_bucket_manager(maplibre_integration_id),
+            make_bucket_manager(maplibre_integration_eid),
         ))
         .id();
 
@@ -135,7 +135,7 @@ pub fn spawn_map_view(
     let maximum_distance = (world_per_meter * SHADOW_MAX_DISTANCE_METERS) as f32;
     let minimum_distance = (world_per_meter * SHADOW_MIN_DISTANCE_METERS) as f32;
 
-    commands.entity(map_view_id).with_child((
+    commands.entity(map_view_eid).with_child((
         DirectionalLight {
             color: Color::WHITE,
             illuminance: 4000.,
@@ -163,7 +163,7 @@ pub fn spawn_map_view(
         ..default()
     };
 
-    commands.entity(map_view_id).with_children(|parent| {
+    commands.entity(map_view_eid).with_children(|parent| {
         parent.spawn((
             Transform::default(),
             CellCoord::default(),
@@ -178,16 +178,18 @@ pub fn spawn_map_view(
             },
             ambient_light.clone(),
             RenderTarget::Window(WindowRef::Entity(
-                app_windows.debug.expect("debug offscreen window to be set"),
+                app_windows
+                    .debug_eid
+                    .expect("debug offscreen window to be set"),
             )),
             GameViewCamera,
             MapViewCamera {
-                maplibre_int_id: maplibre_integration_id,
+                maplibre_int_eid: maplibre_integration_eid,
             },
         ));
     });
 
-    commands.entity(map_view_id).with_children(|parent| {
+    commands.entity(map_view_eid).with_children(|parent| {
         parent.spawn((
             Name::new("MapLibre Texture Camera"),
             Transform::default(),
@@ -204,12 +206,12 @@ pub fn spawn_map_view(
             },
             RenderTarget::Window(WindowRef::Entity(
                 app_windows
-                    .texture
+                    .texture_eid
                     .expect("map texture offscreen window to be set"),
             )),
             ambient_light,
             MapViewCamera {
-                maplibre_int_id: maplibre_integration_id,
+                maplibre_int_eid: maplibre_integration_eid,
             },
         ));
     });

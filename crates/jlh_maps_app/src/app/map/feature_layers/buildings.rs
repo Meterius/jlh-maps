@@ -143,7 +143,7 @@ impl TileBucketLayerMeta for BuildingTileBucketLayer {
     fn spawn(
         mut e_commands: EntityCommands,
         params: &mut SystemParamItem<'_, '_, Self::SpawnParams>,
-        _: Entity,
+        _bucket_eid: Entity,
         bucket: &TileBucket,
     ) {
         e_commands.insert((
@@ -158,7 +158,7 @@ impl TileBucketLayerMeta for BuildingTileBucketLayer {
             },
             BuildingTile,
             FeatureTile::new(
-                bucket.maplibre_int_id,
+                bucket.maplibre_int_eid,
                 &bucket.source_id,
                 bucket.tile_id,
                 bucket.center,

@@ -34,8 +34,8 @@ impl Plugin for FeatureLayersPlugin {
     }
 }
 
-pub fn make_bucket_manager(maplibre_int_id: Entity) -> TileBucketManager {
-    TileBucketManager::new(maplibre_int_id, |mut e_commands, _| {
+pub fn make_bucket_manager(maplibre_int_eid: Entity) -> TileBucketManager {
+    TileBucketManager::new(maplibre_int_eid, |mut e_commands, _| {
         e_commands.insert((
             waters::WaterTileBucket,
             buildings::BuildingTileBucket,
@@ -65,15 +65,15 @@ fn sync_distance_visibility(
         Without<MapViewCamera>,
     >,
 ) {
-    for (distance_visibility, entity_transform, ChildOf(entity_parent), mut visibility) in
+    for (distance_visibility, entity_transform, ChildOf(entity_parent_eid), mut visibility) in
         distance_visible_entities.iter_mut()
     {
         // TODO: remove hierarchical lookup
         let Some(camera_transform) =
             cameras
                 .iter()
-                .find_map(|(_, camera_transform, ChildOf(camera_parent))| {
-                    has_ancestor_or_self(*entity_parent, *camera_parent, &parents)
+                .find_map(|(_, camera_transform, ChildOf(camera_parent_eid))| {
+                    has_ancestor_or_self(*entity_parent_eid, *camera_parent_eid, &parents)
                         .then_some(camera_transform)
                 })
         else {
@@ -96,17 +96,21 @@ fn sync_distance_visibility(
     }
 }
 
-fn has_ancestor_or_self(mut entity: Entity, target: Entity, parents: &Query<&ChildOf>) -> bool {
+fn has_ancestor_or_self(
+    mut entity_eid: Entity,
+    target_eid: Entity,
+    parents: &Query<&ChildOf>,
+) -> bool {
     loop {
-        if entity == target {
+        if entity_eid == target_eid {
             return true;
         }
 
-        let Ok(ChildOf(parent)) = parents.get(entity) else {
+        let Ok(ChildOf(parent_eid)) = parents.get(entity_eid) else {
             return false;
         };
 
-        entity = *parent;
+        entity_eid = *parent_eid;
     }
 }
 

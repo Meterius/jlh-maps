@@ -47,7 +47,7 @@ pub trait TileTaskBasedMeta: Send + Sync + 'static {
     ) -> Self::Data;
 
     fn apply_data(
-        entity: Entity,
+        entity_eid: Entity,
         params: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
         config: &Self::Config,
         state: &mut Self::State,
@@ -142,8 +142,8 @@ fn sync_items_without_terrain<C: TileTaskBasedMeta>(
         Option<&InheritedVisibility>,
     )>,
 ) {
-    for (id, tile, mut tile_tb, visibility) in buckets.iter_mut() {
-        let Some(ml_data) = ml_data_query.get(tile.maplibre_int_id).ok() else {
+    for (entity_eid, tile, mut tile_tb, visibility) in buckets.iter_mut() {
+        let Some(ml_data) = ml_data_query.get(tile.maplibre_int_eid).ok() else {
             continue;
         };
 
@@ -152,7 +152,7 @@ fn sync_items_without_terrain<C: TileTaskBasedMeta>(
             ml_data,
             None,
             &mut *params,
-            id,
+            entity_eid,
             tile,
             &mut tile_tb,
             &task_pool,
@@ -173,18 +173,18 @@ fn sync_items_with_terrain<C: TileTaskBasedMeta>(
         Option<&InheritedVisibility>,
     )>,
 ) {
-    for (id, tile, mut tile_tb, visibility) in buckets.iter_mut() {
-        let Some(ml_data) = ml_data_query.get(tile.maplibre_int_id).ok() else {
+    for (entity_eid, tile, mut tile_tb, visibility) in buckets.iter_mut() {
+        let Some(ml_data) = ml_data_query.get(tile.maplibre_int_eid).ok() else {
             continue;
         };
-        let ml_terrain = ml_terrains.get(tile.maplibre_int_id).ok();
+        let ml_terrain = ml_terrains.get(tile.maplibre_int_eid).ok();
 
         // TODO: do not rely on visibility for task active status
         sync_item(
             ml_data,
             ml_terrain,
             &mut *params,
-            id,
+            entity_eid,
             tile,
             &mut tile_tb,
             &task_pool,
@@ -197,7 +197,7 @@ fn sync_item<C: TileTaskBasedMeta>(
     ml_data: &MlData,
     ml_terrain: Option<&MlTerrain>,
     params: &mut SystemParamItem<'_, '_, C::ApplyParams>,
-    id: Entity,
+    entity_eid: Entity,
     tile: &FeatureTile,
     tile_tb: &mut TileTaskBased<C>,
     task_pool: &AppTaskPool,
@@ -213,7 +213,13 @@ fn sync_item<C: TileTaskBasedMeta>(
             .take()
             .and_then(|mut pending_task| pending_task.take_result())
     {
-        tile_tb.data = C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, Some(data));
+        tile_tb.data = C::apply_data(
+            entity_eid,
+            params,
+            &tile_tb.config,
+            &mut tile_tb.state,
+            Some(data),
+        );
         tile_tb.data_revision += 1;
     }
 
@@ -221,7 +227,13 @@ fn sync_item<C: TileTaskBasedMeta>(
     let Some(source_tile) = tile.tile(ml_data) else {
         if !tile_tb.revision.is_empty() {
             tile_tb.clear_data();
-            tile_tb.data = C::apply_data(id, params, &tile_tb.config, &mut tile_tb.state, None);
+            tile_tb.data = C::apply_data(
+                entity_eid,
+                params,
+                &tile_tb.config,
+                &mut tile_tb.state,
+                None,
+            );
             tile_tb.data_revision += 1;
             tile_tb.dirty = false;
             tile_tb.revision.reset();

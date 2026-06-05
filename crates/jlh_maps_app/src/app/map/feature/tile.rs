@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 #[derive(Component)]
 pub struct FeatureTile {
-    pub maplibre_int_id: Entity,
+    pub maplibre_int_eid: Entity,
     pub source_id: String,
     pub tile_id: CanonicalTileId,
     pub center: DVec3,
@@ -13,13 +13,13 @@ pub struct FeatureTile {
 
 impl FeatureTile {
     pub fn new(
-        maplibre_int_id: Entity,
+        maplibre_int_eid: Entity,
         source_id: &str,
         tile_id: CanonicalTileId,
         center: DVec3,
     ) -> Self {
         Self {
-            maplibre_int_id,
+            maplibre_int_eid,
             source_id: source_id.to_owned(),
             tile_id,
             center,

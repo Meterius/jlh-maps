@@ -17,7 +17,7 @@ pub trait TileBucketLayerMeta: Send + Sync + Sized + 'static {
     fn spawn(
         e_commands: EntityCommands,
         params: &mut SystemParamItem<'_, '_, Self::SpawnParams>,
-        bucket_entity: Entity,
+        bucket_eid: Entity,
         bucket: &TileBucket,
     );
 }
@@ -49,14 +49,14 @@ impl<L: TileBucketLayerMeta> Plugin for TileBucketLayerPlugin<L> {
 
 #[derive(Component)]
 pub struct TileBucketLayerSpawned<L: TileBucketLayerMeta> {
-    child_id: Entity,
+    child_eid: Entity,
     _marker: PhantomData<L>,
 }
 
 impl<L: TileBucketLayerMeta> TileBucketLayerSpawned<L> {
-    fn new(child_id: Entity) -> Self {
+    fn new(child_eid: Entity) -> Self {
         Self {
-            child_id,
+            child_eid,
             _marker: PhantomData,
         }
     }
@@ -80,25 +80,25 @@ fn sync_tile_bucket_layer<L: TileBucketLayerMeta>(
     mut commands: Commands,
     enabled_params: StaticSystemParam<L::EnabledParams>,
     mut spawn_params: StaticSystemParam<L::SpawnParams>,
-    buckets_to_spawn: Query<
+    spawnable_buckets: Query<
         (Entity, &TileBucket),
         (With<L::BucketMarker>, Without<TileBucketLayerSpawned<L>>),
     >,
     spawned_buckets: Query<(Entity, &TileBucketLayerSpawned<L>), With<L::BucketMarker>>,
 ) {
     if !L::is_enabled(&*enabled_params) {
-        for (bucket_id, spawned) in spawned_buckets.iter() {
-            commands.entity(spawned.child_id).despawn();
+        for (bucket_eid, spawned) in spawned_buckets.iter() {
+            commands.entity(spawned.child_eid).despawn();
             commands
-                .entity(bucket_id)
+                .entity(bucket_eid)
                 .remove::<TileBucketLayerSpawned<L>>();
         }
 
         return;
     }
 
-    for (bucket_id, bucket) in buckets_to_spawn.iter() {
-        spawn_tile::<L>(&mut commands, &mut *spawn_params, bucket, bucket_id);
+    for (bucket_eid, bucket) in spawnable_buckets.iter() {
+        spawn_tile::<L>(&mut commands, &mut *spawn_params, bucket, bucket_eid);
     }
 }
 
@@ -106,9 +106,9 @@ fn spawn_tile<L: TileBucketLayerMeta>(
     commands: &mut Commands,
     spawn_params: &mut SystemParamItem<'_, '_, L::SpawnParams>,
     bucket: &TileBucket,
-    bucket_id: Entity,
+    bucket_eid: Entity,
 ) {
-    let child_id = commands
+    let child_eid = commands
         .spawn((
             Transform::default(),
             Visibility::Inherited,
@@ -116,10 +116,10 @@ fn spawn_tile<L: TileBucketLayerMeta>(
         ))
         .id();
 
-    L::spawn(commands.entity(child_id), spawn_params, bucket_id, bucket);
+    L::spawn(commands.entity(child_eid), spawn_params, bucket_eid, bucket);
 
-    commands.entity(bucket_id).add_child(child_id);
+    commands.entity(bucket_eid).add_child(child_eid);
     commands
-        .entity(bucket_id)
-        .insert(TileBucketLayerSpawned::<L>::new(child_id));
+        .entity(bucket_eid)
+        .insert(TileBucketLayerSpawned::<L>::new(child_eid));
 }

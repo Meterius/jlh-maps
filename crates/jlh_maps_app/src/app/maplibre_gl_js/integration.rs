@@ -15,17 +15,17 @@ pub(super) fn with_map_entity(
     integration_id: u32,
     callback: impl FnOnce(&mut World, Entity),
 ) {
-    let Some(entity) = find_map_integration(world, integration_id) else {
+    let Some(integration_eid) = find_map_integration(world, integration_id) else {
         return;
     };
 
-    callback(world, entity);
+    callback(world, integration_eid);
 }
 
 pub(super) fn find_map_integration(world: &mut World, integration_id: u32) -> Option<Entity> {
-    let mut query = world.query::<(Entity, &MaplibreMapIntegration)>();
-    query
+    let mut integrations = world.query::<(Entity, &MaplibreMapIntegration)>();
+    integrations
         .iter(world)
         .find(|(_, integration)| integration.id == integration_id)
-        .map(|(entity, _)| entity)
+        .map(|(integration_eid, _)| integration_eid)
 }

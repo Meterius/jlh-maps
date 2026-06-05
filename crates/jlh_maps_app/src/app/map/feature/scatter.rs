@@ -119,7 +119,7 @@ impl TileTaskBasedMeta for FeatureTileScatterMeta {
     }
 
     fn apply_data(
-        _entity: Entity,
+        _entity_eid: Entity,
         _params: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
         _config: &Self::Config,
         _state: &mut Self::State,

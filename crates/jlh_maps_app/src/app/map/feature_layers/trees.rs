@@ -70,10 +70,10 @@ impl TileBucketLayerMeta for TreeTileBucketLayer {
     fn spawn(
         mut e_commands: EntityCommands,
         tree_assets: &mut SystemParamItem<'_, '_, Self::SpawnParams>,
-        _: Entity,
+        _bucket_eid: Entity,
         bucket: &TileBucket,
     ) {
-        let entity = e_commands.id();
+        let entity_eid = e_commands.id();
 
         e_commands.insert(Name::new("Tree"));
 
@@ -81,7 +81,7 @@ impl TileBucketLayerMeta for TreeTileBucketLayer {
             e_commands.insert((
                 TreeTile::default(),
                 FeatureTile::new(
-                    bucket.maplibre_int_id,
+                    bucket.maplibre_int_eid,
                     &bucket.source_id,
                     bucket.tile_id,
                     bucket.center,
@@ -90,7 +90,7 @@ impl TileBucketLayerMeta for TreeTileBucketLayer {
                     flat_half_extents: bucket.half_extents,
                 },
                 EntitySpawner::<TreeEntitySpawner>::new(
-                    entity,
+                    entity_eid,
                     TreeSpawnerParams {
                         tile_id: bucket.tile_id,
                         scale: tile_world_units_per_meter(bucket.tile_id) as f32

@@ -109,8 +109,8 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_entity(world, integration_id, |world, entity| {
-                if let Some(mut current_view) = world.get_mut::<MlView>(entity) {
+            with_map_entity(world, integration_id, |world, integration_eid| {
+                if let Some(mut current_view) = world.get_mut::<MlView>(integration_eid) {
                     *current_view = view;
                 }
             });
@@ -161,8 +161,8 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_entity(world, integration_id, |world, entity| {
-                if let Some(mut terrain) = world.get_mut::<MlTerrain>(entity) {
+            with_map_entity(world, integration_id, |world, integration_eid| {
+                if let Some(mut terrain) = world.get_mut::<MlTerrain>(integration_eid) {
                     terrain.tiles.insert(tile_key, Arc::new(tile_data));
                 }
             });
@@ -178,8 +178,8 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_entity(world, integration_id, |world, entity| {
-                if let Some(mut terrain) = world.get_mut::<MlTerrain>(entity) {
+            with_map_entity(world, integration_id, |world, integration_eid| {
+                if let Some(mut terrain) = world.get_mut::<MlTerrain>(integration_eid) {
                     terrain.tiles.remove(&tile_id);
                 }
             });
@@ -205,8 +205,8 @@ impl MaplibreIntegration {
                 return;
             };
 
-            with_map_entity(world, integration_id, |world, entity| {
-                if let Some(mut ml_data) = world.get_mut::<MlData>(entity) {
+            with_map_entity(world, integration_id, |world, integration_eid| {
+                if let Some(mut ml_data) = world.get_mut::<MlData>(integration_eid) {
                     ml_data.update_tile(source_id, tile_id, data, &task_pool);
                 }
             });
@@ -224,8 +224,8 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_entity(world, integration_id, |world, entity| {
-                if let Some(mut ml_data) = world.get_mut::<MlData>(entity) {
+            with_map_entity(world, integration_id, |world, integration_eid| {
+                if let Some(mut ml_data) = world.get_mut::<MlData>(integration_eid) {
                     ml_data.remove_tile(&source_id, &tile_id);
                 }
             });
@@ -246,8 +246,8 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_entity(world, integration_id, |world, entity| {
-                if let Some(mut ml_data) = world.get_mut::<MlData>(entity) {
+            with_map_entity(world, integration_id, |world, integration_eid| {
+                if let Some(mut ml_data) = world.get_mut::<MlData>(integration_eid) {
                     ml_data.set_renderable_tiles(source_id, renderable_tile_ids);
                 }
             });
@@ -264,8 +264,8 @@ impl MaplibreIntegration {
         let integration_id = self.integration_id;
 
         self.execute(move |world| {
-            with_map_entity(world, integration_id, |world, entity| {
-                if let Some(mut terrain) = world.get_mut::<MlTerrain>(entity) {
+            with_map_entity(world, integration_id, |world, integration_eid| {
+                if let Some(mut terrain) = world.get_mut::<MlTerrain>(integration_eid) {
                     terrain.active_tile_ids = active_tile_ids;
                 }
             });
@@ -292,8 +292,8 @@ impl Drop for MaplibreIntegration {
         let integration_id = self.integration_id;
 
         let _ = instance.execute(move |world| {
-            if let Some(entity) = find_map_integration(world, integration_id) {
-                world.despawn(entity);
+            if let Some(integration_eid) = find_map_integration(world, integration_id) {
+                world.despawn(integration_eid);
             }
         });
     }

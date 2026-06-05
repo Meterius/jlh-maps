@@ -88,7 +88,7 @@ impl TileTaskBasedMeta for FeatureTileEdgeDistanceTextureMeta {
     }
 
     fn apply_data(
-        _entity: Entity,
+        _entity_eid: Entity,
         images: &mut SystemParamItem<'_, '_, Self::ApplyParams>,
         _config: &Self::Config,
         state: &mut Self::State,

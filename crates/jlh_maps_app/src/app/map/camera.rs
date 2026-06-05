@@ -35,7 +35,7 @@ impl Plugin for CameraPlugin {
 
 #[derive(Debug, Reflect, Component)]
 pub struct MapViewCamera {
-    pub maplibre_int_id: Entity,
+    pub maplibre_int_eid: Entity,
 }
 
 fn sync_camera(
@@ -50,7 +50,7 @@ fn sync_camera(
     grids: Query<&Grid>,
 ) {
     for (camera, mut cell, mut transform, mut projection, child_of) in &mut cameras {
-        let Some(view) = ml_views.get(camera.maplibre_int_id).ok().soft_expect("") else {
+        let Some(view) = ml_views.get(camera.maplibre_int_eid).ok().soft_expect("") else {
             continue;
         };
 
@@ -274,8 +274,8 @@ fn sync_map_view_camera_settings(
         return;
     }
 
-    for entity in &cameras {
-        let mut entity_commands = commands.entity(entity);
+    for camera_eid in &cameras {
+        let mut entity_commands = commands.entity(camera_eid);
 
         entity_commands.remove::<(
             ColorGrading,

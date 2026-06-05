@@ -93,7 +93,7 @@ impl TileBucketLayerMeta for WaterTileBucketLayer {
     fn spawn(
         mut e_commands: EntityCommands,
         params: &mut SystemParamItem<'_, '_, Self::SpawnParams>,
-        _: Entity,
+        _bucket_eid: Entity,
         bucket: &TileBucket,
     ) {
         let edge_distance_texture = FeatureTileEdgeDistanceTexture::new(
@@ -131,7 +131,7 @@ impl TileBucketLayerMeta for WaterTileBucketLayer {
             NotShadowCaster,
             WaterTile,
             FeatureTile::new(
-                bucket.maplibre_int_id,
+                bucket.maplibre_int_eid,
                 &bucket.source_id,
                 bucket.tile_id,
                 bucket.center,
