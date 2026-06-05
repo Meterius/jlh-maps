@@ -33,7 +33,10 @@ impl AppTaskPool {
 
         let pool = TaskPool::builder().backend(backend).build();
 
-        info!("Using {backend:?} app task pool backend");
+        info!(
+            "Using {backend:?} app task pool backend with max_concurrent_tasks={}",
+            pool.max_concurrent_tasks()
+        );
 
         Self { pool }
     }
