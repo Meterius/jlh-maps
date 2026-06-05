@@ -10,4 +10,5 @@
 .codex
 /crates/utilities/test-data/
 /crates/*/target
+/crates/vendor/*/target
 node_modules
