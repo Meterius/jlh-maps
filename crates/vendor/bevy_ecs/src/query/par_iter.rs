@@ -83,7 +83,10 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryParIter<'w, 's, D, F> {
             func(&mut init, item);
             init
         };
-        #[cfg(any(target_arch = "wasm32", not(feature = "multi_threaded")))]
+        #[cfg(any(
+            all(target_arch = "wasm32", not(feature = "wasm_threads")),
+            not(feature = "multi_threaded")
+        ))]
         {
             let init = init();
             // SAFETY:
@@ -99,7 +102,10 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryParIter<'w, 's, D, F> {
                     .fold(init, func);
             }
         }
-        #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+        #[cfg(all(
+            feature = "multi_threaded",
+            any(not(target_arch = "wasm32"), feature = "wasm_threads")
+        ))]
         {
             let thread_count = bevy_tasks::ComputeTaskPool::get().thread_num();
             if thread_count <= 1 {
@@ -129,7 +135,10 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryParIter<'w, 's, D, F> {
         }
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+    #[cfg(all(
+        feature = "multi_threaded",
+        any(not(target_arch = "wasm32"), feature = "wasm_threads")
+    ))]
     fn get_batch_size(&self, thread_count: usize) -> u32 {
         let max_items = || {
             let id_iter = self.state.matched_storage_ids.iter();
@@ -254,7 +263,10 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
             func(&mut init, item);
             init
         };
-        #[cfg(any(target_arch = "wasm32", not(feature = "multi_threaded")))]
+        #[cfg(any(
+            all(target_arch = "wasm32", not(feature = "wasm_threads")),
+            not(feature = "multi_threaded")
+        ))]
         {
             let init = init();
             // SAFETY:
@@ -270,7 +282,10 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
                     .fold(init, func);
             }
         }
-        #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+        #[cfg(all(
+            feature = "multi_threaded",
+            any(not(target_arch = "wasm32"), feature = "wasm_threads")
+        ))]
         {
             let thread_count = bevy_tasks::ComputeTaskPool::get().thread_num();
             if thread_count <= 1 {
@@ -301,7 +316,10 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
         }
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+    #[cfg(all(
+        feature = "multi_threaded",
+        any(not(target_arch = "wasm32"), feature = "wasm_threads")
+    ))]
     fn get_batch_size(&self, thread_count: usize) -> u32 {
         self.batching_strategy
             .calc_batch_size(|| self.entity_list.len(), thread_count) as u32
@@ -409,7 +427,10 @@ impl<'w, 's, D: QueryData, F: QueryFilter, E: EntityEquivalent + Sync>
             func(&mut init, item);
             init
         };
-        #[cfg(any(target_arch = "wasm32", not(feature = "multi_threaded")))]
+        #[cfg(any(
+            all(target_arch = "wasm32", not(feature = "wasm_threads")),
+            not(feature = "multi_threaded")
+        ))]
         {
             let init = init();
             // SAFETY:
@@ -425,7 +446,10 @@ impl<'w, 's, D: QueryData, F: QueryFilter, E: EntityEquivalent + Sync>
                     .fold(init, func);
             }
         }
-        #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+        #[cfg(all(
+            feature = "multi_threaded",
+            any(not(target_arch = "wasm32"), feature = "wasm_threads")
+        ))]
         {
             let thread_count = bevy_tasks::ComputeTaskPool::get().thread_num();
             if thread_count <= 1 {
@@ -456,7 +480,10 @@ impl<'w, 's, D: QueryData, F: QueryFilter, E: EntityEquivalent + Sync>
         }
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+    #[cfg(all(
+        feature = "multi_threaded",
+        any(not(target_arch = "wasm32"), feature = "wasm_threads")
+    ))]
     fn get_batch_size(&self, thread_count: usize) -> u32 {
         self.batching_strategy
             .calc_batch_size(|| self.entity_list.len(), thread_count) as u32

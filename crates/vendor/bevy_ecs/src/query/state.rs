@@ -8,10 +8,13 @@ use crate::{
     query::{FilteredAccess, QueryCombinationIter, QueryIter, QueryParIter, WorldQuery},
     storage::{SparseSetIndex, TableId},
     system::Query,
-    world::{unsafe_world_cell::UnsafeWorldCell, World, WorldId},
+    world::{World, WorldId, unsafe_world_cell::UnsafeWorldCell},
 };
 
-#[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+#[cfg(all(
+    feature = "multi_threaded",
+    any(not(target_arch = "wasm32"), feature = "wasm_threads")
+))]
 use crate::entity::UniqueEntityEquivalentSlice;
 
 use alloc::vec::Vec;
@@ -570,7 +573,9 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         #[track_caller]
         #[cold]
         fn panic_mismatched(this: WorldId, other: WorldId) -> ! {
-            panic!("Encountered a mismatched World. This QueryState was created from {this:?}, but a method was called using {other:?}.");
+            panic!(
+                "Encountered a mismatched World. This QueryState was created from {this:?}, but a method was called using {other:?}."
+            );
         }
 
         if self.world_id != world_id {
@@ -674,7 +679,8 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         assert!(
             component_access.is_subset(&self_access),
             "Transmuted state for {} attempts to access terms that are not allowed by original state {}.",
-            DebugName::type_name::<(NewD, NewF)>(), DebugName::type_name::<(D, F)>()
+            DebugName::type_name::<(NewD, NewF)>(),
+            DebugName::type_name::<(D, F)>()
         );
 
         // For transmuted queries, the dense-ness of the query is equal to the dense-ness of the original query.
@@ -812,11 +818,15 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         assert!(
             component_access.is_subset(&joined_component_access),
             "Joined state for {} attempts to access terms that are not allowed by state {} joined with {}.",
-            DebugName::type_name::<(NewD, NewF)>(), DebugName::type_name::<(D, F)>(), DebugName::type_name::<(OtherD, OtherF)>()
+            DebugName::type_name::<(NewD, NewF)>(),
+            DebugName::type_name::<(D, F)>(),
+            DebugName::type_name::<(OtherD, OtherF)>()
         );
 
         if self.archetype_generation != other.archetype_generation {
-            warn!("You have tried to join queries with different archetype_generations. This could lead to unpredictable results.");
+            warn!(
+                "You have tried to join queries with different archetype_generations. This could lead to unpredictable results."
+            );
         }
 
         // the join is dense of both the queries were dense.
@@ -1420,7 +1430,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// with a mismatched [`WorldId`] is unsound.
     ///
     /// [`ComputeTaskPool`]: bevy_tasks::ComputeTaskPool
-    #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+    #[cfg(all(
+        feature = "multi_threaded",
+        any(not(target_arch = "wasm32"), feature = "wasm_threads")
+    ))]
     pub(crate) unsafe fn par_fold_init_unchecked_manual<'w, 's, T, FN, INIT>(
         &'s self,
         init_accum: INIT,
@@ -1534,7 +1547,10 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
     /// with a mismatched [`WorldId`] is unsound.
     ///
     /// [`ComputeTaskPool`]: bevy_tasks::ComputeTaskPool
-    #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+    #[cfg(all(
+        feature = "multi_threaded",
+        any(not(target_arch = "wasm32"), feature = "wasm_threads")
+    ))]
     pub(crate) unsafe fn par_many_unique_fold_init_unchecked_manual<'w, 's, T, FN, INIT, E>(
         &'s self,
         init_accum: INIT,
@@ -1597,7 +1613,10 @@ impl<D: ReadOnlyQueryData, F: QueryFilter> QueryState<D, F> {
     /// with a mismatched [`WorldId`] is unsound.
     ///
     /// [`ComputeTaskPool`]: bevy_tasks::ComputeTaskPool
-    #[cfg(all(not(target_arch = "wasm32"), feature = "multi_threaded"))]
+    #[cfg(all(
+        feature = "multi_threaded",
+        any(not(target_arch = "wasm32"), feature = "wasm_threads")
+    ))]
     pub(crate) unsafe fn par_many_fold_init_unchecked_manual<'w, 's, T, FN, INIT, E>(
         &'s self,
         init_accum: INIT,

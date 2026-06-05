@@ -72,6 +72,10 @@ multi_threaded = [
     "bevy_tasks/multi_threaded",
     "dep:arrayvec",
 ]
+wasm_threads = [
+    "multi_threaded",
+    "bevy_tasks/wasm_threads",
+]
 reflect_auto_register = [
     "bevy_reflect",
     "bevy_reflect/auto_register",
