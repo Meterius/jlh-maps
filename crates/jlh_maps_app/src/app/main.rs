@@ -2,6 +2,8 @@ use crate::app::common::debug_gizmos::DebugGizmosPlugin;
 use crate::app::common::editor::EditorPlugin;
 use crate::app::common::materials::MaterialsPlugin;
 use crate::app::common::settings::SettingsPlugin;
+#[cfg(feature = "wasm-threads")]
+use crate::app::common::wasm_threaded_app::WasmThreadedAppPlugin;
 use crate::app::instance::BevyInstance;
 use crate::app::map::MapPlugin;
 use crate::app::map::core::spawn_map_view;
@@ -131,6 +133,8 @@ pub fn setup_app(
         MaplibreGlJsPlugin,
         MapPlugin,
         ExtractResourcePlugin::<AppWindows>::default(),
+        #[cfg(feature = "wasm-threads")]
+        WasmThreadedAppPlugin,
     ));
 
     if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
