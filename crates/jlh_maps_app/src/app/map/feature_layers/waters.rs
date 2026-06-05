@@ -27,8 +27,7 @@ impl Plugin for WatersPlugin {
         app.register_type::<WaterMaterialUniform>()
             .register_type::<WaterMaterialExtension>()
             .register_asset_reflect::<WaterMaterial>()
-            .add_plugins(MaterialPlugin::<WaterMaterial>::default())
-            .add_systems(Update, update_water_material_time);
+            .add_plugins(MaterialPlugin::<WaterMaterial>::default());
     }
 }
 
@@ -46,10 +45,6 @@ pub(super) type WaterMaterial = ExtendedMaterial<StandardMaterial, WaterMaterial
 pub struct WaterMaterialUniform {
     pub water_color: Vec4,
     pub water2_color: Vec4,
-    pub time: f32,
-    _webgl2_padding_8b: u32,
-    _webgl2_padding_12b: u32,
-    _webgl2_padding_16b: u32,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -113,10 +108,6 @@ impl TileBucketLayerMeta for WaterTileBucketLayer {
                 uniform: WaterMaterialUniform {
                     water_color: Srgba::from(WATER_COLOR).to_vec4(),
                     water2_color: Srgba::from(WATER2_COLOR).to_vec4(),
-                    time: 0.,
-                    _webgl2_padding_8b: 0,
-                    _webgl2_padding_12b: 0,
-                    _webgl2_padding_16b: 0,
                 },
             },
         });
@@ -142,12 +133,5 @@ impl TileBucketLayerMeta for WaterTileBucketLayer {
             }),
             edge_distance_texture,
         ));
-    }
-}
-
-fn update_water_material_time(time: Res<Time>, mut materials: ResMut<Assets<WaterMaterial>>) {
-    let elapsed = time.elapsed_secs();
-    for (_, material) in materials.iter_mut() {
-        material.extension.uniform.time = elapsed;
     }
 }

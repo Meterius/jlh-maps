@@ -1,4 +1,5 @@
 #import bevy_pbr::{
+    mesh_view_bindings::globals,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{
         alpha_discard,
@@ -21,10 +22,6 @@
 struct WaterMaterial {
     water_color: vec4<f32>,
     water2_color: vec4<f32>,
-    time: f32,
-    _webgl2_padding_8b: u32,
-    _webgl2_padding_12b: u32,
-    _webgl2_padding_16b: u32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var edge_distance_texture: texture_2d<f32>;
@@ -182,7 +179,7 @@ fn shore_surf(uv: vec2<f32>, edge_distance: f32, time: f32) -> f32 {
 }
 
 fn dyn_water_color_and_foam(in: VertexOutput) -> vec4<f32> {
-    let time = water_material.time;
+    let time = globals.time;
     let tile_uv = clamp(in.uv, vec2<f32>(0.0), vec2<f32>(1.0));
     let edge_distance = clamp(textureSample(edge_distance_texture, edge_distance_sampler, tile_uv).r, 0.0, 1.0);
     let uv = in.uv * 500.0;
