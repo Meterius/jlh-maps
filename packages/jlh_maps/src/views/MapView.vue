@@ -136,7 +136,7 @@
         />
       </div>
 
-      <div v-if="frameDiagnosticsVisible" class="absolute left-2 top-2 z-10">
+      <div v-if="frameDiagnosticsVisible && frameDiagnostics" class="absolute left-2 top-2 z-10">
         <FrameDiagnosticsPanel :diagnostics="frameDiagnostics" />
       </div>
 
@@ -526,6 +526,10 @@ import type { ModeSelectorOption } from '@/components/ModeSelector.vue'
 import FrameDiagnosticsPanel from '@/components/FrameDiagnosticsPanel.vue'
 import { useFrameDiagnostics } from '@/composables/frame-diagnostics.ts'
 import {
+  useMapViewScenarioRuntime,
+  type MapViewScenarioName,
+} from '@/views/map-view/map-view-scenario'
+import {
   type MapStyleLifecycleConfig,
   useMapStyleLifecycle,
 } from '@/composables/maplibre/style-lifecycle'
@@ -538,6 +542,10 @@ import {
   provideMapViewStore,
 } from '@/views/map-view/map-view-store.ts'
 import { MapViewBaseStyleType } from '@/views/map-view/map-view-types.ts'
+
+const props = defineProps<{
+  scenarioName?: MapViewScenarioName
+}>()
 
 const mapKey = makeUniqueMapKey()
 const { mapInstance, loaded, zoom, pitch, terrainEnabled } = useMapExtended(mapKey)
@@ -572,13 +580,31 @@ const BEVY_OVERLAY_LAYER_IDS = [
 
 // Persisted View
 
-const { mapViewStore, currentBaseStyleLayerSettings } = provideMapViewStore()
+const { mapViewStore, baseStyleLayerSettingsStore, currentBaseStyleLayerSettings } =
+  provideMapViewStore()
+
+const mapViewScenarioStoreContext = {
+  mapViewStore,
+  baseStyleLayerSettingsStore,
+}
 
 const updateStoredViewCenter = ({ lng, lat }: { lng: number; lat: number }) => {
   mapViewStore.value.view.center = [lng, lat]
 }
 
 usePanProfiles(mapKey)
+
+createDynamicComposable(
+  () => ({
+    scenarioName: props.scenarioName,
+    mapReady: loaded.value && mapInstance.map !== undefined,
+  }),
+  ({ scenarioName, mapReady }) => {
+    if (!scenarioName || !mapReady || !mapInstance.map) return null
+
+    return useMapViewScenarioRuntime(scenarioName, mapInstance.map, mapViewScenarioStoreContext)
+  },
+)
 
 watchDefinedOnce(
   () => (loaded.value ? mapInstance.map : undefined),

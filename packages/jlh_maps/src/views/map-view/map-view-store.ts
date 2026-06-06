@@ -100,7 +100,7 @@ function createDefaultMapViewStore(): MapViewStore {
     baseStyleType: MapViewBaseStyleType.Normal,
     projection: { type: 'mercator' },
     bevyCanvasEnabled: false,
-    frameStatisticsEnabled: true,
+    frameStatisticsEnabled: false,
   }
 }
 

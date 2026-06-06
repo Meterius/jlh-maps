@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "test:unit": "vitest",
     "test:e2e": "playwright test",
+    "trace:perf": "playwright test e2e/perf-trace.spec.ts --project=chromium --headed",
     "build-only": "vite build",
     "build-only:prod": "vite build --mode prod",
     "build-only:local": "vite build --mode local-docker",

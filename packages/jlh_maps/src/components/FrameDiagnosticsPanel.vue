@@ -250,7 +250,8 @@ const timelineFrameBars = computed(() => {
     const visibleDurationMs = clippedEndMs - clippedStartMs
     if (visibleDurationMs <= 0) return []
 
-    const x = TIMELINE_AXIS_WIDTH + ((clippedStartMs - startMs) / TIMELINE_WINDOW_MS) * TIMELINE_PLOT_WIDTH
+    const x =
+      TIMELINE_AXIS_WIDTH + ((clippedStartMs - startMs) / TIMELINE_WINDOW_MS) * TIMELINE_PLOT_WIDTH
     const width = (visibleDurationMs / TIMELINE_WINDOW_MS) * TIMELINE_PLOT_WIDTH
     const height = Math.max(0.7, (frame.durationMs / maxMs) * TIMELINE_PLOT_HEIGHT)
 

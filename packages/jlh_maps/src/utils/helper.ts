@@ -52,3 +52,7 @@ export function coalesceTrailing<Args extends unknown[], R>(
     })
   }
 }
+
+export function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
