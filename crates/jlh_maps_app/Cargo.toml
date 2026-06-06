@@ -20,10 +20,35 @@ wasm-threads = [
 ]
 
 [dependencies]
-bevy = { version = "0.18.1", features = ["webgpu"] }
+bevy = { version = "0.18.1", default-features = false, features = [
+    "std",
+    "async_executor",
+    "reflect_auto_register",
+    "bevy_asset",
+    "bevy_window",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_post_process",
+    "bevy_anti_alias",
+    "bevy_image",
+    "bevy_log",
+    "bevy_mesh",
+    "bevy_camera",
+    "bevy_light",
+    "bevy_pbr",
+    "bevy_gltf",
+    "bevy_gizmos",
+    "bevy_gizmos_render",
+    "keyboard",
+    "mouse",
+    "multi_threaded",
+    "png",
+    "tonemapping_luts",
+    "web",
+    "webgpu",
+] }
 bevy_ecs = { version = "0.18.1", default-features = false }
 bevy_tasks = { version = "0.18.1", default-features = false }
-bevy_winit = "0.18.1"
 big_space = "0.12.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -44,7 +69,6 @@ map_scatter = "0.4.1"
 rand = "0.9"
 anyhow = "1.0.102"
 raw-window-handle = "0.6.2"
-itertools = "0.14.0"
 rayon = { version = "1.11.0", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

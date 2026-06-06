@@ -758,7 +758,7 @@ watch(frameDiagnosticsVisible, (visible) => {
   }
 })
 
-const tickBevyAndProduceFrame = async (transform?: unknown) => {
+const tickBevyAndProduceFrame = async () => {
   const mountedBevy = bevyMount.value
   if (!mountedBevy) {
     closePendingBevyFrameBitmap()

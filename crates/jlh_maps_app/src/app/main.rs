@@ -12,7 +12,6 @@ use crate::app::maplibre_gl_js::integration::MaplibreMapIntegration;
 use crate::app::offscreen_window_handle::OffscreenWindowHandle;
 use crate::app::window_events::WindowInstanceRef;
 use bevy::asset::{AssetMetaCheck, AssetPlugin};
-use bevy::audio::AudioPlugin;
 use bevy::gizmos::GizmoPlugin;
 use bevy::gizmos_render::GizmoRenderPlugin;
 use bevy::light::DirectionalLightShadowMap;
@@ -24,14 +23,11 @@ use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use bevy::render::view::ExtractedWindows;
 use bevy::render::{Render, RenderApp};
 use bevy::render::{RenderPlugin, RenderSystems};
-use bevy::ui::UiPlugin;
-use bevy::ui_render::UiRenderPlugin;
 use bevy::window::{
     CompositeAlphaMode, ExitCondition, PresentMode, PrimaryWindow, RawHandleWrapper, Window,
     WindowPlugin, WindowResolution, WindowWrapper,
 };
 use bevy_inspector_egui::bevy_egui::{EguiGlobalSettings, EguiPlugin};
-use bevy_winit::WinitPlugin;
 use big_space::plugin::BigSpaceDefaultPlugins;
 use tracing::info;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -98,35 +94,38 @@ pub fn setup_app(
         make_offscreen_window("Map Texture Offscreen Window", &texture_canvas)
     };
 
-    app.add_plugins((
-        DefaultPlugins
-            .set(AssetPlugin {
-                file_path: asset_base_url,
-                meta_check: AssetMetaCheck::Never,
+    let default_plugins = DefaultPlugins
+        .set(AssetPlugin {
+            file_path: asset_base_url,
+            meta_check: AssetMetaCheck::Never,
+            ..default()
+        })
+        .set(WindowPlugin {
+            primary_window: Some(primary_window),
+            exit_condition: ExitCondition::DontExit,
+            ..default()
+        })
+        .set(RenderPlugin {
+            render_creation: RenderCreation::Automatic(WgpuSettings {
+                features: WgpuFeatures::default(),
+                backends: Some(Backends::BROWSER_WEBGPU),
                 ..default()
-            })
-            .set(WindowPlugin {
-                primary_window: Some(primary_window),
-                exit_condition: ExitCondition::DontExit,
-                ..default()
-            })
-            .set(RenderPlugin {
-                render_creation: RenderCreation::Automatic(WgpuSettings {
-                    features: WgpuFeatures::default(),
-                    backends: Some(Backends::BROWSER_WEBGPU),
-                    ..default()
-                }),
-                ..default()
-            })
-            .disable::<LogPlugin>()
-            .disable::<WinitPlugin>()
-            .disable::<TransformPlugin>()
-            .disable::<GilrsPlugin>()
-            .disable::<AudioPlugin>()
-            .disable::<UiPlugin>()
-            .disable::<UiRenderPlugin>()
+            }),
+            ..default()
+        })
+        .disable::<TransformPlugin>()
+        .disable::<LogPlugin>();
+
+    let default_plugins = if debug_window_enabled {
+        default_plugins
+    } else {
+        default_plugins
             .disable::<GizmoPlugin>()
-            .disable::<GizmoRenderPlugin>(),
+            .disable::<GizmoRenderPlugin>()
+    };
+
+    app.add_plugins((
+        default_plugins,
         MaterialsPlugin,
         BigSpaceDefaultPlugins,
         SettingsPlugin {},
@@ -139,10 +138,6 @@ pub fn setup_app(
 
     if debug_window_enabled {
         app.add_plugins((
-            UiPlugin,
-            UiRenderPlugin,
-            GizmoPlugin,
-            GizmoRenderPlugin,
             EguiPlugin::default(),
             DebugGizmosPlugin,
             EditorPlugin {},
