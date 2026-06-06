@@ -507,6 +507,7 @@ import {
 } from '@/composables/maplibre/controls'
 import {
   createDynamicComposable,
+  createToggledComposable,
   onScopeDisposeLifo,
   watchDefinedOnce,
 } from '@/composables/helper.ts'
@@ -742,11 +743,13 @@ const closePendingBevyFrameBitmap = () => {
 let pendingBevyFrame = 0
 let bevyTickFailure = false
 
-const frameDiagnostics = useFrameDiagnostics()
+const frameDiagnostics = createToggledComposable(frameDiagnosticsVisible, () =>
+  useFrameDiagnostics(),
+)
 
 watch(bevyMount, () => {
   bevyTickFailure = false
-  frameDiagnostics.reset()
+  frameDiagnostics.value?.reset()
   closePendingBevyFrameBitmap()
   // incrementing frame to invalidate potential pending frame
   ++pendingBevyFrame
@@ -754,7 +757,7 @@ watch(bevyMount, () => {
 
 watch(frameDiagnosticsVisible, (visible) => {
   if (!visible) {
-    frameDiagnostics.reset()
+    frameDiagnostics.value?.reset()
   }
 })
 
@@ -810,7 +813,7 @@ const tickBevyAndProduceFrame = async () => {
       frame.debugBitmap?.close()
     }
   } finally {
-    frameDiagnostics.pushFrame({
+    frameDiagnostics.value?.pushFrame({
       startedAtMs: frameStartedAt,
       endedAtMs: performance.now(),
     })
