@@ -137,11 +137,7 @@ pub fn setup_app(
     ));
 
     if debug_window_enabled {
-        app.add_plugins((
-            EguiPlugin::default(),
-            DebugGizmosPlugin,
-            EditorPlugin {},
-        ));
+        app.add_plugins((EguiPlugin::default(), DebugGizmosPlugin, EditorPlugin {}));
 
         app.insert_resource(EguiGlobalSettings {
             // requires winit which is disabled as windows need manual management

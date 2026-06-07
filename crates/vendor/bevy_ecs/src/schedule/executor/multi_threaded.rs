@@ -788,7 +788,7 @@ impl ExecutorState {
                         }
                     };
                     #[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
-                    let run_system = || {
+                    let mut run_system = || {
                         if let Err(RunSystemError::Failed(err)) =
                             __rust_begin_short_backtrace::run_unsafe(
                                 system,

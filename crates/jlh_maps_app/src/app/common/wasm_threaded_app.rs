@@ -4,7 +4,6 @@ use bevy::app::{
     SpawnScene, Startup, Update,
 };
 use bevy::pbr::{MeshInputUniform, MeshUniform};
-use bevy::render::{ExtractSchedule, RenderApp};
 use bevy::render::batching::gpu_preprocessing::BatchedInstanceBuffers;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::PipelineCache;
@@ -19,6 +18,8 @@ use bevy::render::texture::{
 use bevy::render::view::{
     ExtractedWindows, ViewDepthTexture, ViewTarget, ViewTargetAttachments, WindowSurfaces,
 };
+use bevy::render::{ExtractSchedule, RenderApp};
+use std::fmt::Debug;
 use tracing::{debug, warn};
 
 use bevy::ecs::schedule::{ExecutorKind, Schedules, ThreadLocalResources};
@@ -159,36 +160,61 @@ fn configure_wasm_threaded_schedules(app: &mut App) {
 }
 
 fn configure_low_work_main_schedules(world: &mut World) {
-    configure_schedule(world, "main world", Main, ExecutorKind::SingleThreaded);
-    configure_schedule(
+    configure_optional_schedule(world, "main world", Main, ExecutorKind::SingleThreaded);
+    configure_optional_schedule(
         world,
         "main world",
         RunFixedMainLoop,
         ExecutorKind::SingleThreaded,
     );
-    configure_schedule(world, "main world", FixedMain, ExecutorKind::SingleThreaded);
-    configure_schedule(world, "main world", First, ExecutorKind::SingleThreaded);
-    configure_schedule(world, "main world", SpawnScene, ExecutorKind::SingleThreaded);
-    configure_schedule(world, "main world", Last, ExecutorKind::SingleThreaded);
-    configure_schedule(world, "main world", FixedFirst, ExecutorKind::SingleThreaded);
-    configure_schedule(
+    configure_optional_schedule(world, "main world", FixedMain, ExecutorKind::SingleThreaded);
+    configure_optional_schedule(world, "main world", First, ExecutorKind::SingleThreaded);
+    configure_optional_schedule(
+        world,
+        "main world",
+        SpawnScene,
+        ExecutorKind::SingleThreaded,
+    );
+    configure_optional_schedule(world, "main world", Last, ExecutorKind::SingleThreaded);
+    configure_optional_schedule(
+        world,
+        "main world",
+        FixedFirst,
+        ExecutorKind::SingleThreaded,
+    );
+    configure_optional_schedule(
         world,
         "main world",
         FixedPreUpdate,
         ExecutorKind::SingleThreaded,
     );
-    configure_schedule(world, "main world", FixedUpdate, ExecutorKind::SingleThreaded);
-    configure_schedule(
+    configure_optional_schedule(
+        world,
+        "main world",
+        FixedUpdate,
+        ExecutorKind::SingleThreaded,
+    );
+    configure_optional_schedule(
         world,
         "main world",
         FixedPostUpdate,
         ExecutorKind::SingleThreaded,
     );
-    configure_schedule(world, "main world", FixedLast, ExecutorKind::SingleThreaded);
+    configure_optional_schedule(world, "main world", FixedLast, ExecutorKind::SingleThreaded);
 
-    configure_schedule(world, "main world", PreStartup, ExecutorKind::SingleThreaded);
-    configure_schedule(world, "main world", Startup, ExecutorKind::SingleThreaded);
-    configure_schedule(world, "main world", PostStartup, ExecutorKind::SingleThreaded);
+    configure_optional_schedule(
+        world,
+        "main world",
+        PreStartup,
+        ExecutorKind::SingleThreaded,
+    );
+    configure_optional_schedule(world, "main world", Startup, ExecutorKind::SingleThreaded);
+    configure_optional_schedule(
+        world,
+        "main world",
+        PostStartup,
+        ExecutorKind::SingleThreaded,
+    );
 }
 
 fn configure_hot_main_schedules(world: &mut World) {
@@ -222,8 +248,27 @@ fn configure_world_schedules(world: &mut World, world_name: &str, executor_kind:
 fn configure_schedule(
     world: &mut World,
     world_name: &str,
-    label: impl bevy::ecs::schedule::ScheduleLabel,
+    label: impl bevy::ecs::schedule::ScheduleLabel + Clone + Debug,
     executor_kind: ExecutorKind,
+) {
+    configure_schedule_inner(world, world_name, label, executor_kind, true);
+}
+
+fn configure_optional_schedule(
+    world: &mut World,
+    world_name: &str,
+    label: impl bevy::ecs::schedule::ScheduleLabel + Clone + Debug,
+    executor_kind: ExecutorKind,
+) {
+    configure_schedule_inner(world, world_name, label, executor_kind, false);
+}
+
+fn configure_schedule_inner(
+    world: &mut World,
+    world_name: &str,
+    label: impl bevy::ecs::schedule::ScheduleLabel + Clone + Debug,
+    executor_kind: ExecutorKind,
+    warn_if_missing: bool,
 ) {
     let Some(mut schedules) = world.get_resource_mut::<Schedules>() else {
         warn!(
@@ -232,8 +277,16 @@ fn configure_schedule(
         return;
     };
 
-    let Some(schedule) = schedules.get_mut(label) else {
-        warn!("Could not configure wasm threaded {world_name} schedule: schedule is missing");
+    let Some(schedule) = schedules.get_mut(label.clone()) else {
+        if warn_if_missing {
+            warn!(
+                "Could not configure wasm threaded {world_name} schedule: schedule {label:?} is missing"
+            );
+        } else {
+            debug!(
+                "Skipped optional wasm threaded {world_name} schedule override: schedule {label:?} is missing"
+            );
+        }
         return;
     };
 
