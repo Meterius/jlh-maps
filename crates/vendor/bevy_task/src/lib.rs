@@ -109,7 +109,10 @@ cfg::switch! {
     cfg::wasm_threads => {
         mod wasm_threaded_task_pool;
 
-        pub use wasm_threaded_task_pool::{Scope, TaskPool, TaskPoolBuilder, ThreadExecutor};
+        pub use wasm_threaded_task_pool::{
+            Scope, TaskPool, TaskPoolBuilder, ThreadExecutor, query_par_spawn_on_rayon,
+            with_query_par_spawn_on_rayon,
+        };
     }
     cfg::multi_threaded => {
         mod task_pool;

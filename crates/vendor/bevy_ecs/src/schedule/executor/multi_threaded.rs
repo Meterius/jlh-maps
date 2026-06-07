@@ -2,6 +2,8 @@ use alloc::{boxed::Box, vec::Vec};
 use bevy_platform::cell::SyncUnsafeCell;
 use bevy_platform::sync::Arc;
 use bevy_tasks::{ComputeTaskPool, Scope, TaskPool, ThreadExecutor};
+#[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+use bevy_tasks::with_query_par_spawn_on_rayon;
 use concurrent_queue::ConcurrentQueue;
 use core::{any::Any, panic::AssertUnwindSafe};
 use fixedbitset::FixedBitSet;
@@ -383,6 +385,45 @@ impl<'scope, 'env: 'scope, 'sys> Context<'scope, 'env, 'sys> {
         self.tick_executor();
     }
 
+    fn system_completed_on_scope_thread(
+        &self,
+        system_index: usize,
+        res: Result<(), Box<dyn Any + Send>>,
+        system: &ScheduleSystem,
+    ) {
+        let Some((conditions, mut guard)) = self.try_lock() else {
+            self.system_completed(system_index, res, system);
+            return;
+        };
+
+        for result in self.environment.executor.system_completion.try_iter() {
+            guard.finish_system_and_handle_dependents(result);
+        }
+
+        guard.finish_system_and_handle_dependents(SystemResult { system_index });
+
+        if let Err(payload) = res {
+            #[cfg(feature = "std")]
+            #[expect(clippy::print_stderr, reason = "Allowed behind `std` feature gate.")]
+            {
+                eprintln!("Encountered a panic in system `{}`!", system.name());
+            }
+            let mut panic_payload = self.environment.executor.panic_payload.lock().unwrap();
+            *panic_payload = Some(payload);
+        }
+
+        // SAFETY: finishing the local system above released its world accesses
+        // before new ready systems are spawned.
+        unsafe {
+            guard.spawn_system_tasks(self, conditions);
+        }
+        drop(guard);
+
+        if !self.environment.executor.system_completion.is_empty() {
+            self.tick_executor();
+        }
+    }
+
     #[expect(
         clippy::mut_from_ref,
         reason = "Field is only accessed here and is guarded by lock with a documented safety comment"
@@ -545,11 +586,24 @@ impl ExecutorState {
                 if self.system_task_metadata[system_index].is_exclusive {
                     // SAFETY: `can_run` returned true for this system,
                     // which means no systems are currently borrowed.
+                    #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                    unsafe {
+                        self.run_exclusive_system_inline(context, system_index);
+                    }
+                    #[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
                     unsafe {
                         self.spawn_exclusive_system_task(context, system_index);
                     }
+                    #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                    {
+                        check_for_new_ready_systems = true;
+                        break;
+                    }
+                    #[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
+                    {
                     check_for_new_ready_systems = false;
                     break;
+                    }
                 }
 
                 // SAFETY:
@@ -567,7 +621,7 @@ impl ExecutorState {
         self.ready_systems_copy = ready_systems;
     }
 
-    fn can_run(&mut self, system_index: usize, conditions: &mut Conditions) -> bool {
+    fn can_run(&self, system_index: usize, conditions: &Conditions) -> bool {
         let system_meta = &self.system_task_metadata[system_index];
         if system_meta.is_exclusive && self.num_running_systems > 0 {
             return false;
@@ -707,6 +761,7 @@ impl ExecutorState {
         let context = *context;
 
         let system_meta = &self.system_task_metadata[system_index];
+        let requires_local_thread = system_meta.requires_local_thread();
 
         let task = async move {
             let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -715,11 +770,90 @@ impl ExecutorState {
                 // access the world data used by the system.
                 // - `is_exclusive` returned false
                 unsafe {
+                    #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                    let run_system = || {
+                        if let Err(RunSystemError::Failed(err)) =
+                            __rust_begin_short_backtrace::run_unsafe(
+                                system,
+                                context.environment.world_cell,
+                            )
+                        {
+                            (context.error_handler)(
+                                err,
+                                ErrorContext::System {
+                                    name: system.name(),
+                                    last_run: system.get_last_run(),
+                                },
+                            );
+                        }
+                    };
+                    #[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
+                    let run_system = || {
+                        if let Err(RunSystemError::Failed(err)) =
+                            __rust_begin_short_backtrace::run_unsafe(
+                                system,
+                                context.environment.world_cell,
+                            )
+                        {
+                            (context.error_handler)(
+                                err,
+                                ErrorContext::System {
+                                    name: system.name(),
+                                    last_run: system.get_last_run(),
+                                },
+                            );
+                        }
+                    };
+
+                    #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                    with_query_par_spawn_on_rayon(!requires_local_thread, run_system);
+                    #[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
+                    run_system();
+                };
+            }));
+            if requires_local_thread {
+                context.system_completed_on_scope_thread(system_index, res, system);
+            } else {
+                context.system_completed(system_index, res, system);
+            }
+        };
+
+        if requires_local_thread {
+            self.local_thread_running = true;
+            context.scope.spawn_on_external(task);
+        } else {
+            context.scope.spawn(task);
+        }
+    }
+
+    /// # Safety
+    /// Caller must ensure no systems are currently borrowed.
+    #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+    unsafe fn run_exclusive_system_inline(&mut self, context: &Context, system_index: usize) {
+        // SAFETY: this system is not running, no other reference exists
+        let system = &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
+
+        self.exclusive_running = true;
+        self.local_thread_running = true;
+
+        let res = if is_apply_deferred(&**system) {
+            // TODO: avoid allocation
+            let unapplied_systems = self.unapplied_systems.clone();
+            self.unapplied_systems.clear();
+
+            // SAFETY: `can_run` returned true for this system, which means
+            // that no other systems currently have access to the world.
+            let world = unsafe { context.environment.world_cell.world_mut() };
+            apply_deferred(&unapplied_systems, context.environment.systems, world)
+        } else {
+            // SAFETY: `can_run` returned true for this system, which means
+            // that no other systems currently have access to the world.
+            let world = unsafe { context.environment.world_cell.world_mut() };
+            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                let run_system = || {
                     if let Err(RunSystemError::Failed(err)) =
-                        __rust_begin_short_backtrace::run_unsafe(
-                            system,
-                            context.environment.world_cell,
-                        )
+                        __rust_begin_short_backtrace::run(system, world)
                     {
                         (context.error_handler)(
                             err,
@@ -730,20 +864,44 @@ impl ExecutorState {
                         );
                     }
                 };
-            }));
-            context.system_completed(system_index, res, system);
+                #[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
+                let run_system = || {
+                    if let Err(RunSystemError::Failed(err)) =
+                        __rust_begin_short_backtrace::run(system, world)
+                    {
+                        (context.error_handler)(
+                            err,
+                            ErrorContext::System {
+                                name: system.name(),
+                                last_run: system.get_last_run(),
+                            },
+                        );
+                    }
+                };
+
+                #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                with_query_par_spawn_on_rayon(false, run_system);
+                #[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
+                run_system();
+            }))
         };
 
-        if system_meta.requires_local_thread() {
-            self.local_thread_running = true;
-            context.scope.spawn_on_external(task);
-        } else {
-            context.scope.spawn(task);
+        self.finish_system_and_handle_dependents(SystemResult { system_index });
+
+        if let Err(payload) = res {
+            #[cfg(feature = "std")]
+            #[expect(clippy::print_stderr, reason = "Allowed behind `std` feature gate.")]
+            {
+                eprintln!("Encountered a panic in system `{}`!", system.name());
+            }
+            let mut panic_payload = context.environment.executor.panic_payload.lock().unwrap();
+            *panic_payload = Some(payload);
         }
     }
 
     /// # Safety
     /// Caller must ensure no systems are currently borrowed.
+    #[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
     unsafe fn spawn_exclusive_system_task(&mut self, context: &Context, system_index: usize) {
         // SAFETY: this system is not running, no other reference exists
         let system = &mut unsafe { &mut *context.environment.systems[system_index].get() }.system;
@@ -759,7 +917,7 @@ impl ExecutorState {
                 // that no other systems currently have access to the world.
                 let world = unsafe { context.environment.world_cell.world_mut() };
                 let res = apply_deferred(&unapplied_systems, context.environment.systems, world);
-                context.system_completed(system_index, res, system);
+                context.system_completed_on_scope_thread(system_index, res, system);
             };
 
             context.scope.spawn_on_scope(task);
@@ -781,7 +939,7 @@ impl ExecutorState {
                         );
                     }
                 }));
-                context.system_completed(system_index, res, system);
+                context.system_completed_on_scope_thread(system_index, res, system);
             };
 
             context.scope.spawn_on_scope(task);

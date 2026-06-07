@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use bevy_platform::sync::Arc;
 use concurrent_queue::ConcurrentQueue;
-use core::{future::Future, marker::PhantomData, mem, panic::AssertUnwindSafe};
+use core::{cell::Cell, future::Future, marker::PhantomData, mem, panic::AssertUnwindSafe};
 use futures_lite::FutureExt;
 use std::{
     sync::atomic::{AtomicUsize, Ordering},
@@ -12,11 +12,41 @@ use crate::{Task, block_on, executor::LocalExecutor as Executor};
 
 thread_local! {
     static LOCAL_EXECUTOR: Executor<'static> = const { Executor::new() };
+    static QUERY_PAR_SPAWN_ON_RAYON: Cell<bool> = const { Cell::new(false) };
 }
 
 type Panic = Box<dyn core::any::Any + Send + 'static>;
 type TaskResult<T> = Result<T, Panic>;
 type LocalScopeJob<'scope> = Box<dyn FnOnce() + Send + 'scope>;
+
+/// Returns whether query parallel iterators may use Rayon for scoped jobs.
+///
+/// The ECS scheduler sets this per system from routing metadata. Generic task
+/// pool scopes remain local by default because they may capture wasm
+/// thread-affine browser or GPU wrappers.
+pub fn query_par_spawn_on_rayon() -> bool {
+    QUERY_PAR_SPAWN_ON_RAYON.with(Cell::get)
+}
+
+/// Runs `f` while setting whether query parallel iterators may use Rayon.
+pub fn with_query_par_spawn_on_rayon<R>(enabled: bool, f: impl FnOnce() -> R) -> R {
+    struct RestoreQueryParSpawnOnRayon<'a> {
+        value: &'a Cell<bool>,
+        previous: bool,
+    }
+
+    impl Drop for RestoreQueryParSpawnOnRayon<'_> {
+        fn drop(&mut self) {
+            self.value.set(self.previous);
+        }
+    }
+
+    QUERY_PAR_SPAWN_ON_RAYON.with(|value| {
+        let previous = value.replace(enabled);
+        let _restore = RestoreQueryParSpawnOnRayon { value, previous };
+        f()
+    })
+}
 
 /// Used to create a [`TaskPool`].
 #[derive(Debug, Default, Clone)]
@@ -190,6 +220,7 @@ impl TaskPool {
                 Err(payload) => std::panic::resume_unwind(payload),
             }
         }
+
         output
     }
 
@@ -210,7 +241,6 @@ impl TaskPool {
 
             if !ran_job {
                 rayon::yield_now();
-                core::hint::spin_loop();
             }
         }
     }
@@ -294,13 +324,10 @@ impl<'scope, 'env, T: Send + 'scope> Scope<'scope, 'env, T> {
     }
 
     fn spawn_local_job<Fut: Future<Output = T> + 'scope + Send>(&self, f: Fut) {
-        let pending_tasks = self.pending_tasks;
         let results = self.results;
-        pending_tasks.fetch_add(1, Ordering::Release);
         let job = Box::new(move || {
             let result = block_on(AssertUnwindSafe(f).catch_unwind());
             let _ = results.push(result);
-            pending_tasks.fetch_sub(1, Ordering::Release);
         });
         let _ = self.local_jobs.push(job);
     }

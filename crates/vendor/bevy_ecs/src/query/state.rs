@@ -30,6 +30,24 @@ use super::{
     QueryManyUniqueIter, QuerySingleError, ROQueryItem, ReadOnlyQueryData,
 };
 
+#[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+macro_rules! scoped_query_tasks {
+    ($pool:expr, |$scope:ident| $body:block) => {{
+        if bevy_tasks::query_par_spawn_on_rayon() {
+            $pool.scope_with_executor(false, None, |$scope| $body)
+        } else {
+            $pool.scope(|$scope| $body)
+        }
+    }};
+}
+
+#[cfg(not(all(target_arch = "wasm32", feature = "wasm_threads")))]
+macro_rules! scoped_query_tasks {
+    ($pool:expr, |$scope:ident| $body:block) => {
+        $pool.scope(|$scope| $body)
+    };
+}
+
 /// An ID for either a table or an archetype. Used for Query iteration.
 ///
 /// Query iteration is exclusively dense (over tables) or archetypal (over archetypes) based on whether
@@ -1451,7 +1469,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         // QueryState::par_many_fold_init_unchecked_manual, QueryState::par_many_unique_fold_init_unchecked_manual
         use arrayvec::ArrayVec;
 
-        bevy_tasks::ComputeTaskPool::get().scope(|scope| {
+        scoped_query_tasks!(bevy_tasks::ComputeTaskPool::get(), |scope| {
             // SAFETY: We only access table data that has been registered in `self.component_access`.
             let tables = unsafe { &world.storages().tables };
             let archetypes = world.archetypes();
@@ -1569,7 +1587,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         // QueryIter, QueryIterationCursor, QueryManyIter, QueryCombinationIter,QueryState::par_fold_init_unchecked_manual
         // QueryState::par_many_fold_init_unchecked_manual, QueryState::par_many_unique_fold_init_unchecked_manual
 
-        bevy_tasks::ComputeTaskPool::get().scope(|scope| {
+        scoped_query_tasks!(bevy_tasks::ComputeTaskPool::get(), |scope| {
             let chunks = entity_list.chunks_exact(batch_size as usize);
             let remainder = chunks.remainder();
 
@@ -1635,7 +1653,7 @@ impl<D: ReadOnlyQueryData, F: QueryFilter> QueryState<D, F> {
         // QueryIter, QueryIterationCursor, QueryManyIter, QueryCombinationIter, QueryState::par_fold_init_unchecked_manual
         // QueryState::par_many_fold_init_unchecked_manual, QueryState::par_many_unique_fold_init_unchecked_manual
 
-        bevy_tasks::ComputeTaskPool::get().scope(|scope| {
+        scoped_query_tasks!(bevy_tasks::ComputeTaskPool::get(), |scope| {
             let chunks = entity_list.chunks_exact(batch_size as usize);
             let remainder = chunks.remainder();
 

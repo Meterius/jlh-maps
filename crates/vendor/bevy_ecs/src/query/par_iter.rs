@@ -9,6 +9,10 @@ use super::{QueryData, QueryFilter, QueryItem, QueryState, ReadOnlyQueryData};
 
 use alloc::vec::Vec;
 
+const WASM_PAR_ITER_SERIAL_MAX_STORAGE_ENTITY_COUNT: usize = 2048;
+const WASM_PAR_ITER_EFFECTIVE_THREAD_CAP: usize = 8;
+const WASM_PAR_ITER_MIN_BATCH_SIZE: u32 = 1024;
+
 /// A parallel iterator over query results of a [`Query`](crate::system::Query).
 ///
 /// This struct is created by the [`Query::par_iter`](crate::system::Query::par_iter) and
@@ -108,7 +112,13 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryParIter<'w, 's, D, F> {
         ))]
         {
             let thread_count = bevy_tasks::ComputeTaskPool::get().thread_num();
-            if thread_count <= 1 {
+            #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+            let thread_count = thread_count.min(WASM_PAR_ITER_EFFECTIVE_THREAD_CAP);
+            let max_storage_entity_count = self.max_storage_entity_count();
+            if thread_count <= 1
+                || cfg!(all(target_arch = "wasm32", feature = "wasm_threads"))
+                    && max_storage_entity_count <= WASM_PAR_ITER_SERIAL_MAX_STORAGE_ENTITY_COUNT
+            {
                 let init = init();
                 // SAFETY: See the safety comment above.
                 unsafe {
@@ -119,7 +129,11 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryParIter<'w, 's, D, F> {
                 }
             } else {
                 // Need a batch size of at least 1.
-                let batch_size = self.get_batch_size(thread_count).max(1);
+                let batch_size = self
+                    .get_batch_size(thread_count, max_storage_entity_count)
+                    .max(1);
+                #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                let batch_size = batch_size.max(WASM_PAR_ITER_MIN_BATCH_SIZE);
                 // SAFETY: See the safety comment above.
                 unsafe {
                     self.state.par_fold_init_unchecked_manual(
@@ -139,28 +153,33 @@ impl<'w, 's, D: QueryData, F: QueryFilter> QueryParIter<'w, 's, D, F> {
         feature = "multi_threaded",
         any(not(target_arch = "wasm32"), feature = "wasm_threads")
     ))]
-    fn get_batch_size(&self, thread_count: usize) -> u32 {
-        let max_items = || {
-            let id_iter = self.state.matched_storage_ids.iter();
-            if self.state.is_dense {
-                // SAFETY: We only access table metadata.
-                let tables = unsafe { &self.world.world_metadata().storages().tables };
-                id_iter
-                    // SAFETY: The if check ensures that matched_storage_ids stores TableIds
-                    .map(|id| unsafe { tables[id.table_id].entity_count() })
-                    .max()
-            } else {
-                let archetypes = &self.world.archetypes();
-                id_iter
-                    // SAFETY: The if check ensures that matched_storage_ids stores ArchetypeIds
-                    .map(|id| unsafe { archetypes[id.archetype_id].len() })
-                    .max()
-            }
-            .map(|v| v as usize)
-            .unwrap_or(0)
-        };
+    fn max_storage_entity_count(&self) -> usize {
+        let id_iter = self.state.matched_storage_ids.iter();
+        if self.state.is_dense {
+            // SAFETY: We only access table metadata.
+            let tables = unsafe { &self.world.world_metadata().storages().tables };
+            id_iter
+                // SAFETY: The if check ensures that matched_storage_ids stores TableIds
+                .map(|id| unsafe { tables[id.table_id].entity_count() })
+                .max()
+        } else {
+            let archetypes = &self.world.archetypes();
+            id_iter
+                // SAFETY: The if check ensures that matched_storage_ids stores ArchetypeIds
+                .map(|id| unsafe { archetypes[id.archetype_id].len() })
+                .max()
+        }
+        .map(|v| v as usize)
+        .unwrap_or(0)
+    }
+
+    #[cfg(all(
+        feature = "multi_threaded",
+        any(not(target_arch = "wasm32"), feature = "wasm_threads")
+    ))]
+    fn get_batch_size(&self, thread_count: usize, max_storage_entity_count: usize) -> u32 {
         self.batching_strategy
-            .calc_batch_size(max_items, thread_count) as u32
+            .calc_batch_size(|| max_storage_entity_count, thread_count) as u32
     }
 }
 
@@ -288,6 +307,8 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
         ))]
         {
             let thread_count = bevy_tasks::ComputeTaskPool::get().thread_num();
+            #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+            let thread_count = thread_count.min(WASM_PAR_ITER_EFFECTIVE_THREAD_CAP);
             if thread_count <= 1 {
                 let init = init();
                 // SAFETY: See the safety comment above.
@@ -300,6 +321,8 @@ impl<'w, 's, D: ReadOnlyQueryData, F: QueryFilter, E: EntityEquivalent + Sync>
             } else {
                 // Need a batch size of at least 1.
                 let batch_size = self.get_batch_size(thread_count).max(1);
+                #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                let batch_size = batch_size.max(WASM_PAR_ITER_MIN_BATCH_SIZE);
                 // SAFETY: See the safety comment above.
                 unsafe {
                     self.state.par_many_fold_init_unchecked_manual(
@@ -452,6 +475,8 @@ impl<'w, 's, D: QueryData, F: QueryFilter, E: EntityEquivalent + Sync>
         ))]
         {
             let thread_count = bevy_tasks::ComputeTaskPool::get().thread_num();
+            #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+            let thread_count = thread_count.min(WASM_PAR_ITER_EFFECTIVE_THREAD_CAP);
             if thread_count <= 1 {
                 let init = init();
                 // SAFETY: See the safety comment above.
@@ -464,6 +489,8 @@ impl<'w, 's, D: QueryData, F: QueryFilter, E: EntityEquivalent + Sync>
             } else {
                 // Need a batch size of at least 1.
                 let batch_size = self.get_batch_size(thread_count).max(1);
+                #[cfg(all(target_arch = "wasm32", feature = "wasm_threads"))]
+                let batch_size = batch_size.max(WASM_PAR_ITER_MIN_BATCH_SIZE);
                 // SAFETY: See the safety comment above.
                 unsafe {
                     self.state.par_many_unique_fold_init_unchecked_manual(

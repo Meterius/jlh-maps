@@ -81,7 +81,7 @@ async function wasmThreadsAvailable() {
 
 function rustThreadCount() {
   const hardwareConcurrency = globalThis.navigator?.hardwareConcurrency ?? 4
-  return Math.max(1, hardwareConcurrency)
+  return Math.max(1, Math.min(8, hardwareConcurrency))
 }
 
 export type CanvasRenderSize = {

@@ -1,6 +1,10 @@
-use bevy::app::{App, Plugin};
+use bevy::app::{
+    App, First, FixedFirst, FixedLast, FixedMain, FixedPostUpdate, FixedPreUpdate, FixedUpdate,
+    Last, Main, Plugin, PostStartup, PostUpdate, PreStartup, PreUpdate, RunFixedMainLoop,
+    SpawnScene, Startup, Update,
+};
 use bevy::pbr::{MeshInputUniform, MeshUniform};
-use bevy::render::RenderApp;
+use bevy::render::{ExtractSchedule, RenderApp};
 use bevy::render::batching::gpu_preprocessing::BatchedInstanceBuffers;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::PipelineCache;
@@ -133,6 +137,8 @@ fn mark_thread_affine_component<T: Component>(
 
 fn configure_wasm_threaded_schedules(app: &mut App) {
     configure_world_schedules(app.world_mut(), "main world", ExecutorKind::MultiThreaded);
+    configure_low_work_main_schedules(app.world_mut());
+    configure_hot_main_schedules(app.world_mut());
 
     let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
         warn!("Could not configure wasm threaded render schedules: RenderApp is missing");
@@ -142,8 +148,53 @@ fn configure_wasm_threaded_schedules(app: &mut App) {
     configure_world_schedules(
         render_app.world_mut(),
         "render world",
+        ExecutorKind::SingleThreaded,
+    );
+    configure_schedule(
+        render_app.world_mut(),
+        "render world",
+        ExtractSchedule,
         ExecutorKind::MultiThreaded,
     );
+}
+
+fn configure_low_work_main_schedules(world: &mut World) {
+    configure_schedule(world, "main world", Main, ExecutorKind::SingleThreaded);
+    configure_schedule(
+        world,
+        "main world",
+        RunFixedMainLoop,
+        ExecutorKind::SingleThreaded,
+    );
+    configure_schedule(world, "main world", FixedMain, ExecutorKind::SingleThreaded);
+    configure_schedule(world, "main world", First, ExecutorKind::SingleThreaded);
+    configure_schedule(world, "main world", SpawnScene, ExecutorKind::SingleThreaded);
+    configure_schedule(world, "main world", Last, ExecutorKind::SingleThreaded);
+    configure_schedule(world, "main world", FixedFirst, ExecutorKind::SingleThreaded);
+    configure_schedule(
+        world,
+        "main world",
+        FixedPreUpdate,
+        ExecutorKind::SingleThreaded,
+    );
+    configure_schedule(world, "main world", FixedUpdate, ExecutorKind::SingleThreaded);
+    configure_schedule(
+        world,
+        "main world",
+        FixedPostUpdate,
+        ExecutorKind::SingleThreaded,
+    );
+    configure_schedule(world, "main world", FixedLast, ExecutorKind::SingleThreaded);
+
+    configure_schedule(world, "main world", PreStartup, ExecutorKind::SingleThreaded);
+    configure_schedule(world, "main world", Startup, ExecutorKind::SingleThreaded);
+    configure_schedule(world, "main world", PostStartup, ExecutorKind::SingleThreaded);
+}
+
+fn configure_hot_main_schedules(world: &mut World) {
+    configure_schedule(world, "main world", PreUpdate, ExecutorKind::MultiThreaded);
+    configure_schedule(world, "main world", Update, ExecutorKind::MultiThreaded);
+    configure_schedule(world, "main world", PostUpdate, ExecutorKind::MultiThreaded);
 }
 
 fn configure_world_schedules(world: &mut World, world_name: &str, executor_kind: ExecutorKind) {
@@ -166,4 +217,28 @@ fn configure_world_schedules(world: &mut World, world_name: &str, executor_kind:
     }
 
     debug!("Configured {configured} wasm threaded {world_name} schedules to {executor_kind:?}");
+}
+
+fn configure_schedule(
+    world: &mut World,
+    world_name: &str,
+    label: impl bevy::ecs::schedule::ScheduleLabel,
+    executor_kind: ExecutorKind,
+) {
+    let Some(mut schedules) = world.get_resource_mut::<Schedules>() else {
+        warn!(
+            "Could not configure wasm threaded {world_name} schedule: Schedules resource is missing"
+        );
+        return;
+    };
+
+    let Some(schedule) = schedules.get_mut(label) else {
+        warn!("Could not configure wasm threaded {world_name} schedule: schedule is missing");
+        return;
+    };
+
+    let before = schedule.get_executor_kind();
+    schedule.set_executor_kind(executor_kind);
+    let runtime = schedule.get_executor_kind();
+    debug!("Configured {world_name} schedule executor override: {before:?} -> runtime {runtime:?}");
 }
