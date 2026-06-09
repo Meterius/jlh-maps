@@ -184,12 +184,7 @@ function renderTimeline(force = false) {
   }
 
   lastTimelineRenderAtMs = snapshot.sampledAtMs
-  drawTimeline(
-    timelineCanvas.value,
-    snapshot,
-    timelineMaxMs.value,
-    timelineWindowStats.value,
-  )
+  drawTimeline(timelineCanvas.value, snapshot, timelineMaxMs.value, timelineWindowStats.value)
 }
 
 type TimelineBounds = {

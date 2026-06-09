@@ -13,9 +13,11 @@ type RainViewerWeatherMaps = {
   }
 }
 
-type RainfallRasterSourceProviderOptions = {
+export type RainfallRasterSourceProviderOptions = {
   onLoadError?: (error: unknown) => void
 }
+
+export type RainfallRasterSourceProviderRet = ReturnType<typeof useRainfallRasterProvider>
 
 const RAIN_VIEWER_MANIFEST_URL = 'https://api.rainviewer.com/public/weather-maps.json'
 
