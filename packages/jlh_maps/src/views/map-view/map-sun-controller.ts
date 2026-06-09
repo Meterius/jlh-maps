@@ -9,6 +9,8 @@ export type SolarPosition = {
   elevationDegrees: number
 }
 
+export type CelestialBodyPosition = SolarPosition
+
 const MINUTES_PER_HOUR = 60
 const MILLISECONDS_PER_MINUTE = 60_000
 const SOLAR_CONTROLLER_UPDATE_INTERVAL_MS = 60_000
@@ -20,29 +22,39 @@ export function useMapSunController(
   const now = useNow({ interval: SOLAR_CONTROLLER_UPDATE_INTERVAL_MS })
 
   watchEffect(() => {
-    if (!mapViewStore.value.sun.automatic) return
+    const lighting = mapViewStore.value.lighting
+    if (!lighting.automatic) return
 
     const [longitudeDegrees, latitudeDegrees] = mapViewStore.value.view.center
-    const position = calculateAstronomyEngineSolarPosition({
-      date: getSunCalculationDate(
-        mapViewStore.value.sun,
-        mapViewStore.value.view.center,
-        now.value,
-      ),
+    const date = getSunCalculationDate(lighting, mapViewStore.value.view.center, now.value)
+    const sunPosition = calculateAstronomyEngineBodyPosition({
+      body: Body.Sun,
+      date,
+      latitudeDegrees,
+      longitudeDegrees,
+    })
+    const moonPosition = calculateAstronomyEngineBodyPosition({
+      body: Body.Moon,
+      date,
       latitudeDegrees,
       longitudeDegrees,
     })
 
-    mapViewStore.value.sun.azimuthDegrees = roundToPrecision(position.azimuthDegrees, 2)
-    mapViewStore.value.sun.elevationDegrees = roundToPrecision(position.elevationDegrees, 2)
+    lighting.sun.azimuthDegrees = roundToPrecision(sunPosition.azimuthDegrees, 2)
+    lighting.sun.elevationDegrees = roundToPrecision(sunPosition.elevationDegrees, 2)
+    lighting.moon.azimuthDegrees = roundToPrecision(moonPosition.azimuthDegrees, 2)
+    lighting.moon.elevationDegrees = roundToPrecision(moonPosition.elevationDegrees, 2)
   })
 
   watchEffect(() => {
     const mapViewSettings = bevyMapViewSettings?.()
     if (!mapViewSettings) return
 
-    mapViewSettings.value.sunAzimuthDegrees = mapViewStore.value.sun.azimuthDegrees
-    mapViewSettings.value.sunElevationDegrees = mapViewStore.value.sun.elevationDegrees
+    const { lighting } = mapViewStore.value
+    mapViewSettings.value.sunAzimuthDegrees = lighting.sun.azimuthDegrees
+    mapViewSettings.value.sunElevationDegrees = lighting.sun.elevationDegrees
+    mapViewSettings.value.moonAzimuthDegrees = lighting.moon.azimuthDegrees
+    mapViewSettings.value.moonElevationDegrees = lighting.moon.elevationDegrees
   })
 
   return {
@@ -51,13 +63,13 @@ export function useMapSunController(
 }
 
 export function getSunCalculationDate(
-  sun: Pick<MapViewStore['sun'], 'time'>,
+  lighting: Pick<MapViewStore['lighting'], 'time'>,
   center: [number, number],
   now: Date,
 ) {
-  if (!sun.time) return now
+  if (!lighting.time) return now
 
-  return parseCenterLocalDateTimeInputValue(sun.time, center) ?? now
+  return parseCenterLocalDateTimeInputValue(lighting.time, center) ?? now
 }
 
 // Time
@@ -115,12 +127,31 @@ export function calculateAstronomyEngineSolarPosition({
   latitudeDegrees: number
   longitudeDegrees: number
 }): SolarPosition {
+  return calculateAstronomyEngineBodyPosition({
+    body: Body.Sun,
+    date,
+    latitudeDegrees,
+    longitudeDegrees,
+  })
+}
+
+export function calculateAstronomyEngineBodyPosition({
+  body,
+  date,
+  latitudeDegrees,
+  longitudeDegrees,
+}: {
+  body: Body
+  date: Date
+  latitudeDegrees: number
+  longitudeDegrees: number
+}): CelestialBodyPosition {
   const observer = new Observer(
     clamp(latitudeDegrees, -90, 90),
     normalizeLongitude(longitudeDegrees),
     0,
   )
-  const equatorial = Equator(Body.Sun, date, observer, true, true)
+  const equatorial = Equator(body, date, observer, true, true)
   const horizontal = Horizon(date, observer, equatorial.ra, equatorial.dec, 'normal')
 
   return {

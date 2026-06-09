@@ -11,12 +11,7 @@ export type MapViewStore = {
     pitch: number
     bearing: number
   }
-  sun: {
-    automatic: boolean
-    time?: string
-    azimuthDegrees: number
-    elevationDegrees: number
-  }
+  lighting: MapViewLightingSettings
   lod: MapLibreLodSettings
   rainfallEnabled: boolean
   baseStyleType: MapViewBaseStyleType
@@ -24,6 +19,18 @@ export type MapViewStore = {
   bevyCanvasEnabled: boolean
   frameStatisticsEnabled: boolean
   advancedRoadsEnabled: boolean
+}
+
+export type MapCelestialLightingSettings = {
+  azimuthDegrees: number
+  elevationDegrees: number
+}
+
+export type MapViewLightingSettings = {
+  automatic: boolean
+  time?: string
+  sun: MapCelestialLightingSettings
+  moon: MapCelestialLightingSettings
 }
 
 export type MapLibreLodSettings = {
@@ -94,10 +101,16 @@ function createDefaultMapViewStore(): MapViewStore {
       pitch: 0,
       bearing: 0,
     },
-    sun: {
+    lighting: {
       automatic: false,
-      azimuthDegrees: 11.31,
-      elevationDegrees: 32.52,
+      sun: {
+        azimuthDegrees: 11.31,
+        elevationDegrees: 32.52,
+      },
+      moon: {
+        azimuthDegrees: 191.31,
+        elevationDegrees: -32.52,
+      },
     },
     lod: { ...DEFAULT_MAPLIBRE_LOD_SETTINGS },
     rainfallEnabled: false,
@@ -142,9 +155,17 @@ function mergeMapViewStoreDefaults(
       ...defaults.view,
       ...storageValue.view,
     },
-    sun: {
-      ...defaults.sun,
-      ...storageValue.sun,
+    lighting: {
+      ...defaults.lighting,
+      ...storageValue.lighting,
+      sun: {
+        ...defaults.lighting.sun,
+        ...storageValue.lighting?.sun,
+      },
+      moon: {
+        ...defaults.lighting.moon,
+        ...storageValue.lighting?.moon,
+      },
     },
     lod: {
       ...defaults.lod,

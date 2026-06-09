@@ -2,6 +2,7 @@ use crate::app::common::editor::GameViewCamera;
 use crate::app::main::AppWindows;
 use crate::app::map::camera::MapViewCamera;
 use crate::app::map::feature_layers::make_bucket_manager;
+use crate::app::map::lighting::{CelestialDirectionalLight, CelestialDirectionalLightKind};
 use crate::app::map::terrain::TerrainTileManager;
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{LngLat, MercatorCoordinate};
@@ -29,8 +30,6 @@ pub(super) struct CorePlugin;
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MapViewSettings::default());
-
-        app.add_systems(PreUpdate, sync_map_sun);
     }
 }
 
@@ -44,6 +43,8 @@ pub struct MapViewSettings {
     pub enable_shadows: bool,
     pub sun_azimuth_degrees: f32,
     pub sun_elevation_degrees: f32,
+    pub moon_azimuth_degrees: f32,
+    pub moon_elevation_degrees: f32,
 
     pub feature_visibility_distance: f32,
 }
@@ -57,37 +58,11 @@ impl Default for MapViewSettings {
             enable_shadows: true,
             sun_azimuth_degrees: 11.31,
             sun_elevation_degrees: 32.52,
+            moon_azimuth_degrees: 191.31,
+            moon_elevation_degrees: -32.52,
             feature_visibility_distance: 10.0,
         }
     }
-}
-
-#[derive(Debug, Reflect, Component)]
-struct MapViewShadowLight;
-
-fn sync_map_sun(
-    mv_settings: Res<MapViewSettings>,
-    mut lights: Query<(&mut DirectionalLight, &mut Transform), With<MapViewShadowLight>>,
-) {
-    let direction = map_sun_direction(&mv_settings);
-
-    for (mut light, mut transform) in lights.iter_mut() {
-        light.shadows_enabled = mv_settings.enable_shadows;
-        *transform = Transform::default().looking_to(direction, Vec3::Z);
-    }
-}
-
-fn map_sun_direction(settings: &MapViewSettings) -> Vec3 {
-    let azimuth = settings.sun_azimuth_degrees.to_radians();
-    let elevation = settings.sun_elevation_degrees.clamp(0.0, 89.0).to_radians();
-    let horizontal = elevation.cos();
-
-    Vec3::new(
-        horizontal * azimuth.cos(),
-        horizontal * azimuth.sin(),
-        -elevation.sin(),
-    )
-    .normalize_or_zero()
 }
 
 #[derive(Debug, Reflect, Component)]
@@ -123,33 +98,52 @@ pub fn spawn_map_view(
     let maximum_distance = (world_per_meter * SHADOW_MAX_DISTANCE_METERS) as f32;
     let minimum_distance = (world_per_meter * SHADOW_MIN_DISTANCE_METERS) as f32;
 
-    commands.entity(map_view_eid).with_child((
-        DirectionalLight {
-            color: Color::WHITE,
-            illuminance: 4000.,
+    let directional_light = DirectionalLight {
             shadows_enabled: true,
             shadow_depth_bias: SHADOW_DEPTH_BIAS,
             shadow_normal_bias: SHADOW_NORMAL_BIAS,
             ..default()
-        },
-        CascadeShadowConfigBuilder {
-            num_cascades: 3,
-            first_cascade_far_bound,
-            maximum_distance,
-            minimum_distance,
-            ..default()
-        }
-        .build(),
-        Transform::default().looking_to(map_sun_direction(&MapViewSettings::default()), Vec3::Z),
-        CellCoord::default(),
-        MapViewShadowLight,
-    ));
+        };
 
-    let ambient_light = AmbientLight {
-        color: Color::WHITE,
-        brightness: 1100.0,
-        ..default()
-    };
+    commands.entity(map_view_eid).with_children(|parent| {
+        parent.spawn((
+            Name::new("Sun Directional Light"),
+            directional_light.clone(),
+            CascadeShadowConfigBuilder {
+                num_cascades: 3,
+                first_cascade_far_bound,
+                maximum_distance,
+                minimum_distance,
+                ..default()
+            }
+            .build(),
+            CellCoord::default(),
+            Visibility::Inherited,
+            CelestialDirectionalLight {
+                kind: CelestialDirectionalLightKind::Sun,
+            },
+        ));
+
+        parent.spawn((
+            Name::new("Moon Directional Light"),
+            directional_light,
+            CascadeShadowConfigBuilder {
+                num_cascades: 3,
+                first_cascade_far_bound,
+                maximum_distance,
+                minimum_distance,
+                ..default()
+            }
+            .build(),
+            CellCoord::default(),
+            Visibility::Inherited,
+            CelestialDirectionalLight {
+                kind: CelestialDirectionalLightKind::Moon,
+            },
+        ));
+    });
+
+    let ambient_light = AmbientLight { ..default() };
 
     if let Some(debug_eid) = app_windows.debug_eid {
         commands.entity(map_view_eid).with_children(|parent| {

@@ -22,6 +22,8 @@ export type UseBevyReturn = ReturnType<typeof useBevy>
 
 const DEFAULT_SUN_AZIMUTH_DEGREES = 11.31
 const DEFAULT_SUN_ELEVATION_DEGREES = 32.52
+const DEFAULT_MOON_AZIMUTH_DEGREES = 191.31
+const DEFAULT_MOON_ELEVATION_DEGREES = -32.52
 const DEFAULT_FEATURE_VISIBILITY_DISTANCE = 10
 
 interface BevyInstanceState {
@@ -69,6 +71,8 @@ export function mountBevy(
       enableShadows: true,
       sunElevationDegrees: DEFAULT_SUN_ELEVATION_DEGREES,
       sunAzimuthDegrees: DEFAULT_SUN_AZIMUTH_DEGREES,
+      moonElevationDegrees: DEFAULT_MOON_ELEVATION_DEGREES,
+      moonAzimuthDegrees: DEFAULT_MOON_AZIMUTH_DEGREES,
       featureVisibilityDistance: DEFAULT_FEATURE_VISIBILITY_DISTANCE,
     }),
     mapViewCameraSettings: ref({

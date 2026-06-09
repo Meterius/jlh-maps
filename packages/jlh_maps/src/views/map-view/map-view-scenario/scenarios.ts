@@ -81,10 +81,16 @@ function createScenarioMapViewStore(): MapViewStore {
       pitch: 70,
       bearing: -33.07185377494426,
     },
-    sun: {
+    lighting: {
       automatic: false,
-      azimuthDegrees: 11.31,
-      elevationDegrees: 32.52,
+      sun: {
+        azimuthDegrees: 11.31,
+        elevationDegrees: 32.52,
+      },
+      moon: {
+        azimuthDegrees: 191.31,
+        elevationDegrees: -32.52,
+      },
     },
     lod: {
       maxZoomLevelsOnScreen: 4.25,

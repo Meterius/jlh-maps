@@ -3,6 +3,7 @@ pub mod core;
 pub mod feature;
 pub mod feature_layers;
 pub mod interop;
+pub mod lighting;
 pub mod terrain;
 pub mod transform;
 
@@ -18,6 +19,7 @@ impl Plugin for MapPlugin {
             terrain::TerrainPlugin,
             feature::MapFeaturePlugin,
             feature_layers::FeatureLayersPlugin,
+            lighting::LightingPlugin,
         ));
     }
 }
