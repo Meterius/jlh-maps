@@ -241,7 +241,7 @@
               <USeparator v-if="currentBaseStyleLayerSettings.bevyEnabled" />
 
               <div class="grid min-w-0 gap-1">
-                <div class="grid grid-cols-2 gap-1">
+                <div class="grid grid-cols-3 gap-1">
                   <UButton
                     label="Fancy"
                     color="neutral"
@@ -270,6 +270,18 @@
                       currentBaseStyleLayerSettings.terrainEnabled =
                         !currentBaseStyleLayerSettings.terrainEnabled
                     "
+                  />
+
+                  <UButton
+                    label="Advanced Roads"
+                    color="neutral"
+                    active-color="primary"
+                    variant="outline-solid"
+                    :active="mapViewStore.advancedRoadsEnabled"
+                    size="md"
+                    class="cursor-pointer"
+                    icon="lucide:route"
+                    @click="mapViewStore.advancedRoadsEnabled = !mapViewStore.advancedRoadsEnabled"
                   />
                 </div>
 
@@ -542,6 +554,11 @@ import {
   provideMapViewStore,
 } from '@/views/map-view/map-view-store.ts'
 import { MapViewBaseStyleType } from '@/views/map-view/map-view-types.ts'
+import {
+  ADVANCED_ROADS_BEFORE_LAYER_ID,
+  ADVANCED_ROADS_SOURCE_ID,
+  useAdvancedRoadsLayers,
+} from '@/maplibre-layers/advanced-roads-layer.ts'
 
 const props = defineProps<{
   scenarioName?: MapViewScenarioName
@@ -649,7 +666,7 @@ const bevyMount = createDynamicComposable(
     const useBevyRet = useBevy(mountBevyRet.instanceId)
 
     const useMaplibreIntegrationRet = useMaplibreIntegration(mountBevyRet.instanceId, mapKey, {
-      sourceIds: ['openmaptiles'],
+      sourceIds: ['openmaptiles', ADVANCED_ROADS_SOURCE_ID],
     })
 
     syncRef(
@@ -1345,6 +1362,15 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         }
       })
     }
+
+    // Roads
+
+    useAdvancedRoadsLayers(map, {
+      beforeId: map.getLayer(ADVANCED_ROADS_BEFORE_LAYER_ID)
+        ? ADVANCED_ROADS_BEFORE_LAYER_ID
+        : undefined,
+      visible: () => mapViewStore.value.advancedRoadsEnabled,
+    })
 
     // Bevy
 

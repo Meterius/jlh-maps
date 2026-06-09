@@ -12,3 +12,4 @@
 /crates/*/target
 /crates/vendor/*/target
 node_modules
+infra/osm2streets_pmtiles/

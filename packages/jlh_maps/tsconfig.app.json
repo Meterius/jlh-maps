@@ -9,6 +9,7 @@
     // Path mapping for cleaner imports.
     "paths": {
       "@/*": ["./src/*"],
+      "jlh_maps_roads_source_schema/schema": ["../jlh_maps_roads_source_schema/src/index.ts"],
       "maplibre-gl/src/index.ts": ["./src/types/maplibre-gl-internals/index.d.ts"],
       "maplibre-gl/src/data/dem_data.ts": ["./src/types/maplibre-gl-internals/dem_data.d.ts"],
       "maplibre-gl/src/render/terrain.ts": ["./src/types/maplibre-gl-internals/terrain.d.ts"],

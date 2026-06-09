@@ -91,7 +91,7 @@ pub fn osm2streets(args: &Osm2StreetsArgs) -> Result<()> {
         override_driving_side: None,
         country_code: String::new(),
         bikes_can_use_bus_lanes: true,
-        inferred_sidewalks: true,
+        inferred_sidewalks: false,
         parallel_street_parking_spot_length: geom::Distance::meters(8.0),
         vehicle_width_for_parking_spots: geom::Distance::meters(3.0),
         turn_on_red: true,

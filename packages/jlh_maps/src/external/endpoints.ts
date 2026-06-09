@@ -7,16 +7,18 @@ function makeAppUrl(value: string): URL {
 }
 
 export const TILESERVER_URL = makeAppUrl(import.meta.env.VITE_TILESERVER_OMT_URL)
-export const RASTER_TILESERVER_URL = makeAppUrl(import.meta.env.VITE_TILESERVER_RASTER_URL)
+export const STATIC_TILESERVER_URL = makeAppUrl(import.meta.env.VITE_TILESERVER_STATIC_URL)
 export const API_URL = makeAppUrl(import.meta.env.VITE_API_URL)
 export const VALHALLA_URL = makeAppUrl(import.meta.env.VITE_VALHALLA_URL)
+
+export const TILESERVER_ROADS_PMTILES_URL = new URL('roads/tiles.pmtiles', STATIC_TILESERVER_URL)
 
 export const TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL = import.meta.env
   .VITE_TILESERVER_OMT_STYLE_URL
   ? makeAppUrl(import.meta.env.VITE_TILESERVER_OMT_STYLE_URL)
   : new URL('styles/omt_default/style.json', TILESERVER_URL)
 
-export const TILESERVER_RASTER_SEN2_TILE_URL_PATTERN = `${RASTER_TILESERVER_URL.toString().replace(/\/$/, '')}/raster/sen2/{z}/{x}/{y}.png`
+export const TILESERVER_RASTER_SEN2_TILE_URL_PATTERN = `${STATIC_TILESERVER_URL.toString().replace(/\/$/, '')}/raster/sen2/{z}/{x}/{y}.png`
 
 export interface OsmData {
   tags: Record<string, string>

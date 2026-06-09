@@ -21,6 +21,7 @@ export type MapViewStore = {
   projection?: ProjectionSpecification
   bevyCanvasEnabled: boolean
   frameStatisticsEnabled: boolean
+  advancedRoadsEnabled: boolean
 }
 
 export type MapLibreLodSettings = {
@@ -101,6 +102,7 @@ function createDefaultMapViewStore(): MapViewStore {
     projection: { type: 'mercator' },
     bevyCanvasEnabled: false,
     frameStatisticsEnabled: false,
+    advancedRoadsEnabled: false,
   }
 }
 
