@@ -1,0 +1,29 @@
+[package]
+name = "osm2streets_ingest"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+
+[[bin]]
+name = "osm2streets_ingest"
+path = "src/bin/osm2streets_ingest.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+geojson = "0.24.2"
+geojson-vt-rs = "0.2.0"
+geozero = { version = "0.15.1", default-features = false, features = ["with-geojson", "with-mvt"] }
+indicatif = "0.17.11"
+prost = "0.14.4"
+rayon = "1.12.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.52.3", features = ["fs", "macros", "process", "rt-multi-thread", "sync"] }
+osm2streets = { git = "https://github.com/a-b-street/osm2streets", rev = "fc119c47dac567d030c6ce7c24a48896f58ed906", package = "osm2streets" }
+osmpbf = "0.3.8"
+pmtiles = { version = "0.23.0", default-features = false, features = ["write"] }
+streets_reader = { git = "https://github.com/a-b-street/osm2streets", rev = "fc119c47dac567d030c6ce7c24a48896f58ed906", package = "streets_reader" }
+abstutil = { git = "https://github.com/a-b-street/abstreet" }
+geom = { git = "https://github.com/a-b-street/geom" }

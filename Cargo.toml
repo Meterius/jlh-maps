@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/jlh_maps_app","crates/jlh_maps_core_service", "crates/sat_ingest", "crates/utilities"]
+members = ["crates/jlh_maps_app","crates/jlh_maps_core_service", "crates/osm2streets_ingest", "crates/sat_ingest", "crates/utilities"]
 exclude = ["crates/vendor/bevy_task", "crates/vendor/bevy_ecs"]
 
 [patch.crates-io]
