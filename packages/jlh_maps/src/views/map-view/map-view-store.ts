@@ -12,6 +12,8 @@ export type MapViewStore = {
     bearing: number
   }
   sun: {
+    automatic: boolean
+    time?: string
     azimuthDegrees: number
     elevationDegrees: number
   }
@@ -93,6 +95,7 @@ function createDefaultMapViewStore(): MapViewStore {
       bearing: 0,
     },
     sun: {
+      automatic: false,
       azimuthDegrees: 11.31,
       elevationDegrees: 32.52,
     },

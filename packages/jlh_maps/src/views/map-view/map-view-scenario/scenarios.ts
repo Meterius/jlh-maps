@@ -82,6 +82,7 @@ function createScenarioMapViewStore(): MapViewStore {
       bearing: -33.07185377494426,
     },
     sun: {
+      automatic: false,
       azimuthDegrees: 11.31,
       elevationDegrees: 32.52,
     },

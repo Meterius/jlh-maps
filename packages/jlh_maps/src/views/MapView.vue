@@ -259,6 +259,7 @@ import {
 import MapLayersControlPopover from '@/views/map-view/map-control-popovers/MapLayersControlPopover.vue'
 import MapLodControlPopover from '@/views/map-view/map-control-popovers/MapLodControlPopover.vue'
 import MapSunControlPopover from '@/views/map-view/map-control-popovers/MapSunControlPopover.vue'
+import { useMapSunController } from '@/views/map-view/map-sun-controller.ts'
 
 const props = defineProps<{
   scenarioName?: MapViewScenarioName
@@ -433,38 +434,6 @@ const bevyMount = createDynamicComposable(
       { immediate: true },
     )
 
-    syncRef(
-      computed({
-        get: () => mapViewStore.value.sun.azimuthDegrees,
-        set: (value) => {
-          mapViewStore.value.sun.azimuthDegrees = value
-        },
-      }),
-      computed({
-        get: () => useBevyRet.mapViewSettings.value.sunAzimuthDegrees,
-        set: (value) => {
-          useBevyRet.mapViewSettings.value.sunAzimuthDegrees = value
-        },
-      }),
-      { immediate: true },
-    )
-
-    syncRef(
-      computed({
-        get: () => mapViewStore.value.sun.elevationDegrees,
-        set: (value) => {
-          mapViewStore.value.sun.elevationDegrees = value
-        },
-      }),
-      computed({
-        get: () => useBevyRet.mapViewSettings.value.sunElevationDegrees,
-        set: (value) => {
-          useBevyRet.mapViewSettings.value.sunElevationDegrees = value
-        },
-      }),
-      { immediate: true },
-    )
-
     return {
       mountBevyRet,
       useBevyRet,
@@ -472,6 +441,8 @@ const bevyMount = createDynamicComposable(
     }
   },
 )
+
+useMapSunController(() => bevyMount.value?.useBevyRet.mapViewSettings)
 
 const bevyFrameBitmap = shallowRef<ImageBitmap | null>(null)
 
