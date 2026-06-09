@@ -83,7 +83,7 @@ services:
       - frontend_private
       - api_private
       - tiles_private
-      - raster_private
+      - static_tiles_private
       - valhalla_private
 
   postgres_osm:
@@ -114,17 +114,18 @@ services:
     networks:
       - tiles_private
 
-  raster_tile_json_server:
+  static_tile_server:
     <<: *prod-nginx-service
 
     volumes:
       # Prod CORS is handled by Traefik, so use a smaller nginx config here and
-      # keep the raster data read-only.
-      - ./raster_tile_json_server/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      # keep the static tile data read-only.
+      - ./static_tile_server/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
       - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
+      - ${OSM2STREETS_PMTILES_PATH:?OSM2STREETS_PMTILES_PATH is required}:/usr/share/nginx/html/roads/tiles.pmtiles:ro
 
     networks:
-      - raster_private
+      - static_tiles_private
 
   frontend:
     <<: *prod-nginx-service
@@ -191,7 +192,7 @@ networks:
   tiles_private:
     driver: bridge
     internal: true
-  raster_private:
+  static_tiles_private:
     driver: bridge
     internal: true
   valhalla_private:

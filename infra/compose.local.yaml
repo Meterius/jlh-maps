@@ -49,15 +49,16 @@ services:
       - "traefik.http.routers.omt_tileserver_gl.entrypoints=web"
       - "traefik.http.services.omt_tileserver_gl.loadbalancer.server.port=8080"
 
-  raster_tile_json_server:
+  static_tile_server:
     volumes:
       - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
+      - ${OSM2STREETS_PMTILES_PATH:?OSM2STREETS_PMTILES_PATH is required}:/usr/share/nginx/html/roads/tiles.pmtiles:ro
 
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.raster_tile_json_server.rule=Host(`raster.jlh_maps.localhost`) || Host(`raster.${ROOT_DOMAIN}`)"
-      - "traefik.http.routers.raster_tile_json_server.entrypoints=web"
-      - "traefik.http.services.raster_tile_json_server.loadbalancer.server.port=8080"
+      - "traefik.http.routers.static_tile_server.rule=Host(`static.jlh_maps.localhost`) || Host(`static.${ROOT_DOMAIN}`)"
+      - "traefik.http.routers.static_tile_server.entrypoints=web"
+      - "traefik.http.services.static_tile_server.loadbalancer.server.port=8080"
 
   frontend:
     volumes:

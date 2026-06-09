@@ -34,14 +34,14 @@ http:
       tls:
         certResolver: letsencrypt
 
-    raster_tile_json_server:
-      rule: Host(`raster.{{ env "ROOT_DOMAIN" }}`)
+    static_tile_server:
+      rule: Host(`static.{{ env "ROOT_DOMAIN" }}`)
       entryPoints:
         - websecure
-      service: raster_tile_json_server
+      service: static_tile_server
       middlewares:
         - public_security_headers
-        - raster_cors
+        - static_tiles_cors
         - public_rate_limit
         - public_inflight_limit
       tls:
@@ -76,10 +76,10 @@ http:
         servers:
           - url: http://omt_tileserver_gl:8080
 
-    raster_tile_json_server:
+    static_tile_server:
       loadBalancer:
         servers:
-          - url: http://raster_tile_json_server:8080
+          - url: http://static_tile_server:8080
 
     valhalla:
       loadBalancer:
@@ -105,7 +105,7 @@ http:
       inFlightReq:
         amount: 64
 
-    raster_cors:
+    static_tiles_cors:
       headers:
         accessControlAllowMethods:
           - GET
@@ -115,6 +115,11 @@ http:
           - Origin
           - Accept
           - Content-Type
+          - Range
+        accessControlExposeHeaders:
+          - Accept-Ranges
+          - Content-Length
+          - Content-Range
         accessControlAllowOriginList:
           - https://{{ env "ROOT_DOMAIN" }}
         accessControlMaxAge: 86400
