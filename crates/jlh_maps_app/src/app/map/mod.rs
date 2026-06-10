@@ -7,6 +7,7 @@ pub mod lighting;
 pub mod terrain;
 pub mod transform;
 pub mod skybox;
+pub mod utils;
 
 use bevy::prelude::*;
 

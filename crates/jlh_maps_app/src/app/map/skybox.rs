@@ -1,6 +1,7 @@
 use bevy::prelude::*;
-use crate::app::common::skybox_shader::{SkyboxShaderMaterial, SkyboxShaderMesh, SkyboxShaderPlugin};
+use crate::app::common::skybox_shader::{SkyboxShaderMaterial, SkyboxShaderMesh, SkyboxShaderParams, SkyboxShaderPlugin};
 use crate::app::map::core::MapViewSettings;
+use crate::app::map::utils::sky_model::{light_travel_direction_from_az_el_degrees, lighting_from_sun_elevation};
 
 pub struct SkyboxPlugin;
 
@@ -21,26 +22,34 @@ fn sync_skybox_material(
             continue;
         };
 
-        material.sun_direction = azimuth_elevation_to_dir4(
-            mv_settings.sun_azimuth_degrees.to_radians(),
-            mv_settings.sun_elevation_degrees.to_radians()
-        );
+        let lighting = lighting_from_sun_elevation(
+        mv_settings.sun_elevation_degrees,
+        mv_settings.moon_elevation_degrees,
+    );
 
-        material.moon_direction = azimuth_elevation_to_dir4(
-            mv_settings.moon_azimuth_degrees.to_radians(),
-            mv_settings.moon_elevation_degrees.to_radians()
-        );
+    material.sky.sun_direction = -light_travel_direction_from_az_el_degrees(
+        mv_settings.sun_azimuth_degrees,
+        mv_settings.sun_elevation_degrees,
+    ).extend(0.0);
+
+    material.sky.moon_direction = -light_travel_direction_from_az_el_degrees(
+        mv_settings.moon_azimuth_degrees,
+        mv_settings.moon_elevation_degrees,
+    ).extend(0.0);
+
+    material.sky.sun_color = lighting.sun_color.to_linear().with_alpha(lighting.sun_intensity).to_vec4();
+
+    material.sky.moon_color = lighting.moon_color.to_linear().with_alpha(lighting.moon_intensity).to_vec4();
+
+    material.sky.ambient_color = lighting.ambient_color.to_linear().with_alpha(lighting.ambient_intensity).to_vec4();
+
+    material.sky.params = SkyboxShaderParams {
+        sun_elevation_degrees: mv_settings.sun_elevation_degrees,
+        moon_elevation_degrees: mv_settings.moon_elevation_degrees,
+
+        // Add these to MapViewSettings if you want them configurable.
+        haze: 0.25,
+        exposure: 1.0,
+    };
     }
-}
-
-pub fn azimuth_elevation_to_dir4(azimuth: f32, elevation: f32) -> Vec4 {
-    let horizontal = elevation.cos();
-
-    Vec3::new(
-        horizontal * azimuth.cos(),
-        horizontal * azimuth.sin(),
-        elevation.sin(),
-    )
-        .normalize_or_zero()
-        .extend(0.0)
 }

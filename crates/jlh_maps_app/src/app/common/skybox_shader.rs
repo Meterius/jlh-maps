@@ -11,6 +11,7 @@ use bevy::{
     },
     shader::ShaderRef,
 };
+use bevy::render::render_resource::ShaderType;
 
 pub const SKYBOX_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("a2f7d6bd-7f79-4c4d-8e63-2a8c1f1a9c42");
@@ -37,12 +38,54 @@ pub struct SkyboxShaderMesh;
 #[derive(Component)]
 pub struct SkyboxShaderCamera;
 
+#[derive(ShaderType, Debug, Clone, Copy)]
+pub struct SkyboxShaderParams {
+    pub sun_elevation_degrees: f32,
+    pub moon_elevation_degrees: f32,
+    pub haze: f32,
+    pub exposure: f32,
+}
+
+impl Default for SkyboxShaderParams {
+    fn default() -> Self {
+        Self {
+            sun_elevation_degrees: 45.0,
+            moon_elevation_degrees: -45.0,
+            haze: 0.25,
+            exposure: 1.0,
+        }
+    }
+}
+
+#[derive(ShaderType, Debug, Clone, Copy)]
+pub struct SkyboxShaderUniform {
+    pub sun_direction: Vec4,
+    pub moon_direction: Vec4,
+
+    pub sun_color: Vec4,
+    pub moon_color: Vec4,
+    pub ambient_color: Vec4,
+
+    pub params: SkyboxShaderParams,
+}
+
+impl Default for SkyboxShaderUniform {
+    fn default() -> Self {
+        Self {
+            sun_direction: Vec3::new(0.0, 1.0, 1.0).normalize().extend(0.0),
+            moon_direction: Vec3::new(0.0, -1.0, -1.0).normalize().extend(0.0),
+            sun_color: Vec4::new(1.0, 0.92, 0.75, 1.0),
+            moon_color: Vec4::new(0.62, 0.68, 1.0, 0.0),
+            ambient_color: Vec4::new(0.55, 0.68, 1.0, 1.0),
+            params: SkyboxShaderParams::default(),
+        }
+    }
+}
+
 #[derive(Asset, TypePath, AsBindGroup, Debug, Default, Clone)]
 pub struct SkyboxShaderMaterial {
     #[uniform(0)]
-    pub sun_direction: Vec4,
-    #[uniform(1)]
-    pub moon_direction: Vec4,
+    pub sky: SkyboxShaderUniform,
 }
 
 impl Material for SkyboxShaderMaterial {
@@ -127,21 +170,4 @@ fn fullscreen_triangle_mesh() -> Mesh {
     mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
 
     mesh
-}
-
-pub fn sky_direction_from_az_el_degrees(
-    azimuth_degrees: f32,
-    elevation_degrees: f32,
-) -> Vec4 {
-    let azimuth = azimuth_degrees.to_radians();
-    let elevation = elevation_degrees.clamp(-89.0, 89.0).to_radians();
-    let horizontal = elevation.cos();
-
-    Vec3::new(
-        horizontal * azimuth.cos(),
-        horizontal * azimuth.sin(),
-        elevation.sin(),
-    )
-    .normalize_or_zero()
-    .extend(0.0)
 }
