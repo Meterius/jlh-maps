@@ -11,7 +11,10 @@ pub struct LightingFactors {
     pub ambient_intensity: f32,
 }
 
-pub fn lighting_from_sun_elevation(sun_elevation_deg: f32, moon_elevation_deg: f32) -> LightingFactors {
+pub fn lighting_from_sun_elevation(
+    sun_elevation_deg: f32,
+    moon_elevation_deg: f32,
+) -> LightingFactors {
     let temp_k = sun_color_temperature(sun_elevation_deg);
     let sun_color = kelvin_to_rgb(temp_k);
 
@@ -108,16 +111,16 @@ fn kelvin_to_rgb(kelvin: f32) -> Color {
 
     if temp <= 66.0 {
         r = 255.0;
-        g = 99.470_802_586_1 * temp.ln() - 161.119_568_166_1;
+        g = 99.470_8 * temp.ln() - 161.119_57;
 
         b = if temp <= 19.0 {
             0.0
         } else {
-            138.517_731_223_1 * (temp - 10.0).ln() - 305.044_792_730_7
+            138.517_73 * (temp - 10.0).ln() - 305.044_8
         };
     } else {
-        r = 329.698_727_446 * (temp - 60.0).powf(-0.133_204_759_2);
-        g = 288.122_169_528_3 * (temp - 60.0).powf(-0.075_514_849_2);
+        r = 329.698_73 * (temp - 60.0).powf(-0.133_204_76);
+        g = 288.122_16 * (temp - 60.0).powf(-0.075_514_846);
         b = 255.0;
     }
 
@@ -147,5 +150,5 @@ pub fn light_travel_direction_from_az_el_degrees(
         -horizontal * azimuth.cos(),
         -elevation.sin(),
     )
-        .normalize_or_zero()
+    .normalize_or_zero()
 }

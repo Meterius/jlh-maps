@@ -330,10 +330,15 @@ async function mountRegisteredBevyInstance(
       ? new OffscreenCanvas(debugSize.width, debugSize.height)
       : null
     const textureOffscreenCanvas = new OffscreenCanvas(maplibreSize.width, maplibreSize.height)
+    const terrainTextureOffscreenCanvas = new OffscreenCanvas(
+      maplibreSize.width,
+      maplibreSize.height,
+    )
 
     state.bevyInstance.value = wrap<BevyInstance>(worker)
     await state.bevyInstance.value.mount(
       transfer(textureOffscreenCanvas, [textureOffscreenCanvas]),
+      transfer(terrainTextureOffscreenCanvas, [terrainTextureOffscreenCanvas]),
       debugOffscreenCanvas
         ? transfer(debugOffscreenCanvas, [debugOffscreenCanvas])
         : debugOffscreenCanvas,

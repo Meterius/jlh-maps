@@ -31,6 +31,12 @@ void main() {
 }
 `
 
+interface FrameTexture {
+  handle?: WebGLTexture
+  width: number
+  height: number
+}
+
 export class BevyLayer implements CustomLayerInterface {
   id: string
   type = 'custom' as const
@@ -39,18 +45,28 @@ export class BevyLayer implements CustomLayerInterface {
 
   private map!: MapLibreMap
   private program: WebGLProgram | undefined
-  private texture: WebGLTexture | undefined
+
+  private texture: FrameTexture = {
+    handle: undefined,
+    width: 0,
+    height: 0,
+  }
+
+  private terrainTexture: FrameTexture = {
+    handle: undefined,
+    width: 0,
+    height: 0,
+  }
+
   private vertexBuffer: WebGLBuffer | undefined
   private vertexArray: WebGLVertexArrayObject | undefined
   private aPos = -1
   private uColorTexture: WebGLUniformLocation | null = null
   private uDepthRange: WebGLUniformLocation | null = null
 
-  private textureWidth = 0
-  private textureHeight = 0
-
   constructor(
     private readonly frameBitmap: ShallowRef<ImageBitmap | null>,
+    private readonly frameTerrainBitmap: ShallowRef<ImageBitmap | null>,
     options: BevyLayerOptions = {},
   ) {
     this.id = options.id ?? 'bevy-texture'
@@ -63,8 +79,6 @@ export class BevyLayer implements CustomLayerInterface {
     this.aPos = gl.getAttribLocation(this.program, 'a_pos')
     this.uColorTexture = gl.getUniformLocation(this.program, 'u_color_texture')
     this.uDepthRange = gl.getUniformLocation(this.program, 'u_depth_range')
-
-    this.texture = createTexture(gl)
 
     this.vertexBuffer = gl.createBuffer()!
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer)
@@ -91,62 +105,60 @@ export class BevyLayer implements CustomLayerInterface {
     this.map.triggerRepaint()
 
     const frameBitmap = this.frameBitmap.value
-    if (!frameBitmap) return
-    this.frameBitmap.value = null
+    const frameTerrainBitmap = this.frameTerrainBitmap.value
 
-    if (!this.program || !this.vertexBuffer || !this.texture) {
-      frameBitmap.close()
+    this.frameBitmap.value = null
+    this.frameTerrainBitmap.value = null
+
+    if (
+      !frameBitmap ||
+      !frameTerrainBitmap ||
+      !this.program ||
+      !this.vertexBuffer ||
+      !this.texture
+    ) {
+      frameBitmap?.close()
+      frameTerrainBitmap?.close()
       return
     }
 
-    // Upload bevy render to maplibre texture
+    // Draw terrain texture
 
-    gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, this.texture)
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
-    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
-
-    // Recreate texture if dimensions have changed
-    if (frameBitmap.width !== this.textureWidth || frameBitmap.height !== this.textureHeight) {
-      this.textureWidth = frameBitmap.width
-      this.textureHeight = frameBitmap.height
-
-      if (isWebGL2(gl)) {
-        gl.deleteTexture(this.texture)
-        this.texture = createTexture(gl)
-        if (!this.texture) {
-          frameBitmap.close()
-          this.map.triggerRepaint()
-          return
-        }
-        gl.bindTexture(gl.TEXTURE_2D, this.texture)
-        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, this.textureWidth, this.textureHeight)
-      } else {
-        gl.texImage2D(
-          gl.TEXTURE_2D,
-          0,
-          gl.RGBA,
-          this.textureWidth,
-          this.textureHeight,
-          0,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          null,
-        )
-      }
+    if (!bindAndUploadTexture(gl, this.terrainTexture, frameTerrainBitmap)) {
+      this.map.triggerRepaint()
+      return
     }
 
-    // On chrome this happens < 1ms, likely the current setup is handled as gpu-gpu copy,
-    // while on firefox this can take ~20-40ms and incurs a cpu copy
-    // TODO: investigate firefox performance bottleneck of texture transfer
-    try {
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, frameBitmap)
-    } finally {
-      frameBitmap.close()
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.DST_COLOR, gl.ZERO)
+    gl.enable(gl.DEPTH_TEST)
+    gl.depthFunc(gl.LEQUAL)
+    gl.depthMask(true)
+
+    gl.useProgram(this.program)
+
+    if (isWebGL2(gl) && this.vertexArray) {
+      gl.bindVertexArray(this.vertexArray)
+    } else {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer)
+      gl.enableVertexAttribArray(this.aPos)
+      gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, false, 0, 0)
     }
 
-    // Draw bevy render texture as fullscreen quad
+    gl.uniform1i(this.uColorTexture, 0)
+    gl.uniform2f(
+      this.uDepthRange,
+      this.map.painter.depthRangeFor3D[0],
+      this.map.painter.depthRangeFor3D[1],
+    )
+    gl.drawArrays(gl.TRIANGLES, 0, 6)
+
+    // Draw texture
+
+    if (!bindAndUploadTexture(gl, this.texture, frameBitmap)) {
+      this.map.triggerRepaint()
+      return
+    }
 
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
@@ -180,8 +192,11 @@ export class BevyLayer implements CustomLayerInterface {
     if (this.vertexBuffer) {
       gl.deleteBuffer(this.vertexBuffer)
     }
-    if (this.texture) {
-      gl.deleteTexture(this.texture)
+    if (this.texture.handle) {
+      gl.deleteTexture(this.texture.handle)
+    }
+    if (this.terrainTexture.handle) {
+      gl.deleteTexture(this.terrainTexture.handle)
     }
     if (this.program) {
       gl.deleteProgram(this.program)
@@ -206,6 +221,69 @@ function createTexture(
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
   gl.bindTexture(gl.TEXTURE_2D, null)
   return texture
+}
+
+function bindAndUploadTexture(
+  gl: WebGLRenderingContext | WebGL2RenderingContext,
+  frameTexture: FrameTexture,
+  frameBitmap: ImageBitmap,
+): boolean {
+  gl.activeTexture(gl.TEXTURE0)
+
+  gl.bindTexture(gl.TEXTURE_2D, frameTexture.handle ?? null)
+
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true)
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE)
+
+  // Recreate texture if dimensions have changed
+  if (
+    !frameTexture.handle ||
+    frameBitmap.width !== frameTexture.width ||
+    frameBitmap.height !== frameTexture.height
+  ) {
+    frameTexture.width = frameBitmap.width
+    frameTexture.height = frameBitmap.height
+
+    if (isWebGL2(gl)) {
+      if (frameTexture.handle) {
+        gl.deleteTexture(frameTexture.handle)
+      }
+
+      frameTexture.handle = createTexture(gl)
+
+      if (!frameTexture.handle) {
+        frameBitmap.close()
+        return false
+      }
+
+      gl.bindTexture(gl.TEXTURE_2D, frameTexture.handle)
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, frameTexture.width, frameTexture.height)
+    } else {
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        frameTexture.width,
+        frameTexture.height,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      )
+    }
+  }
+
+  // On chrome this happens < 1ms, likely the current setup is handled as gpu-gpu copy,
+  // while on firefox this can take ~20-40ms and incurs a cpu copy
+  // TODO: investigate firefox performance bottleneck of texture transfer
+  try {
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, frameBitmap)
+  } finally {
+    frameBitmap.close()
+  }
+
+  return true
 }
 
 function createProgram(

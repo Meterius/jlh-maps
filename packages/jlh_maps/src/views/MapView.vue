@@ -445,11 +445,16 @@ const bevyMount = createDynamicComposable(
 useMapSunController(() => bevyMount.value?.useBevyRet.mapViewSettings)
 
 const bevyFrameBitmap = shallowRef<ImageBitmap | null>(null)
+const bevyTerrainFrameBitmap = shallowRef<ImageBitmap | null>(null)
 
-const closePendingBevyFrameBitmap = () => {
+const closePendingBevyFrameBitmaps = () => {
   const frameBitmap = bevyFrameBitmap.value
   bevyFrameBitmap.value = null
   frameBitmap?.close()
+
+  const terrainFrameBitmap = bevyTerrainFrameBitmap.value
+  bevyTerrainFrameBitmap.value = null
+  terrainFrameBitmap?.close()
 }
 
 let pendingBevyFrame = 0
@@ -462,7 +467,7 @@ const frameDiagnostics = createToggledComposable(frameDiagnosticsVisible, () =>
 watch(bevyMount, () => {
   bevyTickFailure = false
   frameDiagnostics.value?.reset()
-  closePendingBevyFrameBitmap()
+  closePendingBevyFrameBitmaps()
   // incrementing frame to invalidate potential pending frame
   ++pendingBevyFrame
 })
@@ -476,7 +481,7 @@ watch(frameDiagnosticsVisible, (visible) => {
 const tickBevyAndProduceFrame = async () => {
   const mountedBevy = bevyMount.value
   if (!mountedBevy) {
-    closePendingBevyFrameBitmap()
+    closePendingBevyFrameBitmaps()
     return
   }
 
@@ -500,12 +505,13 @@ const tickBevyAndProduceFrame = async () => {
     }
 
     if (!frame) {
-      closePendingBevyFrameBitmap()
+      closePendingBevyFrameBitmaps()
       return
     }
 
     if (frameIdx !== pendingBevyFrame) {
       frame.textureBitmap.close()
+      frame.terrainTextureBitmap.close()
       frame.debugBitmap?.close()
       return
     }
@@ -513,6 +519,10 @@ const tickBevyAndProduceFrame = async () => {
     const previousFrameBitmap = bevyFrameBitmap.value
     bevyFrameBitmap.value = frame.textureBitmap
     previousFrameBitmap?.close()
+
+    const previousTerrainFrameBitmap = bevyTerrainFrameBitmap.value
+    bevyTerrainFrameBitmap.value = frame.terrainTextureBitmap
+    previousTerrainFrameBitmap?.close()
 
     if (frame.debugBitmap && bevyDebugCanvas.value) {
       const context = bevyDebugCanvas.value.getContext('bitmaprenderer')
@@ -533,7 +543,7 @@ const tickBevyAndProduceFrame = async () => {
 }
 
 onScopeDisposeLifo(() => {
-  closePendingBevyFrameBitmap()
+  closePendingBevyFrameBitmaps()
   // incrementing frame to invalidate potential pending frame
   ++pendingBevyFrame
 })
@@ -988,7 +998,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
     useLayer(
       map,
-      new BevyLayer(bevyFrameBitmap, {
+      new BevyLayer(bevyFrameBitmap, bevyTerrainFrameBitmap, {
         id: BEVY_LAYER_ID,
       }),
     )

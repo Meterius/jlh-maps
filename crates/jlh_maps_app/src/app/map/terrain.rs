@@ -1,6 +1,6 @@
 use crate::app::common::debug_gizmos::DebugAabbGizmo;
 use crate::app::common::materials::TransparentOverwriteMaterial;
-use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MAP_VIEW_DEPTH_RENDER_LAYER};
+use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MAP_VIEW_NON_TERRAIN_RENDER_LAYER};
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
 use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrain, MlTerrainTile};
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{
@@ -28,7 +28,7 @@ pub struct TerrainPlugin;
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TerrainFlatMesh>()
-            .init_resource::<TerrainMaterial>()
+            .init_resource::<TerrainMaterials>()
             .add_systems(Update, (sync_spawned_tiles, sync_tiles).chain());
     }
 }
@@ -44,16 +44,27 @@ impl FromWorld for TerrainFlatMesh {
 }
 
 #[derive(Resource)]
-struct TerrainMaterial(Handle<StandardMaterial>);
+struct TerrainMaterials {
+    color_material: Handle<StandardMaterial>,
+    transparent_material: Handle<TransparentOverwriteMaterial>,
+}
 
-impl FromWorld for TerrainMaterial {
+impl FromWorld for TerrainMaterials {
     fn from_world(world: &mut World) -> Self {
-        let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
-        Self(materials.add(StandardMaterial {
+        let mut standard_materials = world.resource_mut::<Assets<StandardMaterial>>();
+        let color_material = standard_materials.add(StandardMaterial {
             base_color: Color::WHITE,
             ..default()
-        }))
-        // Self(materials.add(TransparentOverwriteMaterial::new(0.4)))
+        });
+
+        let mut transparent_materials =
+            world.resource_mut::<Assets<TransparentOverwriteMaterial>>();
+        let transparent_material = transparent_materials.add(TransparentOverwriteMaterial {});
+
+        Self {
+            color_material,
+            transparent_material,
+        }
     }
 }
 
@@ -69,7 +80,7 @@ fn sync_spawned_tiles(
     mut managers: Query<(Entity, &mut TerrainTileManager)>,
     grids: Query<&Grid>,
     flat_mesh: Res<TerrainFlatMesh>,
-    material: Res<TerrainMaterial>,
+    materials: Res<TerrainMaterials>,
 ) {
     for (manager_eid, mut manager) in managers.iter_mut() {
         let maplibre_int_eid = manager.maplibre_int_eid;
@@ -84,28 +95,50 @@ fn sync_spawned_tiles(
         for &tile_id in ml_terrain.active_tile_ids.iter() {
             if let Entry::Vacant(entry) = manager.spawned_tile_eids.entry(tile_id) {
                 let (tile_cell, tile_transform) = terrain_tile_transform(grid, tile_id);
+
                 let tile_eid = commands
                     .spawn((
                         Name::new(format!("Terrain Tile {tile_id:?}")),
                         tile_transform,
                         tile_cell,
                         Visibility::Inherited,
-                        Mesh3d(flat_mesh.0.clone()),
-                        MeshMaterial3d(material.0.clone()),
-                        DebugAabbGizmo,
-                        NotShadowCaster,
                         TerrainTile {
                             maplibre_int_eid,
                             maplibre_tile_id: tile_id,
                             terrain_hash: None,
                             pending_mesh_task: None,
                         },
-                        RenderLayers::from_layers(&[
-                            MAP_VIEW_DEPTH_RENDER_LAYER,
-                            MAP_VIEW_COLOR_RENDER_LAYER,
-                        ]),
                     ))
                     .id();
+
+                let color_mesh_eid = commands
+                    .spawn((
+                        Transform::default(),
+                        Visibility::Inherited,
+                        Mesh3d(flat_mesh.0.clone()),
+                        MeshMaterial3d(materials.transparent_material.clone()),
+                        DebugAabbGizmo,
+                        NotShadowCaster,
+                        RenderLayers::from_layers(&[MAP_VIEW_NON_TERRAIN_RENDER_LAYER]),
+                    ))
+                    .id();
+
+                let transparent_mesh_eid = commands
+                    .spawn((
+                        Transform::default(),
+                        Visibility::Inherited,
+                        Mesh3d(flat_mesh.0.clone()),
+                        MeshMaterial3d(materials.color_material.clone()),
+                        DebugAabbGizmo,
+                        NotShadowCaster,
+                        RenderLayers::from_layers(&[MAP_VIEW_COLOR_RENDER_LAYER]),
+                    ))
+                    .id();
+
+                commands
+                    .entity(tile_eid)
+                    .add_children(&[color_mesh_eid, transparent_mesh_eid]);
+
                 commands.entity(manager_eid).add_child(tile_eid);
                 entry.insert(tile_eid);
             }

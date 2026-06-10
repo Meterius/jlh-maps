@@ -1,4 +1,5 @@
 use crate::app::common::editor::GameViewCamera;
+use crate::app::common::skybox_shader::SkyboxShaderCamera;
 use crate::app::main::AppWindows;
 use crate::app::map::camera::MapViewCamera;
 use crate::app::map::feature_layers::make_bucket_manager;
@@ -6,6 +7,7 @@ use crate::app::map::lighting::{CelestialDirectionalLight, CelestialDirectionalL
 use crate::app::map::terrain::TerrainTileManager;
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{LngLat, MercatorCoordinate};
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{CameraOutputMode, RenderTarget};
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
@@ -15,7 +17,6 @@ use big_space::prelude::{CellCoord, FloatingOrigin};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tsify::Tsify;
-use crate::app::common::skybox_shader::SkyboxShaderCamera;
 
 const FIRST_CASCADE_FAR_METERS: f64 = 2_000.0;
 const SHADOW_MAX_DISTANCE_METERS: f64 = 10_000.0;
@@ -23,8 +24,9 @@ const SHADOW_MIN_DISTANCE_METERS: f64 = 1.0;
 const SHADOW_DEPTH_BIAS: f32 = 0.01;
 const SHADOW_NORMAL_BIAS: f32 = 1.8;
 
-pub const MAP_VIEW_COLOR_RENDER_LAYER: usize = 0;
-pub const MAP_VIEW_DEPTH_RENDER_LAYER: usize = 1;
+pub const MAP_VIEW_COLOR_RENDER_LAYER: usize = 1;
+pub const MAP_VIEW_NON_TERRAIN_RENDER_LAYER: usize = 2;
+pub const MAP_VIEW_TERRAIN_RENDER_LAYER: usize = 3;
 
 pub(super) struct CorePlugin;
 
@@ -84,10 +86,10 @@ pub fn spawn_map_view(
             MapView {
                 maplibre_int_eid: maplibre_integration_eid,
             },
-            // TerrainTileManager {
-            //     maplibre_int_eid: maplibre_integration_eid,
-            //     spawned_tile_eids: HashMap::default(),
-            // },
+            TerrainTileManager {
+                maplibre_int_eid: maplibre_integration_eid,
+                spawned_tile_eids: HashMap::default(),
+            },
             make_bucket_manager(maplibre_integration_eid),
         ))
         .id();
@@ -100,16 +102,16 @@ pub fn spawn_map_view(
     let minimum_distance = (world_per_meter * SHADOW_MIN_DISTANCE_METERS) as f32;
 
     let directional_light = DirectionalLight {
-            shadows_enabled: true,
-            shadow_depth_bias: SHADOW_DEPTH_BIAS,
-            shadow_normal_bias: SHADOW_NORMAL_BIAS,
-            ..default()
-        };
+        shadows_enabled: true,
+        shadow_depth_bias: SHADOW_DEPTH_BIAS,
+        shadow_normal_bias: SHADOW_NORMAL_BIAS,
+        ..default()
+    };
 
     commands.entity(map_view_eid).with_children(|parent| {
         parent.spawn((
             Name::new("Sun Directional Light"),
-            directional_light.clone(),
+            directional_light,
             CascadeShadowConfigBuilder {
                 num_cascades: 3,
                 first_cascade_far_bound,
@@ -123,6 +125,10 @@ pub fn spawn_map_view(
             CelestialDirectionalLight {
                 kind: CelestialDirectionalLightKind::Sun,
             },
+            RenderLayers::from_layers(&[
+                MAP_VIEW_COLOR_RENDER_LAYER,
+                MAP_VIEW_TERRAIN_RENDER_LAYER,
+            ]),
         ));
 
         parent.spawn((
@@ -141,6 +147,10 @@ pub fn spawn_map_view(
             CelestialDirectionalLight {
                 kind: CelestialDirectionalLightKind::Moon,
             },
+            RenderLayers::from_layers(&[
+                MAP_VIEW_COLOR_RENDER_LAYER,
+                MAP_VIEW_TERRAIN_RENDER_LAYER,
+            ]),
         ));
     });
 
@@ -163,6 +173,10 @@ pub fn spawn_map_view(
                 ambient_light.clone(),
                 RenderTarget::Window(WindowRef::Entity(debug_eid)),
                 GameViewCamera,
+                RenderLayers::from_layers(&[
+                    MAP_VIEW_COLOR_RENDER_LAYER,
+                    MAP_VIEW_NON_TERRAIN_RENDER_LAYER,
+                ]),
                 MapViewCamera {
                     maplibre_int_eid: maplibre_integration_eid,
                 },
@@ -177,7 +191,9 @@ pub fn spawn_map_view(
             CellCoord::default(),
             Camera3d::default(),
             FloatingOrigin,
-            SkyboxShaderCamera,
+            SkyboxShaderCamera {
+                layers: RenderLayers::layer(MAP_VIEW_NON_TERRAIN_RENDER_LAYER),
+            },
             Camera {
                 clear_color: ClearColorConfig::Custom(Color::NONE),
                 output_mode: CameraOutputMode::Write {
@@ -191,6 +207,40 @@ pub fn spawn_map_view(
                     .texture_eid
                     .expect("map texture offscreen window to be set"),
             )),
+            RenderLayers::from_layers(&[
+                MAP_VIEW_COLOR_RENDER_LAYER,
+                MAP_VIEW_NON_TERRAIN_RENDER_LAYER,
+            ]),
+            ambient_light.clone(),
+            MapViewCamera {
+                maplibre_int_eid: maplibre_integration_eid,
+            },
+        ));
+    });
+
+    commands.entity(map_view_eid).with_children(|parent| {
+        parent.spawn((
+            Name::new("MapLibre Terrain Texture Camera"),
+            Transform::default(),
+            CellCoord::default(),
+            Camera3d::default(),
+            Camera {
+                clear_color: ClearColorConfig::Custom(Color::NONE),
+                output_mode: CameraOutputMode::Write {
+                    clear_color: ClearColorConfig::Custom(Color::NONE),
+                    blend_state: None,
+                },
+                ..default()
+            },
+            RenderTarget::Window(WindowRef::Entity(
+                app_windows
+                    .terrain_texture_eid
+                    .expect("map texture offscreen window to be set"),
+            )),
+            RenderLayers::from_layers(&[
+                MAP_VIEW_COLOR_RENDER_LAYER,
+                MAP_VIEW_TERRAIN_RENDER_LAYER,
+            ]),
             ambient_light,
             MapViewCamera {
                 maplibre_int_eid: maplibre_integration_eid,

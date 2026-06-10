@@ -1,13 +1,14 @@
 use crate::app::map::camera::MapViewCamera;
 use crate::app::map::core::MapViewSettings;
+use crate::app::map::utils::sky_model::{
+    light_travel_direction_from_az_el_degrees, lighting_from_sun_elevation,
+};
 use bevy::app::{Plugin, Update};
-use bevy::color::Color;
 use bevy::light::{AmbientLight, DirectionalLight};
 use bevy::math::{Vec3, VectorSpace};
 use bevy::prelude::{Component, Transform, Visibility};
 use bevy_ecs::change_detection::{DetectChanges, Res};
 use bevy_ecs::prelude::{Query, With};
-use crate::app::map::utils::sky_model::{light_travel_direction_from_az_el_degrees, lighting_from_sun_elevation};
 
 const SUN_MAX_ILLUMINANCE: f32 = 4_000.0;
 const MOON_MAX_ILLUMINANCE: f32 = 300.0;
@@ -35,8 +36,13 @@ pub struct CelestialDirectionalLight {
 fn sync_map_lighting(
     mv_settings: Res<MapViewSettings>,
     mut directional_lights: Query<
-        (&CelestialDirectionalLight, &mut DirectionalLight,  &mut Transform, &mut Visibility),
-        With<CelestialDirectionalLight>
+        (
+            &CelestialDirectionalLight,
+            &mut DirectionalLight,
+            &mut Transform,
+            &mut Visibility,
+        ),
+        With<CelestialDirectionalLight>,
     >,
     mut ambients: Query<&mut AmbientLight, With<MapViewCamera>>,
 ) {
@@ -89,7 +95,8 @@ fn sync_map_lighting(
         }
 
         ambient.color = model.ambient_color;
-        ambient.brightness = AMBIENT_MIN_BRIGHTNESS.lerp(AMBIENT_MAX_BRIGHTNESS, model.ambient_intensity);
+        ambient.brightness =
+            AMBIENT_MIN_BRIGHTNESS.lerp(AMBIENT_MAX_BRIGHTNESS, model.ambient_intensity);
     }
 }
 
@@ -98,5 +105,8 @@ fn map_light_direction(azimuth_degrees: f32, elevation_degrees: f32) -> Option<V
         return None;
     }
 
-    Some(light_travel_direction_from_az_el_degrees(azimuth_degrees, elevation_degrees))
+    Some(light_travel_direction_from_az_el_degrees(
+        azimuth_degrees,
+        elevation_degrees,
+    ))
 }

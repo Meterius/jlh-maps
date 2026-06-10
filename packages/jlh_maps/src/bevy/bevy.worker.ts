@@ -189,9 +189,11 @@ export type MaplibreIntegration = InstanceType<typeof WorkerMaplibreIntegration>
 class WorkerBevyInstance {
   private debugCanvas: OffscreenCanvas | null = null
   private textureCanvas: OffscreenCanvas | null = null
+  private terrainTextureCanvas: OffscreenCanvas | null = null
   private bevyInstance: BevyBevyInstance | null = null
   private debugWindow: BevyWindowInstanceRef | null = null
   private textureWindow: BevyWindowInstanceRef | null = null
+  private terrainTextureWindow: BevyWindowInstanceRef | null = null
 
   private secondaryTickScheduled = false
 
@@ -199,6 +201,7 @@ class WorkerBevyInstance {
 
   async mount(
     textureCanvas: OffscreenCanvas,
+    terrainTextureCanvas: OffscreenCanvas,
     debugCanvas: OffscreenCanvas | null,
     assetBaseUrl: string,
     mapViewSettings: MapViewSettings,
@@ -210,9 +213,15 @@ class WorkerBevyInstance {
 
     this.debugCanvas = debugCanvas
     this.textureCanvas = textureCanvas
+    this.terrainTextureCanvas = terrainTextureCanvas
 
     this.resizeCanvases(debugSize, textureSize)
-    this.bevyInstance = new wasmModule.BevyInstance(debugCanvas, textureCanvas, assetBaseUrl)
+    this.bevyInstance = new wasmModule.BevyInstance(
+      debugCanvas,
+      textureCanvas,
+      terrainTextureCanvas,
+      assetBaseUrl,
+    )
     this.set_map_view_settings(mapViewSettings)
     this.set_map_view_camera_settings(mapViewCameraSettings)
     this.refreshWindowRefs()
@@ -231,6 +240,7 @@ class WorkerBevyInstance {
     this.bevyInstance = null
 
     this.textureCanvas = null
+    this.terrainTextureCanvas = null
     this.debugCanvas = null
   }
 
@@ -252,7 +262,8 @@ class WorkerBevyInstance {
   async tick(frameIdx: number) {
     const bevyInstance = this.bevyInstance
     const textureCanvas = this.textureCanvas
-    if (!bevyInstance || !textureCanvas) return null
+    const terrainTextureCanvas = this.terrainTextureCanvas
+    if (!bevyInstance || !textureCanvas || !terrainTextureCanvas) return null
 
     // since instance and integration messages are handled by separate event listeners,
     // even if the messages are sent in order from the main thread, they may be processed out-of-order
@@ -268,17 +279,19 @@ class WorkerBevyInstance {
     this.refreshWindowRefs()
 
     try {
-      const [textureBitmap, debugBitmap] = await Promise.all([
+      const [textureBitmap, terrainTextureBitmap, debugBitmap] = await Promise.all([
         createImageBitmap(textureCanvas),
+        createImageBitmap(terrainTextureCanvas),
         this.debugCanvas ? createImageBitmap(this.debugCanvas) : null,
       ])
 
       return transfer(
         {
           textureBitmap,
+          terrainTextureBitmap,
           debugBitmap,
         },
-        [textureBitmap, ...(debugBitmap ? [debugBitmap] : [])],
+        [textureBitmap, terrainTextureBitmap, ...(debugBitmap ? [debugBitmap] : [])],
       )
     } catch (error) {
       console.warn('Failed to create ImageBitmap:', error)
@@ -329,6 +342,11 @@ class WorkerBevyInstance {
       this.textureCanvas.width = textureSize.width
       this.textureCanvas.height = textureSize.height
     }
+
+    if (this.terrainTextureCanvas) {
+      this.terrainTextureCanvas.width = textureSize.width
+      this.terrainTextureCanvas.height = textureSize.height
+    }
   }
 
   private refreshWindowRefs() {
@@ -337,6 +355,7 @@ class WorkerBevyInstance {
 
     this.debugWindow ??= bevyInstance.get_debug_window() ?? null
     this.textureWindow ??= bevyInstance.get_texture_window() ?? null
+    this.terrainTextureWindow ??= bevyInstance.get_terrain_texture_window() ?? null
   }
 
   private scheduleSecondaryTick(bevyInstance: BevyBevyInstance) {

@@ -60,17 +60,32 @@ impl BevyInstance {
             window_eid,
         }))
     }
+
+    pub fn get_terrain_texture_window(&self) -> Result<Option<WindowInstanceRef>, String> {
+        let window_eid = self.execute(|world| {
+            world
+                .get_resource::<AppWindows>()
+                .and_then(|windows| windows.terrain_texture_eid)
+        })?;
+
+        Ok(window_eid.map(|window_eid| WindowInstanceRef {
+            instance: self.weak_inner(),
+            window_eid,
+        }))
+    }
 }
 
 #[derive(Clone, Resource)]
 pub struct AppWindows {
     pub debug_eid: Option<Entity>,
     pub texture_eid: Option<Entity>,
+    pub terrain_texture_eid: Option<Entity>,
 }
 
 pub struct OffscreenCanvases {
     pub debug: Option<OffscreenCanvas>,
     pub texture: OffscreenCanvas,
+    pub terrain_texture: OffscreenCanvas,
 }
 
 impl ExtractResource for AppWindows {
@@ -85,6 +100,7 @@ pub fn setup_app(
     app: &mut App,
     debug_canvas: Option<OffscreenCanvas>,
     texture_canvas: OffscreenCanvas,
+    terrain_texture_canvas: OffscreenCanvas,
     asset_base_url: String,
 ) {
     let debug_window_enabled = debug_canvas.is_some();
@@ -162,11 +178,13 @@ pub fn setup_app(
     app.insert_resource(AppWindows {
         debug_eid: None,
         texture_eid: None,
+        terrain_texture_eid: None,
     });
 
     app.insert_non_send_resource(OffscreenCanvases {
         debug: debug_canvas,
         texture: texture_canvas,
+        terrain_texture: terrain_texture_canvas,
     });
 
     app.add_systems(PreStartup, setup_offscreen_windows);
@@ -229,6 +247,19 @@ fn setup_offscreen_windows(
         app_windows.texture_eid = Some(texture_window_eid);
     }
 
+    if app_windows.terrain_texture_eid.is_none() {
+        let terrain_texture_window_eid = commands
+            .spawn((
+                make_offscreen_window(
+                    "Map Terrain Texture Offscreen Window",
+                    &canvases.terrain_texture,
+                ),
+                raw_handle(&canvases.terrain_texture),
+            ))
+            .id();
+        app_windows.terrain_texture_eid = Some(terrain_texture_window_eid);
+    }
+
     info!("Setup offscreen Bevy windows");
 }
 
@@ -257,10 +288,17 @@ fn setup_map_for_integration(
     let Some(texture_eid) = windows.texture_eid else {
         return;
     };
+
+    let Some(terrain_texture_eid) = windows.terrain_texture_eid else {
+        return;
+    };
+
     let app_windows = AppWindows {
         debug_eid: windows.debug_eid,
         texture_eid: Some(texture_eid),
+        terrain_texture_eid: Some(terrain_texture_eid),
     };
+
     for (integration_eid, _) in integrations.iter() {
         spawn_map_view(&mut commands, integration_eid, &app_windows);
     }

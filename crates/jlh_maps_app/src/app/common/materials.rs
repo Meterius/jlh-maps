@@ -3,7 +3,6 @@ use bevy::asset::{Asset, Handle, load_internal_asset, uuid_handle};
 use bevy::pbr::{Material, MaterialPlugin, OpaqueRendererMethod};
 use bevy::prelude::{Reflect, Shader};
 use bevy::render::render_resource::AsBindGroup;
-use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
 
 const DEPTH_TEXTURE_MATERIAL_SHADER_HANDLE: Handle<Shader> =
@@ -42,33 +41,8 @@ impl Material for DepthTextureMaterial {
         DEPTH_TEXTURE_MATERIAL_SHADER_HANDLE.into()
     }
 }
-
-#[derive(ShaderType, Reflect, Debug, Clone, Copy)]
-pub struct TransparentOverwriteMaterialUniform {
-    pub max_shadow_alpha: f32,
-    _webgl2_padding_8b: u32,
-    _webgl2_padding_12b: u32,
-    _webgl2_padding_16b: u32,
-}
-
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
-pub struct TransparentOverwriteMaterial {
-    #[uniform(0)]
-    pub uniform: TransparentOverwriteMaterialUniform,
-}
-
-impl TransparentOverwriteMaterial {
-    pub fn new(max_shadow_alpha: f32) -> Self {
-        Self {
-            uniform: TransparentOverwriteMaterialUniform {
-                max_shadow_alpha,
-                _webgl2_padding_8b: 0,
-                _webgl2_padding_12b: 0,
-                _webgl2_padding_16b: 0,
-            },
-        }
-    }
-}
+pub struct TransparentOverwriteMaterial {}
 
 impl Material for TransparentOverwriteMaterial {
     fn enable_prepass() -> bool {
