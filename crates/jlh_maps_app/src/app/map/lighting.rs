@@ -11,7 +11,7 @@ use bevy_ecs::prelude::{Query, With};
 const SUN_MAX_ILLUMINANCE: f32 = 4_000.0;
 const MOON_MAX_ILLUMINANCE: f32 = 300.0;
 const AMBIENT_MAX_BRIGHTNESS: f32 = 1_100.0;
-const AMBIENT_MIN_BRIGHTNESS: f32 = 400.0;
+const AMBIENT_MIN_BRIGHTNESS: f32 = 800.0;
 
 pub struct LightingPlugin;
 

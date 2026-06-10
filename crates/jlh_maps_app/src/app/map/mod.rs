@@ -6,6 +6,7 @@ pub mod interop;
 pub mod lighting;
 pub mod terrain;
 pub mod transform;
+pub mod skybox;
 
 use bevy::prelude::*;
 
@@ -20,6 +21,7 @@ impl Plugin for MapPlugin {
             feature::MapFeaturePlugin,
             feature_layers::FeatureLayersPlugin,
             lighting::LightingPlugin,
+            skybox::SkyboxPlugin,
         ));
     }
 }

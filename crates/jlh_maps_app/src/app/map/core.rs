@@ -15,6 +15,7 @@ use big_space::prelude::{CellCoord, FloatingOrigin};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tsify::Tsify;
+use crate::app::common::skybox_shader::SkyboxShaderCamera;
 
 const FIRST_CASCADE_FAR_METERS: f64 = 2_000.0;
 const SHADOW_MAX_DISTANCE_METERS: f64 = 10_000.0;
@@ -83,10 +84,10 @@ pub fn spawn_map_view(
             MapView {
                 maplibre_int_eid: maplibre_integration_eid,
             },
-            TerrainTileManager {
-                maplibre_int_eid: maplibre_integration_eid,
-                spawned_tile_eids: HashMap::default(),
-            },
+            // TerrainTileManager {
+            //     maplibre_int_eid: maplibre_integration_eid,
+            //     spawned_tile_eids: HashMap::default(),
+            // },
             make_bucket_manager(maplibre_integration_eid),
         ))
         .id();
@@ -176,6 +177,7 @@ pub fn spawn_map_view(
             CellCoord::default(),
             Camera3d::default(),
             FloatingOrigin,
+            SkyboxShaderCamera,
             Camera {
                 clear_color: ClearColorConfig::Custom(Color::NONE),
                 output_mode: CameraOutputMode::Write {

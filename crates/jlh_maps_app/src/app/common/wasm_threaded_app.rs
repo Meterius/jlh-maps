@@ -19,7 +19,6 @@ use bevy::render::view::{
     ExtractedWindows, ViewDepthTexture, ViewTarget, ViewTargetAttachments, WindowSurfaces,
 };
 use bevy::render::{ExtractSchedule, RenderApp};
-use std::fmt::Debug;
 use tracing::{debug, warn};
 
 use bevy::ecs::schedule::{ExecutorKind, Schedules, ThreadLocalResources};

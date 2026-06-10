@@ -5,3 +5,4 @@ pub mod materials;
 pub mod settings;
 #[cfg(feature = "wasm-threads")]
 pub mod wasm_threaded_app;
+pub mod skybox_shader;
