@@ -216,6 +216,13 @@ pub fn spawn_map_view(
         ));
     });
 
+    // TODO: improve implementation
+    // - filtered rendering:
+    //  - right now, terrain texture is color multiplied which due to MSAA results in artifacts around meshes,
+    //    most visible when illuminance is low
+    // - render to texture:
+    //  - render overhead is increased as multiple seperate window and offscreen canvases are created and used,
+    //    ideally the seperate render should render directly to a texture and minimize overhead
     commands.entity(map_view_eid).with_children(|parent| {
         parent.spawn((
             Name::new("MapLibre Terrain Texture Camera"),

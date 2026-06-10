@@ -247,14 +247,20 @@ class WorkerBevyInstance {
   resize(debugSize: CanvasRenderSize | null, textureSize: CanvasRenderSize): boolean {
     this.refreshWindowRefs()
 
-    if (!this.textureWindow) return false
+    if (!this.textureWindow || !this.terrainTextureWindow) return false
     if (this.debugCanvas && !this.debugWindow) return false
 
+    // resize canvases
+
     this.resizeCanvases(debugSize, textureSize)
+
+    // resize windows
+
     if (this.debugWindow && debugSize) {
       this.debugWindow.resize(debugSize.width, debugSize.height, debugSize.scaleFactor)
     }
     this.textureWindow.resize(textureSize.width, textureSize.height, textureSize.scaleFactor)
+    this.terrainTextureWindow.resize(textureSize.width, textureSize.height, textureSize.scaleFactor)
 
     return true
   }

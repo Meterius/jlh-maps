@@ -130,6 +130,7 @@ export class BevyLayer implements CustomLayerInterface {
     }
 
     gl.enable(gl.BLEND)
+    // color multiply
     gl.blendFunc(gl.DST_COLOR, gl.ZERO)
     gl.enable(gl.DEPTH_TEST)
     gl.depthFunc(gl.LEQUAL)
