@@ -15,6 +15,7 @@ const MINUTES_PER_HOUR = 60
 const MILLISECONDS_PER_MINUTE = 60_000
 const SOLAR_CONTROLLER_UPDATE_INTERVAL_MS = 60_000
 
+// Handles lighting settings and store/bevy lighting synchronization
 export function useMapSunController(
   bevyMapViewSettings?: () => Ref<MapViewSettings> | null | undefined,
 ) {
@@ -55,6 +56,7 @@ export function useMapSunController(
     mapViewSettings.value.sunElevationDegrees = lighting.sun.elevationDegrees
     mapViewSettings.value.moonAzimuthDegrees = lighting.moon.azimuthDegrees
     mapViewSettings.value.moonElevationDegrees = lighting.moon.elevationDegrees
+    mapViewSettings.value.disableLightingHue = lighting.disableHue
   })
 
   return {

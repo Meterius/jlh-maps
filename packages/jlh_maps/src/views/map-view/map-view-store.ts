@@ -31,6 +31,7 @@ export type MapViewLightingSettings = {
   time?: string
   sun: MapCelestialLightingSettings
   moon: MapCelestialLightingSettings
+  disableHue: boolean
 }
 
 export type MapLibreLodSettings = {
@@ -103,6 +104,7 @@ function createDefaultMapViewStore(): MapViewStore {
     },
     lighting: {
       automatic: false,
+      disableHue: false,
       sun: {
         azimuthDegrees: 11.31,
         elevationDegrees: 32.52,

@@ -1,4 +1,4 @@
-use bevy::color::Color;
+use bevy::color::{Color, Saturation};
 use bevy::math::{Vec3, VectorSpace};
 
 #[derive(Debug, Clone, Copy)]
@@ -14,17 +14,32 @@ pub struct LightingFactors {
 pub fn lighting_from_sun_elevation(
     sun_elevation_deg: f32,
     moon_elevation_deg: f32,
+    disable_lighting_hue: bool,
 ) -> LightingFactors {
     let temp_k = sun_color_temperature(sun_elevation_deg);
     let sun_color = kelvin_to_rgb(temp_k);
 
+    let sun_intensity = sun_intensity(sun_elevation_deg);
+    let moon_color = moon_color();
+    let moon_intensity = moon_intensity(moon_elevation_deg);
+    let ambient_color = ambient_color(sun_elevation_deg);
+    let ambient_intensity = ambient_intensity(sun_elevation_deg);
+
+    let adjusted_color = |color: Color| {
+        if disable_lighting_hue {
+            color.with_saturation(0.0)
+        } else {
+            color
+        }
+    };
+
     LightingFactors {
-        sun_color,
-        sun_intensity: sun_intensity(sun_elevation_deg),
-        moon_color: moon_color(),
-        moon_intensity: moon_intensity(moon_elevation_deg),
-        ambient_color: ambient_color(sun_elevation_deg),
-        ambient_intensity: ambient_intensity(sun_elevation_deg),
+        sun_color: adjusted_color(sun_color),
+        sun_intensity,
+        moon_color: adjusted_color(moon_color),
+        moon_intensity,
+        ambient_color: adjusted_color(ambient_color),
+        ambient_intensity,
     }
 }
 

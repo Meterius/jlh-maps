@@ -54,6 +54,8 @@ impl FromWorld for TerrainMaterials {
         let mut standard_materials = world.resource_mut::<Assets<StandardMaterial>>();
         let color_material = standard_materials.add(StandardMaterial {
             base_color: Color::WHITE,
+            perceptual_roughness: 0.6,
+            reflectance: 0.2,
             ..default()
         });
 

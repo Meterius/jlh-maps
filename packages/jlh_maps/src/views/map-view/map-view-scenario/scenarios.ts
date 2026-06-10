@@ -83,6 +83,7 @@ function createScenarioMapViewStore(): MapViewStore {
     },
     lighting: {
       automatic: false,
+      disableHue: false,
       sun: {
         azimuthDegrees: 11.31,
         elevationDegrees: 32.52,

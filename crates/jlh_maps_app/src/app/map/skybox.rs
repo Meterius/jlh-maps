@@ -29,6 +29,7 @@ fn sync_skybox_material(
         let lighting = lighting_from_sun_elevation(
             mv_settings.sun_elevation_degrees,
             mv_settings.moon_elevation_degrees,
+            mv_settings.disable_lighting_hue,
         );
 
         material.sky.sun_direction = -light_travel_direction_from_az_el_degrees(

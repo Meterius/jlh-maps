@@ -27,6 +27,22 @@
         />
       </div>
 
+      <USeparator />
+
+      <div class="grid grid-cols-2 gap-1">
+        <UButton
+          label="Hue Enabled"
+          color="neutral"
+          active-color="primary"
+          variant="outline-solid"
+          :active="!mapViewStore.lighting.disableHue"
+          size="md"
+          class="cursor-pointer"
+          icon="lucide:paintbrush"
+          @click="mapViewStore.lighting.disableHue = !mapViewStore.lighting.disableHue"
+        />
+      </div>
+
       <div v-if="mapViewStore.lighting.automatic" class="grid gap-2">
         <USeparator />
 

@@ -49,6 +49,7 @@ fn sync_map_lighting(
     let model = lighting_from_sun_elevation(
         mv_settings.sun_elevation_degrees,
         mv_settings.moon_elevation_degrees,
+        mv_settings.disable_lighting_hue,
     );
 
     let sun_direction = map_light_direction(

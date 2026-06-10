@@ -69,6 +69,7 @@ export function mountBevy(
       enableWaters: true,
       enableTrees: true,
       enableShadows: true,
+      disableLightingHue: false,
       sunElevationDegrees: DEFAULT_SUN_ELEVATION_DEGREES,
       sunAzimuthDegrees: DEFAULT_SUN_AZIMUTH_DEGREES,
       moonElevationDegrees: DEFAULT_MOON_ELEVATION_DEGREES,

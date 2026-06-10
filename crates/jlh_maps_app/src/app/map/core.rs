@@ -44,6 +44,9 @@ pub struct MapViewSettings {
     pub enable_waters: bool,
     pub enable_trees: bool,
     pub enable_shadows: bool,
+
+    pub disable_lighting_hue: bool,
+
     pub sun_azimuth_degrees: f32,
     pub sun_elevation_degrees: f32,
     pub moon_azimuth_degrees: f32,
@@ -59,6 +62,7 @@ impl Default for MapViewSettings {
             enable_waters: true,
             enable_trees: true,
             enable_shadows: true,
+            disable_lighting_hue: false,
             sun_azimuth_degrees: 11.31,
             sun_elevation_degrees: 32.52,
             moon_azimuth_degrees: 191.31,
@@ -125,10 +129,7 @@ pub fn spawn_map_view(
             CelestialDirectionalLight {
                 kind: CelestialDirectionalLightKind::Sun,
             },
-            RenderLayers::from_layers(&[
-                MAP_VIEW_COLOR_RENDER_LAYER,
-                MAP_VIEW_TERRAIN_RENDER_LAYER,
-            ]),
+            RenderLayers::from_layers(&[MAP_VIEW_COLOR_RENDER_LAYER]),
         ));
 
         parent.spawn((
@@ -147,10 +148,7 @@ pub fn spawn_map_view(
             CelestialDirectionalLight {
                 kind: CelestialDirectionalLightKind::Moon,
             },
-            RenderLayers::from_layers(&[
-                MAP_VIEW_COLOR_RENDER_LAYER,
-                MAP_VIEW_TERRAIN_RENDER_LAYER,
-            ]),
+            RenderLayers::from_layers(&[MAP_VIEW_COLOR_RENDER_LAYER]),
         ));
     });
 
