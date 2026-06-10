@@ -485,6 +485,11 @@ const tickBevyAndProduceFrame = async () => {
     return
   }
 
+  const zoom = mapInstance.map?.getZoom()
+  if (zoom === undefined || zoom < 12) {
+    return
+  }
+
   const frameIdx = ++pendingBevyFrame
   const frameStartedAt = performance.now()
 
