@@ -109,11 +109,13 @@ impl Material for SkyboxShaderMaterial {
 
         if let Some(depth_stencil) = &mut descriptor.depth_stencil {
             depth_stencil.depth_write_enabled = false;
+            
+            // TODO: reasoning
 
             // Fullscreen shader writes far depth in WGSL using clip_position.z = 0.0.
             // With Bevy/reversed-Z style depth, far depth passes against the cleared
             // depth buffer with GreaterEqual, but fails behind already-rendered geometry.
-            depth_stencil.depth_compare = CompareFunction::Always;
+            depth_stencil.depth_compare = CompareFunction::GreaterEqual;
         }
 
         Ok(())

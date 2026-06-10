@@ -141,9 +141,10 @@ pub fn light_travel_direction_from_az_el_degrees(
     let elevation = elevation_degrees.clamp(-89.0, 89.0).to_radians();
     let horizontal = elevation.cos();
 
+    // TODO: reasoning
     Vec3::new(
-        horizontal * azimuth.cos(),
-        horizontal * azimuth.sin(),
+        -horizontal * azimuth.sin(),
+        -horizontal * azimuth.cos(),
         -elevation.sin(),
     )
         .normalize_or_zero()
