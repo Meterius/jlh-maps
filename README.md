@@ -1,8 +1,15 @@
 # jlh-maps
 
-Simple map application.
+Map application based on maplibre and bevy.
 
-Demo: https://meterius.github.io/jlh-maps/demo/
+## Demo
+
+Link: https://meterius.github.io/jlh-maps/demo/
+
+Notes:
+ - The demo is designed to work with Chrome
+   - Other browser support is not guaranteed
+   - Firefox experiences performance issues (see `bindAndUploadTexture` in `bevy-layer.ts`)
 
 ## Structure
 
