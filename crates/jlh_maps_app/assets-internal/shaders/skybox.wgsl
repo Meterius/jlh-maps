@@ -101,64 +101,18 @@ fn elevation_blend(edge0: f32, edge1: f32, elevation_degrees: f32) -> f32 {
     return smoothstep(edge0, edge1, elevation_degrees);
 }
 
-fn base_day_sky(dir: vec3<f32>, sun_dir: vec3<f32>, up: f32) -> vec3<f32> {
-    let horizon_amount = pow(1.0 - up, 2.0);
+const INV_4PI: f32 = 0.07957747154594767;
+const RAYLEIGH_PHASE_SCALE: f32 = 0.05968310365946075;
 
-    let clear_zenith = vec3<f32>(0.10, 0.28, 0.62);
-    let clear_horizon = vec3<f32>(0.58, 0.72, 0.95);
-
-    let hazy_zenith = vec3<f32>(0.32, 0.48, 0.72);
-    let hazy_horizon = vec3<f32>(0.78, 0.82, 0.86);
-
-    let haze = saturate(sky.params.haze);
-
-    let zenith = mix(clear_zenith, hazy_zenith, haze);
-    let horizon = mix(clear_horizon, hazy_horizon, haze);
-
-    var color = mix(horizon, zenith, pow(up, 0.65));
-
-    // Slight brightening toward the sun side of the sky.
-    let sun_side = pow(saturate(dot(dir, sun_dir) * 0.5 + 0.5), 2.0);
-    color += sky.sun_color.rgb * sky.sun_color.a * sun_side * 0.08;
-
-    // Haze brightens the horizon.
-    color = mix(color, horizon, horizon_amount * haze * 0.35);
-
-    return color;
+fn rayleigh_phase(cos_theta: f32) -> f32 {
+    return RAYLEIGH_PHASE_SCALE * (1.0 + cos_theta * cos_theta);
 }
 
-fn base_sunrise_sky(dir: vec3<f32>, sun_dir: vec3<f32>, up: f32) -> vec3<f32> {
-    let horizon_amount = pow(1.0 - up, 1.7);
+fn aerosol_phase(cos_theta: f32, anisotropy: f32) -> f32 {
+    let g2 = anisotropy * anisotropy;
+    let denom = max(1.0 + g2 - 2.0 * anisotropy * cos_theta, 0.0001);
 
-    let twilight_zenith = vec3<f32>(0.13, 0.12, 0.28);
-    let sunrise_horizon = vec3<f32>(1.00, 0.42, 0.18);
-    let upper_blue = vec3<f32>(0.28, 0.38, 0.70);
-
-    var color = mix(sunrise_horizon, upper_blue, pow(up, 0.75));
-
-    // Push the horizon warm near the sun direction.
-    let sun_side = pow(saturate(dot(dir, sun_dir) * 0.5 + 0.5), 3.0);
-    color = mix(color, sunrise_horizon * 1.15, sun_side * horizon_amount * 0.65);
-
-    // Add twilight purple in the upper sky.
-    color = mix(color, twilight_zenith, pow(up, 1.8) * 0.25);
-
-    return color;
-}
-
-fn base_twilight_sky(dir: vec3<f32>, sun_dir: vec3<f32>, up: f32) -> vec3<f32> {
-    let horizon_amount = pow(1.0 - up, 2.2);
-
-    let zenith = vec3<f32>(0.025, 0.030, 0.090);
-    let horizon = vec3<f32>(0.30, 0.18, 0.34);
-    let sun_horizon = vec3<f32>(0.90, 0.30, 0.18);
-
-    var color = mix(horizon, zenith, pow(up, 0.8));
-
-    let sun_side = pow(saturate(dot(dir, sun_dir) * 0.5 + 0.5), 4.0);
-    color = mix(color, sun_horizon, sun_side * horizon_amount * 0.5);
-
-    return color;
+    return INV_4PI * (1.0 - g2) / pow(denom, 1.5);
 }
 
 fn base_night_sky(dir: vec3<f32>, moon_dir: vec3<f32>, up: f32) -> vec3<f32> {
@@ -174,6 +128,82 @@ fn base_night_sky(dir: vec3<f32>, moon_dir: vec3<f32>, up: f32) -> vec3<f32> {
     return color;
 }
 
+// Based on https://www.shadertoy.com/view/msXXDS
+fn single_pass_physical_sky(dir: vec3<f32>, sun_dir: vec3<f32>, moon_dir: vec3<f32>, up: f32) -> vec3<f32> {
+    let haze = saturate(sky.params.haze);
+    let sun_elevation_sin = sin(sky.params.sun_elevation_degrees * 0.01745329252);
+    let sun_cos_theta = clamp(dot(dir, sun_dir), -1.0, 1.0);
+
+    // msXXDS precomputes transmittance in Buffer A and renders a sky-view LUT in
+    // Buffer B. The Bevy skybox stays single-pass, so these are compact RGB
+    // collision coefficients plus analytic air-mass approximations for the same
+    // Rayleigh/aerosol/transmittance terms.
+    let beta_rayleigh = vec3<f32>(5.80, 13.56, 33.10);
+    let aerosol_turbidity = 0.35 + haze * 2.15;
+    let beta_aerosol = vec3<f32>(20.0, 18.0, 16.0) * aerosol_turbidity;
+    let beta_extinction = beta_rayleigh + beta_aerosol;
+
+    // `up` is the existing horizon-anchored gradient coordinate. Using it here
+    // keeps the atmospheric horizon attached to the MapLibre horizon line while
+    // the angular phase term still follows the true view direction.
+    let view_mu = max(pow(up, 0.9), 0.015);
+    let view_air_mass = 1.0 / (view_mu + 0.065);
+    let sun_air_mass = 1.0 / (max(sun_elevation_sin, 0.0) + 0.085);
+
+    let view_transmittance = exp(-beta_extinction * (view_air_mass * 0.0065));
+    let scatter_fraction = vec3<f32>(1.0) - view_transmittance;
+    let sun_transmittance =
+        exp(-(beta_rayleigh * 0.0040 + beta_aerosol * 0.0030) * sun_air_mass);
+
+    let rayleigh = beta_rayleigh * rayleigh_phase(sun_cos_theta);
+    let aerosol = beta_aerosol
+        * aerosol_phase(sun_cos_theta, mix(0.86, 0.92, haze))
+        * 0.05;
+    let single_scattering = (rayleigh + aerosol) / max(beta_extinction, vec3<f32>(0.0001));
+
+    // Keep twilight energy when the CPU-side direct sun intensity has already
+    // reached zero below the horizon.
+    let twilight_energy = smoothstep(-0.32, 0.05, sun_elevation_sin) * 0.42;
+    let daylight_energy = max(sky.sun_color.a, twilight_energy);
+    let solar_energy = daylight_energy * (0.9 + 1.4 * saturate(sun_elevation_sin + 0.15));
+    let solar_color = sky.sun_color.rgb * solar_energy * sun_transmittance;
+
+    var color = scatter_fraction * single_scattering * solar_color * 18.0;
+
+    // A small multiple-scattering style lift prevents the horizon from becoming
+    // too contrasty without adding the extra Shadertoy LUT pass.
+    color += scatter_fraction
+        * mix(vec3<f32>(0.30, 0.38, 0.48), vec3<f32>(0.72, 0.74, 0.74), haze)
+        * daylight_energy
+        * (0.10 + 0.30 * (1.0 - up));
+
+    let horizon_amount = pow(1.0 - up, 2.3);
+    let low_sun = (1.0 - smoothstep(0.08, 0.45, sun_elevation_sin))
+        * smoothstep(-0.28, 0.05, sun_elevation_sin);
+    // Keep this centered on the physical sun direction. The earlier horizontal
+    // projection made the warm glow follow the sun azimuth but not the actual
+    // sun elevation, which could make the apparent center drift off `sun_dir`.
+    let sun_side = pow(saturate(sun_cos_theta), 32.0);
+
+    color += sky.sun_color.rgb
+        * vec3<f32>(1.30, 0.55, 0.25)
+        * sun_side
+        * horizon_amount
+        * low_sun
+        * 0.12;
+
+    color = mix(
+        color,
+        sky.ambient_color.rgb * (0.15 + 0.35 * sky.ambient_color.a),
+        0.08 * sky.ambient_color.a,
+    );
+
+    let night_color = base_night_sky(dir, moon_dir, up);
+    let daylight_blend = elevation_blend(-18.0, -4.0, sky.params.sun_elevation_degrees);
+
+    return mix(night_color, color, daylight_blend);
+}
+
 fn ground_sky(below: f32) -> vec3<f32> {
     let horizon_ground = sky.ambient_color.rgb * (0.18 + 0.40 * sky.ambient_color.a);
     let nadir_ground = sky.ambient_color.rgb * (0.025 + 0.12 * sky.ambient_color.a);
@@ -181,22 +211,24 @@ fn ground_sky(below: f32) -> vec3<f32> {
     return mix(horizon_ground, nadir_ground, pow(below, 0.55));
 }
 
-fn add_sun(dir: vec3<f32>, sun_dir: vec3<f32>, color: vec3<f32>) -> vec3<f32> {
+fn add_sun(dir: vec3<f32>, is_up: f32, sun_dir: vec3<f32>, color: vec3<f32>) -> vec3<f32> {
     let sun_amount = max(dot(dir, sun_dir), 0.0);
+    let sun_visible = smoothstep(-0.01, 0.03, sky.params.sun_elevation_degrees * 0.01745329252)
+        * is_up;
 
-    let broad_glow = pow(sun_amount, 24.0) * 0.035;
-    let tight_glow = pow(sun_amount, 256.0) * 0.25;
-    let disc = smoothstep(0.9995, 1.0, sun_amount);
+    let broad_glow = pow(sun_amount, 180.0) * 0.012;
+    let tight_glow = pow(sun_amount, 2048.0) * 0.12;
+    let disc = smoothstep(0.99988, 1.0, sun_amount);
 
     var result = color;
 
-    result += sky.sun_color.rgb * sky.sun_color.a * broad_glow;
-    result += sky.sun_color.rgb * sky.sun_color.a * tight_glow;
+    result += sky.sun_color.rgb * sky.sun_color.a * broad_glow * sun_visible;
+    result += sky.sun_color.rgb * sky.sun_color.a * tight_glow * sun_visible;
 
     result = mix(
         result,
         sky.sun_color.rgb * 1.25,
-        disc * sky.sun_color.a,
+        disc * sky.sun_color.a * sun_visible,
     );
 
     return result;
@@ -249,35 +281,10 @@ fn fragment(in: SkyboxVertexOutput) -> @location(0) vec4<f32> {
 
     let sun_elevation = sky.params.sun_elevation_degrees;
 
-    // Elevation phase weights:
-    //
-    // night:     below roughly -12 degrees
-    // twilight:  -12 to -2
-    // sunrise:   -2 to +8
-    // day:       +8 and above, fully day around +25
-    let twilight_factor = elevation_blend(-12.0, -2.0, sun_elevation);
-    let sunrise_factor = elevation_blend(-2.0, 8.0, sun_elevation);
     let day_factor = elevation_blend(6.0, 25.0, sun_elevation);
 
-    let night = base_night_sky(dir, moon_dir, up);
-    let twilight = base_twilight_sky(dir, sun_dir, up);
-    let sunrise = base_sunrise_sky(dir, sun_dir, up);
-    let day = base_day_sky(dir, sun_dir, up);
-
-    var upper_color = night;
-
-    upper_color = mix(upper_color, twilight, twilight_factor);
-    upper_color = mix(upper_color, sunrise, sunrise_factor);
-    upper_color = mix(upper_color, day, day_factor);
-
-    // Subtle pull toward the scene ambient color so sky and lighting stay aligned.
-    upper_color = mix(
-        upper_color,
-        sky.ambient_color.rgb,
-        0.12 * sky.ambient_color.a,
-    );
-
-    upper_color = add_sun(dir, sun_dir, upper_color);
+    var upper_color = single_pass_physical_sky(dir, sun_dir, moon_dir, up);
+//    upper_color = add_sun(dir, is_up, sun_dir, upper_color);
     upper_color = add_moon(dir, is_up, moon_dir, upper_color);
 
     let lower_color = ground_sky(below);
@@ -292,7 +299,7 @@ fn fragment(in: SkyboxVertexOutput) -> @location(0) vec4<f32> {
 
     let horizon_color = mix(
         sky.ambient_color.rgb,
-        vec3<f32>(0.80, 0.86, 0.96),
+        single_pass_physical_sky(horizon_dir, sun_dir, moon_dir, 0.0),
         saturate(day_factor),
     );
 

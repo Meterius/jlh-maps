@@ -209,10 +209,6 @@ fn fragment(
     let water = dyn_water_color_and_foam(vertex_output);
     let foam = smoothstep(0.35, 1.0, water.a);
     pbr_input.material.base_color = vec4<f32>(srgb_to_linear(water.rgb), 1.0);
-    pbr_input.material.emissive = vec4<f32>(
-        pbr_input.material.emissive.rgb + srgb_to_linear(FOAM_COL) * foam * 0.01,
-        pbr_input.material.emissive.a,
-    );
 
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
 
