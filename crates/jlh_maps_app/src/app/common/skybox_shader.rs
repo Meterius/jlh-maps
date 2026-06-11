@@ -61,6 +61,29 @@ impl Default for SkyboxShaderParams {
 }
 
 #[derive(ShaderType, Debug, Clone, Copy)]
+pub struct SkyboxShaderHorizon {
+    pub position: Vec2,
+    pub normal: Vec2,
+    pub sky_gradient_distance_px: f32,
+    pub ground_gradient_distance_px: f32,
+    pub seam_width_px: f32,
+    pub _padding: f32,
+}
+
+impl Default for SkyboxShaderHorizon {
+    fn default() -> Self {
+        Self {
+            position: Vec2::new(0.0, 1_000_000.0),
+            normal: Vec2::new(0.0, -1.0),
+            sky_gradient_distance_px: 256.0,
+            ground_gradient_distance_px: 256.0,
+            seam_width_px: 2.0,
+            _padding: 0.0,
+        }
+    }
+}
+
+#[derive(ShaderType, Debug, Clone, Copy)]
 pub struct SkyboxShaderUniform {
     pub sun_direction: Vec4,
     pub moon_direction: Vec4,
@@ -70,6 +93,7 @@ pub struct SkyboxShaderUniform {
     pub ambient_color: Vec4,
 
     pub params: SkyboxShaderParams,
+    pub horizon: SkyboxShaderHorizon,
 }
 
 impl Default for SkyboxShaderUniform {
@@ -81,6 +105,7 @@ impl Default for SkyboxShaderUniform {
             moon_color: Vec4::new(0.62, 0.68, 1.0, 0.0),
             ambient_color: Vec4::new(0.55, 0.68, 1.0, 1.0),
             params: SkyboxShaderParams::default(),
+            horizon: SkyboxShaderHorizon::default(),
         }
     }
 }

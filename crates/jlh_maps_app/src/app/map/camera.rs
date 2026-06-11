@@ -102,8 +102,16 @@ pub fn maplibre_camera_to_center_distance_world(height: f64, zoom: f64) -> f64 {
         return 0.0;
     }
 
-    let camera_to_center_pixels = 0.5 * height / (MAPLIBRE_DEFAULT_FOV_RADIANS * 0.5).tan();
+    let camera_to_center_pixels = maplibre_camera_to_center_distance_pixels(height);
     camera_to_center_pixels / world_size_pixels * MERCATOR_WORLD_SIZE
+}
+
+pub fn maplibre_camera_to_center_distance_pixels(height: f64) -> f64 {
+    if height <= 0.0 {
+        return 0.0;
+    }
+
+    0.5 * height / (MAPLIBRE_DEFAULT_FOV_RADIANS * 0.5).tan()
 }
 
 fn maplibre_semantic_camera_transform(state: &MlView) -> SemanticCameraTransform {

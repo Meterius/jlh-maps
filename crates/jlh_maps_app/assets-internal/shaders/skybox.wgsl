@@ -13,6 +13,15 @@ struct SkyboxShaderParams {
     exposure: f32,
 };
 
+struct SkyboxShaderHorizon {
+    position: vec2<f32>,
+    normal: vec2<f32>,
+    sky_gradient_distance_px: f32,
+    ground_gradient_distance_px: f32,
+    seam_width_px: f32,
+    _padding: f32,
+};
+
 struct SkyboxShaderUniform {
     sun_direction: vec4<f32>,
     moon_direction: vec4<f32>,
@@ -22,6 +31,7 @@ struct SkyboxShaderUniform {
     ambient_color: vec4<f32>,
 
     params: SkyboxShaderParams,
+    horizon: SkyboxShaderHorizon,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
@@ -71,12 +81,27 @@ fn sky_view_direction_from_frag_coord(frag_coord: vec4<f32>) -> vec3<f32> {
     return normalize(far_world - near_world);
 }
 
+fn horizon_signed_distance_px(frag_coord: vec4<f32>) -> f32 {
+    return dot(frag_coord.xy - sky.horizon.position, sky.horizon.normal);
+}
+
+fn remap_sky_up_from_horizon_z(dir_z: f32, horizon_z: f32) -> f32 {
+    return saturate(
+        (dir_z - horizon_z) / max(1.0 - horizon_z, 0.0001)
+    );
+}
+
+fn remap_ground_down_from_horizon_z(dir_z: f32, horizon_z: f32) -> f32 {
+    return saturate(
+        (horizon_z - dir_z) / max(1.0 + horizon_z, 0.0001)
+    );
+}
+
 fn elevation_blend(edge0: f32, edge1: f32, elevation_degrees: f32) -> f32 {
     return smoothstep(edge0, edge1, elevation_degrees);
 }
 
-fn base_day_sky(dir: vec3<f32>, sun_dir: vec3<f32>) -> vec3<f32> {
-    let up = saturate(dir.z);
+fn base_day_sky(dir: vec3<f32>, sun_dir: vec3<f32>, up: f32) -> vec3<f32> {
     let horizon_amount = pow(1.0 - up, 2.0);
 
     let clear_zenith = vec3<f32>(0.10, 0.28, 0.62);
@@ -102,8 +127,7 @@ fn base_day_sky(dir: vec3<f32>, sun_dir: vec3<f32>) -> vec3<f32> {
     return color;
 }
 
-fn base_sunrise_sky(dir: vec3<f32>, sun_dir: vec3<f32>) -> vec3<f32> {
-    let up = saturate(dir.z);
+fn base_sunrise_sky(dir: vec3<f32>, sun_dir: vec3<f32>, up: f32) -> vec3<f32> {
     let horizon_amount = pow(1.0 - up, 1.7);
 
     let twilight_zenith = vec3<f32>(0.13, 0.12, 0.28);
@@ -122,8 +146,7 @@ fn base_sunrise_sky(dir: vec3<f32>, sun_dir: vec3<f32>) -> vec3<f32> {
     return color;
 }
 
-fn base_twilight_sky(dir: vec3<f32>, sun_dir: vec3<f32>) -> vec3<f32> {
-    let up = saturate(dir.z);
+fn base_twilight_sky(dir: vec3<f32>, sun_dir: vec3<f32>, up: f32) -> vec3<f32> {
     let horizon_amount = pow(1.0 - up, 2.2);
 
     let zenith = vec3<f32>(0.025, 0.030, 0.090);
@@ -138,9 +161,7 @@ fn base_twilight_sky(dir: vec3<f32>, sun_dir: vec3<f32>) -> vec3<f32> {
     return color;
 }
 
-fn base_night_sky(dir: vec3<f32>, moon_dir: vec3<f32>) -> vec3<f32> {
-    let up = saturate(dir.z);
-
+fn base_night_sky(dir: vec3<f32>, moon_dir: vec3<f32>, up: f32) -> vec3<f32> {
     let zenith = vec3<f32>(0.004, 0.006, 0.020);
     let horizon = sky.ambient_color.rgb * (0.08 + 0.35 * sky.ambient_color.a);
 
@@ -153,9 +174,7 @@ fn base_night_sky(dir: vec3<f32>, moon_dir: vec3<f32>) -> vec3<f32> {
     return color;
 }
 
-fn ground_sky(dir: vec3<f32>) -> vec3<f32> {
-    let below = saturate(-dir.z);
-
+fn ground_sky(below: f32) -> vec3<f32> {
     let horizon_ground = sky.ambient_color.rgb * (0.18 + 0.40 * sky.ambient_color.a);
     let nadir_ground = sky.ambient_color.rgb * (0.025 + 0.12 * sky.ambient_color.a);
 
@@ -183,11 +202,10 @@ fn add_sun(dir: vec3<f32>, sun_dir: vec3<f32>, color: vec3<f32>) -> vec3<f32> {
     return result;
 }
 
-fn add_moon(dir: vec3<f32>, moon_dir: vec3<f32>, color: vec3<f32>) -> vec3<f32> {
+fn add_moon(dir: vec3<f32>, is_up: f32, moon_dir: vec3<f32>, color: vec3<f32>) -> vec3<f32> {
     let moon_amount = max(dot(dir, moon_dir), 0.0);
 
     let moon_visible = select(0.0, 1.0, sky.params.moon_elevation_degrees > 0.0);
-    let upper_sky = select(0.0, 1.0, dir.z >= 0.0);
 
     let glow = pow(moon_amount, 62.0) * 0.08;
     let disc = smoothstep(0.9997, 1.0, moon_amount);
@@ -198,12 +216,12 @@ fn add_moon(dir: vec3<f32>, moon_dir: vec3<f32>, color: vec3<f32>) -> vec3<f32> 
         * sky.moon_color.a
         * glow
         * moon_visible
-        * upper_sky;
+        * is_up;
 
     result = mix(
         result,
         sky.moon_color.rgb * 1.15,
-        disc * sky.moon_color.a * moon_visible * upper_sky,
+        disc * sky.moon_color.a * moon_visible * is_up,
     );
 
     return result;
@@ -212,6 +230,19 @@ fn add_moon(dir: vec3<f32>, moon_dir: vec3<f32>, color: vec3<f32>) -> vec3<f32> 
 @fragment
 fn fragment(in: SkyboxVertexOutput) -> @location(0) vec4<f32> {
     let dir = sky_view_direction_from_frag_coord(in.clip_position);
+
+    let horizon_distance_px = horizon_signed_distance_px(in.clip_position);
+    let horizon_frag_xy =
+        in.clip_position.xy - sky.horizon.normal * horizon_distance_px;
+    let horizon_dir = sky_view_direction_from_frag_coord(
+        vec4<f32>(horizon_frag_xy, in.clip_position.zw)
+    );
+    let horizon_z = clamp(horizon_dir.z, -0.9999, 0.9999);
+
+    let is_up = select(0.0, 1.0, horizon_distance_px >= 0.0);
+
+    let up = remap_sky_up_from_horizon_z(dir.z, horizon_z);
+    let below = remap_ground_down_from_horizon_z(dir.z, horizon_z);
 
     let sun_dir = normalize(sky.sun_direction.xyz);
     let moon_dir = normalize(sky.moon_direction.xyz);
@@ -228,10 +259,10 @@ fn fragment(in: SkyboxVertexOutput) -> @location(0) vec4<f32> {
     let sunrise_factor = elevation_blend(-2.0, 8.0, sun_elevation);
     let day_factor = elevation_blend(6.0, 25.0, sun_elevation);
 
-    let night = base_night_sky(dir, moon_dir);
-    let twilight = base_twilight_sky(dir, sun_dir);
-    let sunrise = base_sunrise_sky(dir, sun_dir);
-    let day = base_day_sky(dir, sun_dir);
+    let night = base_night_sky(dir, moon_dir, up);
+    let twilight = base_twilight_sky(dir, sun_dir, up);
+    let sunrise = base_sunrise_sky(dir, sun_dir, up);
+    let day = base_day_sky(dir, sun_dir, up);
 
     var upper_color = night;
 
@@ -247,13 +278,18 @@ fn fragment(in: SkyboxVertexOutput) -> @location(0) vec4<f32> {
     );
 
     upper_color = add_sun(dir, sun_dir, upper_color);
-    upper_color = add_moon(dir, moon_dir, upper_color);
+    upper_color = add_moon(dir, is_up, moon_dir, upper_color);
 
-    let lower_color = ground_sky(dir);
-    var final_color = select(lower_color, upper_color, dir.z >= 0.0);
+    let lower_color = ground_sky(below);
+    var final_color = select(lower_color, upper_color, is_up > 0.0);
 
     // Soft horizon seam.
-    let horizon_line = 1.0 - smoothstep(0.0, 0.020, abs(dir.z));
+    let horizon_line = 1.0 - smoothstep(
+        0.0,
+        max(sky.horizon.seam_width_px, 0.0001),
+        abs(horizon_distance_px),
+    );
+
     let horizon_color = mix(
         sky.ambient_color.rgb,
         vec3<f32>(0.80, 0.86, 0.96),
