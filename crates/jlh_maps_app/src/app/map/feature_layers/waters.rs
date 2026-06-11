@@ -27,7 +27,8 @@ impl Plugin for WatersPlugin {
         app.register_type::<WaterMaterialUniform>()
             .register_type::<WaterMaterialExtension>()
             .register_asset_reflect::<WaterMaterial>()
-            .add_plugins(MaterialPlugin::<WaterMaterial>::default());
+            .add_plugins(MaterialPlugin::<WaterMaterial>::default())
+            .add_systems(PostUpdate, sync_water_material_edge_distance_texture);
     }
 }
 
@@ -68,6 +69,11 @@ struct WaterTile;
 
 #[derive(Component)]
 pub(crate) struct WaterTileBucket;
+
+#[derive(Component, Default)]
+struct AppliedEdgeDistanceTextureRevision {
+    data_revision: u64,
+}
 
 pub(super) struct WaterTileBucketLayer;
 
@@ -132,6 +138,29 @@ impl TileBucketLayerMeta for WaterTileBucketLayer {
                 ..default()
             }),
             edge_distance_texture,
+            AppliedEdgeDistanceTextureRevision::default(),
         ));
+    }
+}
+
+fn sync_water_material_edge_distance_texture(
+    mut materials: ResMut<Assets<WaterMaterial>>,
+    mut waters: Query<(
+        &FeatureTileEdgeDistanceTexture,
+        &MeshMaterial3d<WaterMaterial>,
+        &mut AppliedEdgeDistanceTextureRevision,
+    )>,
+) {
+    for (edge_distance_texture, material_handle, mut applied_revision) in &mut waters {
+        let data_revision = edge_distance_texture.data_revision();
+        if applied_revision.data_revision == data_revision {
+            continue;
+        }
+
+        applied_revision.data_revision = data_revision;
+
+        // Edge texture image is updated in-place, without dirtying the material
+        // Bevy does not rebuild the material bind group of the material asset
+        let _ = materials.get_mut(&material_handle.0);
     }
 }
