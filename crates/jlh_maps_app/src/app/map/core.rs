@@ -8,10 +8,10 @@ use crate::app::map::terrain::TerrainTileManager;
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{LngLat, MercatorCoordinate};
 use bevy::camera::visibility::RenderLayers;
-use bevy::camera::{CameraOutputMode, RenderTarget};
+use bevy::camera::{CameraOutputMode, RenderTarget, Viewport};
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
-use bevy::window::WindowRef;
+use bevy::window::{Window, WindowRef};
 use big_space::bundles::BigSpaceRootBundle;
 use big_space::prelude::{CellCoord, FloatingOrigin};
 use serde::{Deserialize, Serialize};
@@ -28,11 +28,34 @@ pub const MAP_VIEW_COLOR_RENDER_LAYER: usize = 1;
 pub const MAP_VIEW_NON_TERRAIN_RENDER_LAYER: usize = 2;
 pub const MAP_VIEW_TERRAIN_RENDER_LAYER: usize = 3;
 
+const MAP_TEXTURE_ATLAS_COLUMNS: u32 = 2;
+
 pub(super) struct CorePlugin;
 
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MapViewSettings::default());
+        app.insert_resource(MapViewSettings::default())
+            .add_systems(PreUpdate, sync_map_texture_atlas_camera_viewports);
+    }
+}
+
+#[derive(Debug, Component)]
+struct MapTextureAtlasCamera {
+    slot: MapTextureAtlasSlot,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MapTextureAtlasSlot {
+    Terrain,
+    Overlay,
+}
+
+impl MapTextureAtlasSlot {
+    fn index(self) -> u32 {
+        match self {
+            Self::Terrain => 0,
+            Self::Overlay => 1,
+        }
     }
 }
 
@@ -193,9 +216,10 @@ pub fn spawn_map_view(
                 layers: RenderLayers::layer(MAP_VIEW_NON_TERRAIN_RENDER_LAYER),
             },
             Camera {
-                clear_color: ClearColorConfig::Custom(Color::NONE),
+                order: 1,
+                clear_color: ClearColorConfig::None,
                 output_mode: CameraOutputMode::Write {
-                    clear_color: ClearColorConfig::Custom(Color::NONE),
+                    clear_color: ClearColorConfig::None,
                     blend_state: None,
                 },
                 ..default()
@@ -210,19 +234,15 @@ pub fn spawn_map_view(
                 MAP_VIEW_NON_TERRAIN_RENDER_LAYER,
             ]),
             ambient_light.clone(),
+            MapTextureAtlasCamera {
+                slot: MapTextureAtlasSlot::Overlay,
+            },
             MapViewCamera {
                 maplibre_int_eid: maplibre_integration_eid,
             },
         ));
     });
 
-    // TODO: improve implementation
-    // - filtered rendering:
-    //  - right now, terrain texture is color multiplied which due to MSAA results in artifacts around meshes,
-    //    most visible when illuminance is low
-    // - render to texture:
-    //  - render overhead is increased as multiple seperate window and offscreen canvases are created and used,
-    //    ideally the seperate render should render directly to a texture and minimize overhead
     commands.entity(map_view_eid).with_children(|parent| {
         parent.spawn((
             Name::new("MapLibre Terrain Texture Camera"),
@@ -239,7 +259,7 @@ pub fn spawn_map_view(
             },
             RenderTarget::Window(WindowRef::Entity(
                 app_windows
-                    .terrain_texture_eid
+                    .texture_eid
                     .expect("map texture offscreen window to be set"),
             )),
             RenderLayers::from_layers(&[
@@ -247,9 +267,46 @@ pub fn spawn_map_view(
                 MAP_VIEW_TERRAIN_RENDER_LAYER,
             ]),
             ambient_light,
+            MapTextureAtlasCamera {
+                slot: MapTextureAtlasSlot::Terrain,
+            },
             MapViewCamera {
                 maplibre_int_eid: maplibre_integration_eid,
             },
         ));
     });
+}
+
+fn sync_map_texture_atlas_camera_viewports(
+    mut cameras: Query<(&mut Camera, &MapTextureAtlasCamera, &RenderTarget)>,
+    windows: Query<&Window>,
+) {
+    for (mut camera, atlas_camera, render_target) in &mut cameras {
+        let RenderTarget::Window(WindowRef::Entity(window_eid)) = render_target else {
+            continue;
+        };
+        let Ok(window) = windows.get(*window_eid) else {
+            continue;
+        };
+
+        let atlas_size = window.physical_size();
+        let slot_width = atlas_size.x / MAP_TEXTURE_ATLAS_COLUMNS;
+        if slot_width == 0 || atlas_size.y == 0 {
+            camera.viewport = None;
+            continue;
+        }
+
+        let viewport = Viewport {
+            physical_position: UVec2::new(slot_width * atlas_camera.slot.index(), 0),
+            physical_size: UVec2::new(slot_width, atlas_size.y),
+            depth: 0.0..1.0,
+        };
+
+        if camera.viewport.as_ref().is_none_or(|current| {
+            current.physical_position != viewport.physical_position
+                || current.physical_size != viewport.physical_size
+        }) {
+            camera.viewport = Some(viewport);
+        }
+    }
 }

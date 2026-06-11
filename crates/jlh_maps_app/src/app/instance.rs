@@ -62,20 +62,13 @@ impl BevyInstance {
     pub fn new(
         debug_canvas: Option<OffscreenCanvas>,
         texture_canvas: OffscreenCanvas,
-        terrain_texture_canvas: OffscreenCanvas,
         asset_base_url: String,
     ) -> Self {
         initialize();
 
         let mut app = App::new();
         app.add_plugins(AppTaskPoolPlugin {});
-        setup_app(
-            &mut app,
-            debug_canvas,
-            texture_canvas,
-            terrain_texture_canvas,
-            asset_base_url,
-        );
+        setup_app(&mut app, debug_canvas, texture_canvas, asset_base_url);
 
         Self {
             inner: Rc::new(BevyInstanceInner {

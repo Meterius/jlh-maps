@@ -26,6 +26,31 @@ const DEFAULT_MOON_AZIMUTH_DEGREES = 191.31
 const DEFAULT_MOON_ELEVATION_DEGREES = -32.52
 const DEFAULT_FEATURE_VISIBILITY_DISTANCE = 10
 
+const BEVY_TEXTURE_ATLAS_COLUMNS = 2
+
+// TODO: refactor naming and structure convention for maplibre texture window / canvas handling,
+// as now the window contains multiple viewports handled manually in both bevy and js code
+
+export enum MaplibreTextureAtlasKind {
+  Terrain,
+  Overlay,
+}
+
+export function textureSizeForMaplibreSize(size: { width: number; height: number }): {
+  width: number
+  height: number
+} {
+  return {
+    width: size.width * BEVY_TEXTURE_ATLAS_COLUMNS,
+    height: size.height,
+  }
+}
+
+export const BEVY_MAPLIBRE_TEXTURE_ATLAS_VIEWPORT = {
+  [MaplibreTextureAtlasKind.Terrain]: [0.0, 0.0, 0.5, 1.0],
+  [MaplibreTextureAtlasKind.Overlay]: [0.5, 0.0, 0.5, 1.0],
+}
+
 interface BevyInstanceState {
   instanceId: string
   isMounted: Ref<boolean>
@@ -132,7 +157,13 @@ export function mountBevy(
     const canvas = state.maplibreCanvas.value
     if (!canvas) return
 
-    targetWindowSize.maplibre.value = canvasRenderSize(canvas)
+    const maplibreCanvasSize = canvasRenderSize(canvas)
+    const maplibreTextureSize = textureSizeForMaplibreSize(maplibreCanvasSize)
+
+    targetWindowSize.maplibre.value = {
+      ...maplibreCanvasSize,
+      ...maplibreTextureSize,
+    }
   }
 
   watch(state.debugCanvas, updateDebugCanvasRenderSize, { immediate: true })
@@ -157,7 +188,13 @@ export function mountBevy(
       const debugSize = debugCanvas ? canvasRenderSize(debugCanvas) : null
       const maplibreSize = canvasRenderSize(maplibreCanvas)
 
-      targetWindowSize.maplibre.value = maplibreSize
+      const maplibreCanvasSize = canvasRenderSize(maplibreCanvas)
+      const maplibreTextureSize = textureSizeForMaplibreSize(maplibreCanvasSize)
+
+      targetWindowSize.maplibre.value = {
+        ...maplibreCanvasSize,
+        ...maplibreTextureSize,
+      }
       targetWindowSize.debug.value = debugSize
 
       mountRegisteredBevyInstance(state, debugSize, maplibreSize)
@@ -330,16 +367,13 @@ async function mountRegisteredBevyInstance(
     const debugOffscreenCanvas = debugSize
       ? new OffscreenCanvas(debugSize.width, debugSize.height)
       : null
-    const textureOffscreenCanvas = new OffscreenCanvas(maplibreSize.width, maplibreSize.height)
-    const terrainTextureOffscreenCanvas = new OffscreenCanvas(
-      maplibreSize.width,
-      maplibreSize.height,
-    )
+
+    const textureSize = textureSizeForMaplibreSize(maplibreSize)
+    const textureOffscreenCanvas = new OffscreenCanvas(textureSize.width, textureSize.height)
 
     state.bevyInstance.value = wrap<BevyInstance>(worker)
     await state.bevyInstance.value.mount(
       transfer(textureOffscreenCanvas, [textureOffscreenCanvas]),
-      transfer(terrainTextureOffscreenCanvas, [terrainTextureOffscreenCanvas]),
       debugOffscreenCanvas
         ? transfer(debugOffscreenCanvas, [debugOffscreenCanvas])
         : debugOffscreenCanvas,

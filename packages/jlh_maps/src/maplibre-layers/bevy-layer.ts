@@ -1,5 +1,7 @@
 import type { CustomLayerInterface, Map as MapLibreMap } from 'maplibre-gl'
 import type { ShallowRef } from 'vue'
+import { BEVY_MAPLIBRE_TEXTURE_ATLAS_VIEWPORT, MaplibreTextureAtlasKind } from '@/bevy'
+import { assertNever } from '@/utils/helper.ts'
 
 interface BevyLayerOptions {
   id?: string
@@ -20,11 +22,22 @@ precision highp float;
 
 in vec2 v_uv;
 uniform sampler2D u_color_texture;
+uniform vec4 u_texture_region;
 uniform vec2 u_depth_range;
+uniform bool u_terrain_composite;
 out vec4 out_color;
 
 void main() {
-  vec4 color = texture(u_color_texture, v_uv);
+  vec2 atlas_uv = u_texture_region.xy + v_uv * u_texture_region.zw;
+  vec4 color = texture(u_color_texture, atlas_uv);
+
+  if (u_terrain_composite) {
+    // The terrain region is a straight-alpha coverage texture. Convert it into
+    // an opaque multiplier: uncovered pixels become white, covered pixels keep
+    // Bevy's lit terrain color.
+    float coverage = clamp(color.a, 0.0, 1.0);
+    color = vec4(mix(vec3(1.0), color.rgb, coverage), 1.0);
+  }
 
   gl_FragDepth = u_depth_range.x;
   out_color = color;
@@ -52,21 +65,16 @@ export class BevyLayer implements CustomLayerInterface {
     height: 0,
   }
 
-  private terrainTexture: FrameTexture = {
-    handle: undefined,
-    width: 0,
-    height: 0,
-  }
-
   private vertexBuffer: WebGLBuffer | undefined
   private vertexArray: WebGLVertexArrayObject | undefined
   private aPos = -1
   private uColorTexture: WebGLUniformLocation | null = null
+  private uTextureRegion: WebGLUniformLocation | null = null
   private uDepthRange: WebGLUniformLocation | null = null
+  private uTerrainComposite: WebGLUniformLocation | null = null
 
   constructor(
     private readonly frameBitmap: ShallowRef<ImageBitmap | null>,
-    private readonly frameTerrainBitmap: ShallowRef<ImageBitmap | null>,
     options: BevyLayerOptions = {},
   ) {
     this.id = options.id ?? 'bevy-texture'
@@ -78,7 +86,9 @@ export class BevyLayer implements CustomLayerInterface {
     this.program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER)
     this.aPos = gl.getAttribLocation(this.program, 'a_pos')
     this.uColorTexture = gl.getUniformLocation(this.program, 'u_color_texture')
+    this.uTextureRegion = gl.getUniformLocation(this.program, 'u_texture_region')
     this.uDepthRange = gl.getUniformLocation(this.program, 'u_depth_range')
+    this.uTerrainComposite = gl.getUniformLocation(this.program, 'u_terrain_composite')
 
     this.vertexBuffer = gl.createBuffer()!
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer)
@@ -105,85 +115,66 @@ export class BevyLayer implements CustomLayerInterface {
     this.map.triggerRepaint()
 
     const frameBitmap = this.frameBitmap.value
-    const frameTerrainBitmap = this.frameTerrainBitmap.value
 
     this.frameBitmap.value = null
-    this.frameTerrainBitmap.value = null
 
-    if (
-      !frameBitmap ||
-      !frameTerrainBitmap ||
-      !this.program ||
-      !this.vertexBuffer ||
-      !this.texture
-    ) {
+    if (!frameBitmap || !this.program || !this.vertexBuffer || !this.texture) {
       frameBitmap?.close()
-      frameTerrainBitmap?.close()
       return
     }
-
-    // Draw terrain texture
-
-    if (!bindAndUploadTexture(gl, this.terrainTexture, frameTerrainBitmap)) {
-      this.map.triggerRepaint()
-      return
-    }
-
-    gl.enable(gl.BLEND)
-    // color multiply
-    gl.blendFunc(gl.DST_COLOR, gl.ZERO)
-    gl.enable(gl.DEPTH_TEST)
-    gl.depthFunc(gl.LEQUAL)
-    gl.depthMask(true)
-
-    gl.useProgram(this.program)
-
-    if (isWebGL2(gl) && this.vertexArray) {
-      gl.bindVertexArray(this.vertexArray)
-    } else {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer)
-      gl.enableVertexAttribArray(this.aPos)
-      gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, false, 0, 0)
-    }
-
-    gl.uniform1i(this.uColorTexture, 0)
-    gl.uniform2f(
-      this.uDepthRange,
-      this.map.painter.depthRangeFor3D[0],
-      this.map.painter.depthRangeFor3D[1],
-    )
-    gl.drawArrays(gl.TRIANGLES, 0, 6)
-
-    // Draw texture
 
     if (!bindAndUploadTexture(gl, this.texture, frameBitmap)) {
       this.map.triggerRepaint()
       return
     }
 
-    gl.enable(gl.BLEND)
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
-    gl.enable(gl.DEPTH_TEST)
-    gl.depthFunc(gl.LEQUAL)
-    gl.depthMask(true)
+    for (const kind of [MaplibreTextureAtlasKind.Terrain, MaplibreTextureAtlasKind.Overlay]) {
+      gl.enable(gl.BLEND)
 
-    gl.useProgram(this.program)
+      switch (kind) {
+        case MaplibreTextureAtlasKind.Terrain: {
+          // Terrain is applied as a color multiplier over MapLibre terrain:
+          // final color = Bevy terrain multiplier * existing framebuffer color.
+          gl.blendFunc(gl.DST_COLOR, gl.ZERO)
+          break
+        }
+        case MaplibreTextureAtlasKind.Overlay: {
+          // The worker requests straight-alpha ImageBitmaps and upload keeps
+          // them straight, so use ordinary source-alpha composition here.
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+          break
+        }
+        default:
+          assertNever(kind)
+          break
+      }
 
-    if (isWebGL2(gl) && this.vertexArray) {
-      gl.bindVertexArray(this.vertexArray)
-    } else {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer)
-      gl.enableVertexAttribArray(this.aPos)
-      gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, false, 0, 0)
+      gl.enable(gl.DEPTH_TEST)
+      gl.depthFunc(gl.LEQUAL)
+      gl.depthMask(true)
+
+      gl.useProgram(this.program)
+
+      if (isWebGL2(gl) && this.vertexArray) {
+        gl.bindVertexArray(this.vertexArray)
+      } else {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer)
+        gl.enableVertexAttribArray(this.aPos)
+        gl.vertexAttribPointer(this.aPos, 2, gl.FLOAT, false, 0, 0)
+      }
+
+      gl.uniform1i(this.uColorTexture, 0)
+      gl.uniform4fv(this.uTextureRegion, BEVY_MAPLIBRE_TEXTURE_ATLAS_VIEWPORT[kind])
+      // Only the terrain atlas region needs conversion into a multiplier; the
+      // overlay region keeps its sampled RGBA color unchanged.
+      gl.uniform1i(this.uTerrainComposite, kind === MaplibreTextureAtlasKind.Terrain ? 1 : 0)
+      gl.uniform2f(
+        this.uDepthRange,
+        this.map.painter.depthRangeFor3D[0],
+        this.map.painter.depthRangeFor3D[1],
+      )
+      gl.drawArrays(gl.TRIANGLES, 0, 6)
     }
-
-    gl.uniform1i(this.uColorTexture, 0)
-    gl.uniform2f(
-      this.uDepthRange,
-      this.map.painter.depthRangeFor3D[0],
-      this.map.painter.depthRangeFor3D[1],
-    )
-    gl.drawArrays(gl.TRIANGLES, 0, 6)
   }
 
   onRemove(_map: MapLibreMap, gl: WebGLRenderingContext | WebGL2RenderingContext): void {
@@ -195,9 +186,6 @@ export class BevyLayer implements CustomLayerInterface {
     }
     if (this.texture.handle) {
       gl.deleteTexture(this.texture.handle)
-    }
-    if (this.terrainTexture.handle) {
-      gl.deleteTexture(this.terrainTexture.handle)
     }
     if (this.program) {
       gl.deleteProgram(this.program)
@@ -275,9 +263,9 @@ function bindAndUploadTexture(
     }
   }
 
-  // On chrome this happens < 1ms, likely the current setup is handled as gpu-gpu copy,
-  // while on firefox this can take ~20-40ms and incurs a cpu copy
-  // TODO: investigate firefox performance bottleneck of texture transfer
+  // On Chrome this happens < 1ms, likely because the current setup is handled
+  // as a GPU-to-GPU copy. On Firefox this can take ~20-40ms and incurs a CPU copy.
+  // TODO: investigate Firefox performance bottleneck of texture transfer.
   try {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, frameBitmap)
   } finally {

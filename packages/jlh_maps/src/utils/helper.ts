@@ -56,3 +56,7 @@ export function coalesceTrailing<Args extends unknown[], R>(
 export function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
+
+export function assertNever(value: never): never {
+  throw new Error(`Unexpected code path reached due to value: ${value}`)
+}

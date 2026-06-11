@@ -445,16 +445,11 @@ const bevyMount = createDynamicComposable(
 useMapSunController(() => bevyMount.value?.useBevyRet.mapViewSettings)
 
 const bevyFrameBitmap = shallowRef<ImageBitmap | null>(null)
-const bevyTerrainFrameBitmap = shallowRef<ImageBitmap | null>(null)
 
 const closePendingBevyFrameBitmaps = () => {
   const frameBitmap = bevyFrameBitmap.value
   bevyFrameBitmap.value = null
   frameBitmap?.close()
-
-  const terrainFrameBitmap = bevyTerrainFrameBitmap.value
-  bevyTerrainFrameBitmap.value = null
-  terrainFrameBitmap?.close()
 }
 
 let pendingBevyFrame = 0
@@ -516,7 +511,6 @@ const tickBevyAndProduceFrame = async () => {
 
     if (frameIdx !== pendingBevyFrame) {
       frame.textureBitmap.close()
-      frame.terrainTextureBitmap.close()
       frame.debugBitmap?.close()
       return
     }
@@ -524,10 +518,6 @@ const tickBevyAndProduceFrame = async () => {
     const previousFrameBitmap = bevyFrameBitmap.value
     bevyFrameBitmap.value = frame.textureBitmap
     previousFrameBitmap?.close()
-
-    const previousTerrainFrameBitmap = bevyTerrainFrameBitmap.value
-    bevyTerrainFrameBitmap.value = frame.terrainTextureBitmap
-    previousTerrainFrameBitmap?.close()
 
     if (frame.debugBitmap && bevyDebugCanvas.value) {
       const context = bevyDebugCanvas.value.getContext('bitmaprenderer')
@@ -1003,7 +993,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
     useLayer(
       map,
-      new BevyLayer(bevyFrameBitmap, bevyTerrainFrameBitmap, {
+      new BevyLayer(bevyFrameBitmap, {
         id: BEVY_LAYER_ID,
       }),
     )
