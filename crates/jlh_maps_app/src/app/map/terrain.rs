@@ -13,7 +13,6 @@ use crate::utils::debug::SoftExpect;
 use crate::utils::terrain_mesh::build_terrain_mesh_with_skirts;
 use crate::wasm_task_pool::Task;
 use bevy::camera::visibility::RenderLayers;
-use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use big_space::grid::Grid;
 use big_space::prelude::CellCoord;
@@ -104,24 +103,6 @@ fn sync_spawned_tiles(
                         tile_transform,
                         tile_cell,
                         Visibility::Inherited,
-                        TerrainTile {
-                            maplibre_int_eid,
-                            maplibre_tile_id: tile_id,
-                            terrain_hash: None,
-                            pending_mesh_task: None,
-                        },
-                    ))
-                    .id();
-
-                let color_mesh_eid = commands
-                    .spawn((
-                        Transform::default(),
-                        Visibility::Inherited,
-                        Mesh3d(flat_mesh.0.clone()),
-                        MeshMaterial3d(materials.transparent_material.clone()),
-                        DebugAabbGizmo,
-                        NotShadowCaster,
-                        RenderLayers::from_layers(&[MAP_VIEW_NON_TERRAIN_RENDER_LAYER]),
                     ))
                     .id();
 
@@ -130,16 +111,33 @@ fn sync_spawned_tiles(
                         Transform::default(),
                         Visibility::Inherited,
                         Mesh3d(flat_mesh.0.clone()),
+                        MeshMaterial3d(materials.transparent_material.clone()),
+                        DebugAabbGizmo,
+                        RenderLayers::from_layers(&[MAP_VIEW_NON_TERRAIN_RENDER_LAYER]),
+                    ))
+                    .id();
+
+                let color_mesh_id = commands
+                    .spawn((
+                        Transform::default(),
+                        Visibility::Inherited,
+                        Mesh3d(flat_mesh.0.clone()),
                         MeshMaterial3d(materials.color_material.clone()),
                         DebugAabbGizmo,
-                        NotShadowCaster,
                         RenderLayers::from_layers(&[MAP_VIEW_COLOR_RENDER_LAYER]),
                     ))
                     .id();
 
                 commands
                     .entity(tile_eid)
-                    .add_children(&[color_mesh_eid, transparent_mesh_eid]);
+                    .insert(TerrainTile {
+                        maplibre_int_eid,
+                        maplibre_tile_id: tile_id,
+                        terrain_mesh_eids: [transparent_mesh_eid, color_mesh_id],
+                        terrain_hash: None,
+                        pending_mesh_task: None,
+                    })
+                    .add_children(&[transparent_mesh_eid, color_mesh_id]);
 
                 commands.entity(manager_eid).add_child(tile_eid);
                 entry.insert(tile_eid);
@@ -167,6 +165,7 @@ fn sync_spawned_tiles(
 pub struct TerrainTile {
     pub maplibre_int_eid: Entity,
     pub maplibre_tile_id: CanonicalTileId,
+    terrain_mesh_eids: [Entity; 2],
     pub terrain_hash: Option<u64>,
     pending_mesh_task: Option<PendingTerrainMeshTask>,
 }
@@ -178,12 +177,13 @@ struct PendingTerrainMeshTask {
 
 fn sync_tiles(
     ml_terrains: Query<&MlTerrain>,
-    mut tiles: Query<(&mut TerrainTile, &mut Mesh3d)>,
+    mut tiles: Query<&mut TerrainTile>,
+    mut terrain_meshes: Query<&mut Mesh3d>,
     task_pool: Res<AppTaskPool>,
     flat_mesh: Res<TerrainFlatMesh>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    for (mut tile, mut tile_mesh) in tiles.iter_mut() {
+    for mut tile in tiles.iter_mut() {
         let Some(ml_terrain) = ml_terrains.get(tile.maplibre_int_eid).ok().soft_expect("") else {
             continue;
         };
@@ -198,10 +198,18 @@ fn sync_tiles(
             if task.task.is_finished() {
                 if let Some(mesh) = task.task.take_result() {
                     tile.terrain_hash = Some(task.terrain_hash);
-                    *tile_mesh = Mesh3d(meshes.add(mesh));
+                    set_terrain_tile_mesh(
+                        tile.terrain_mesh_eids,
+                        meshes.add(mesh),
+                        &mut terrain_meshes,
+                    );
                 } else {
                     tile.terrain_hash = None;
-                    *tile_mesh = Mesh3d(flat_mesh.0.clone());
+                    set_terrain_tile_mesh(
+                        tile.terrain_mesh_eids,
+                        flat_mesh.0.clone(),
+                        &mut terrain_meshes,
+                    );
                 }
             } else {
                 tile.pending_mesh_task = Some(task);
@@ -225,7 +233,23 @@ fn sync_tiles(
             });
         } else {
             tile.terrain_hash = None;
-            *tile_mesh = Mesh3d(flat_mesh.0.clone());
+            set_terrain_tile_mesh(
+                tile.terrain_mesh_eids,
+                flat_mesh.0.clone(),
+                &mut terrain_meshes,
+            );
+        }
+    }
+}
+
+fn set_terrain_tile_mesh(
+    terrain_mesh_eids: [Entity; 2],
+    mesh: Handle<Mesh>,
+    terrain_meshes: &mut Query<&mut Mesh3d>,
+) {
+    for terrain_mesh_eid in terrain_mesh_eids {
+        if let Ok(mut terrain_mesh) = terrain_meshes.get_mut(terrain_mesh_eid) {
+            *terrain_mesh = Mesh3d(mesh.clone());
         }
     }
 }
