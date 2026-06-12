@@ -22,6 +22,7 @@
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/datasets/sat" />
       <excludeFolder url="file://$MODULE_DIR$/crates/jlh_maps_core_service/target" />
+      <excludeFolder url="file://$MODULE_DIR$/jupyter/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/jupyter/notebooks/water_flow_test/.venv" />
     </content>
     <orderEntry type="inheritedJdk" />
