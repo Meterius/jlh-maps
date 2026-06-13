@@ -1,6 +1,8 @@
 use crate::app::common::debug_gizmos::DebugAabbGizmo;
 use crate::app::common::materials::TransparentOverwriteMaterial;
-use crate::app::map::core::{MAP_VIEW_COLOR_RENDER_LAYER, MAP_VIEW_NON_TERRAIN_RENDER_LAYER, MAP_VIEW_TERRAIN_RENDER_LAYER};
+use crate::app::map::core::{
+    MAP_VIEW_COLOR_RENDER_LAYER, MAP_VIEW_NON_TERRAIN_RENDER_LAYER, MAP_VIEW_TERRAIN_RENDER_LAYER,
+};
 use crate::app::map::transform::MERCATOR_WORLD_SIZE;
 use crate::app::maplibre_gl_js::types::{CanonicalTileId, MlTerrain, MlTerrainTile};
 use crate::app::maplibre_gl_js::utils::mercator_coordinate::{
