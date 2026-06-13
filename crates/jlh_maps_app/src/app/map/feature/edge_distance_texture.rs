@@ -9,9 +9,11 @@ use crate::utils::edge_distance::update_edge_distance_texture;
 use bevy::asset::{Assets, Handle, RenderAssetUsages};
 use bevy::ecs::system::SystemParamItem;
 use bevy::image::{Image, ImageSampler};
-use bevy::math::{UVec2, dvec2};
-use bevy::prelude::{Entity, Plugin, ResMut, uvec2};
+use bevy::math::{dvec2, UVec2};
+use bevy::prelude::{uvec2, Entity, Plugin, ResMut};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use geo::algorithm::unary_union;
+use geo_types::Polygon as GeoPolygon;
 use geojson::Value;
 use std::sync::Arc;
 
@@ -135,18 +137,37 @@ fn build_features_edge_segments<'a>(
     bounds: (bevy::math::DVec2, bevy::math::DVec2),
     features: impl IntoIterator<Item = &'a MlTileFeature>,
 ) -> Vec<f32> {
-    let mut edges = Vec::new();
+    let mut geo_polygons: Vec<GeoPolygon<f64>> = Vec::new();
     for feature in features {
         match &feature.geometry.value {
-            Value::Polygon(polygon) => push_polygon_edge_segments(bounds, polygon, &mut edges),
+            Value::Polygon(polygon) => {
+                if let Ok(polygon) = GeoPolygon::try_from(Value::Polygon(polygon.clone())) {
+                    geo_polygons.push(polygon);
+                }
+            }
             Value::MultiPolygon(polygons) => {
                 for polygon in polygons {
-                    push_polygon_edge_segments(bounds, polygon, &mut edges);
+                    if let Ok(polygon) = GeoPolygon::try_from(Value::Polygon(polygon.clone())) {
+                        geo_polygons.push(polygon);
+                    }
                 }
             }
             _ => {}
         }
     }
+
+    let mut edges = Vec::new();
+    if geo_polygons.is_empty() {
+        return edges;
+    }
+
+    let merged_geometry = unary_union(&geo_polygons);
+    for polygon in &merged_geometry.0 {
+        if let Value::Polygon(polygon) = Value::from(polygon) {
+            push_polygon_edge_segments(bounds, &polygon, &mut edges);
+        }
+    }
+
     edges
 }
 
