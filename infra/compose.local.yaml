@@ -48,24 +48,9 @@ services:
       - postgres_private
       - traefik_public
 
-  omt_tileserver_gl:
-    volumes:
-      - ${OPENMAPTILES_DIR}/data:/data
-      - ${OPENMAPTILES_DIR}/style:/style
-      - ${OPENMAPTILES_DIR}/build:/build
-
   static_tile_server:
     volumes:
-      - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
-      - ${OSM2STREETS_PMTILES_PATH:?OSM2STREETS_PMTILES_PATH is required}:/usr/share/nginx/html/roads/tiles.pmtiles:ro
-
-  frontend:
-    volumes:
-      - ${JLH_MAPS_DIST_DIR}:/usr/share/nginx/html:ro
-
-  valhalla:
-    volumes:
-      - ${VALHALLA_CUSTOM_FILES_DIR}:/custom_files
+      - ./services/static_tile_server/nginx.local.conf:/etc/nginx/conf.d/default.conf:ro
 
 configs:
   traefik_dynamic_local:

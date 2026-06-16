@@ -1,10 +1,10 @@
 http:
   routers:
-    frontend:
+    static_frontend:
       rule: Host(`localhost`) || Host(`{{ env "ROOT_DOMAIN" }}`)
       entryPoints:
         - web
-      service: frontend
+      service: static_frontend
 
     core_service:
       rule: Host(`api.jlh_maps.localhost`) || Host(`api.{{ env "ROOT_DOMAIN" }}`)
@@ -33,10 +33,10 @@ http:
         - valhalla_cors
 
   services:
-    frontend:
+    static_frontend:
       loadBalancer:
         servers:
-          - url: http://frontend:8080
+          - url: http://static_frontend:8080
 
     core_service:
       loadBalancer:

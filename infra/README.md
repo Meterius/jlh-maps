@@ -3,7 +3,7 @@
 Docker Compose stack for the map data services used by `jlh_maps`.
 The base `compose.yaml` contains shared service definitions, common networks, and
 common named volumes. Environment-specific overlays provide routing mode,
-published ports, and data volumes.
+published ports, service config mounts, and production hardening.
 
 Run commands from this `infra` directory unless otherwise noted.
 
@@ -16,9 +16,9 @@ dynamic routing files live under `services/`.
 
 | File | Purpose |
 | --- | --- |
-| `compose.yaml` | Shared service definitions, service network isolation, and common named volumes. Deployment-specific data mounts are intentionally omitted here. |
-| `compose.local.yaml` | Local Docker Desktop override with file-provider Traefik routing, local DNS, local host ports, and host bind-mounted data paths. |
-| `compose.prod.mono.yaml` | Single-server production override with HTTPS Traefik routing under fixed service subdomains and host bind-mounted data paths. |
+| `compose.yaml` | Shared service definitions, service network isolation, common artifact bind mounts, and common named volumes. Some service config mounts are intentionally supplied by overlays. |
+| `compose.local.yaml` | Local Docker Desktop override with file-provider Traefik routing, local DNS, local host ports, and local-only public network access. |
+| `compose.prod.mono.yaml` | Single-server production override with HTTPS Traefik routing under fixed service subdomains and hardened service settings. |
 | `compose.jobs.yaml` | One-shot import jobs, such as loading OSM data into PostGIS. |
 
 ### Services
@@ -27,10 +27,10 @@ dynamic routing files live under `services/`.
 | --- | --- | --- |-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `dnsmasq` | Local DNS forwarder. Resolves `${ROOT_DOMAIN}` and its subdomains to `${LOCAL_SERVER_IP}` for LAN testing. | DNS on `${LOCAL_SERVER_IP}:53` | Requires devices under test to use `${LOCAL_SERVER_IP}` as their DNS server.                                                                                                                  |
 | `traefik` | Reverse proxy for the HTTP services in this stack. | `http://localhost:80`; dashboard on `http://localhost:8081` |                                                                                                                                                                                               |
-| `postgres_osm` | PostGIS PostgreSQL database. Stores OSM data imported by the `osm2pgsql_osm_import` job. | PostgreSQL on `localhost:5433` | Automatically initialized from `services/postgres_osm/init/init.sql`; persisted in the `postgres_osm_data` Docker volume.                                                                              |
+| `postgres_osm` | PostGIS PostgreSQL database. Stores OSM data imported by the `postgres_osm_importer` job. | PostgreSQL on `localhost:5433` | Automatically initialized from `services/postgres_osm/init/init.sql`; persisted in the `postgres_osm_data` Docker volume.                                                                              |
 | `omt_tileserver_gl` | Serves OpenMapTiles vector tiles and styles through TileServer GL. | `http://tiles.jlh_maps.localhost` | Requires `${OPENMAPTILES_DIR}/data`, `${OPENMAPTILES_DIR}/style`, and `${OPENMAPTILES_DIR}/build`; Populated by output of https://github.com/Meterius/jlh-sys-design-playground-openmaptiles. |
 | `static_tile_server` | Static nginx server for Sentinel-2 raster tiles and the local osm2streets PMTiles archive. | `http://static.jlh_maps.localhost/raster/sen2/tilejson.json` | Requires `${SAT_RASTER_TILE_JSON_DIR}` for Sentinel-2 raster tiles and `${OSM2STREETS_PMTILES_PATH}` for the PMTiles file. See `crates/sat_ingest` for populating raster tiles from satellite imagery. |
-| `frontend` | Static nginx server for the built Vite frontend. | `http://localhost` or `http://${ROOT_DOMAIN}` | Requires `${JLH_MAPS_DIST_DIR}` to point at the built `packages/jlh_maps/dist` directory. |
+| `static_frontend` | Static nginx server for the built Vite frontend. | `http://localhost` or `http://${ROOT_DOMAIN}` | Requires `${JLH_MAPS_DIST_DIR}` to point at the built `packages/jlh_maps/dist` directory. |
 | `core_service` | Rust API for looking up imported OSM element metadata from `postgres_osm`. | `http://api.jlh_maps.localhost` | Requires the `unitable` table produced by the OSM import job of `postgres_osm`.                                                                                                               |
 | `valhalla` | Valhalla routing service backed by a prebuilt routing graph. | `http://valhalla.jlh_maps.localhost` | Requires generated Valhalla files under `valhalla/custom_files`.                                                                                                                              |
 
@@ -38,13 +38,13 @@ dynamic routing files live under `services/`.
 
 | Service/job | Purpose | Inputs                                                                     | Output                                                                                       |
 | --- | --- |----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| `osm2pgsql_osm_import` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `services/postgres_osm/osm2pgsql/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
+| `postgres_osm_importer` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `services/postgres_osm/osm2pgsql/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
 
 Run the import job with the main stack file included so the `postgres_osm`
 dependency is available:
 
 ```powershell
-docker compose --env-file .env -f compose.yaml -f compose.jobs.yaml run --rm osm2pgsql_osm_import
+docker compose --env-file .env -f compose.yaml -f compose.jobs.yaml run --rm postgres_osm_importer
 ```
 
 Generate osm2streets PMTiles with `crates/osm2streets_ingest`, then set
@@ -54,44 +54,62 @@ Generate osm2streets PMTiles with `crates/osm2streets_ingest`, then set
 
 ### Environment
 
-The environment files are split by scope:
+Environment variables are consumed by the Compose files, not inherently by a
+specific env file. The commands below load `.env` first and then the target
+overlay env file, so overlay env files can override base values when local and
+production paths or domains differ.
 
-| File | Used by | Purpose |
-| --- | --- | --- |
-| `.env` | All Compose commands | Shared database defaults used by the base stack and jobs. |
-| `.local.env` | `compose.local.yaml` | Local host paths, local root domain, and Docker host LAN IP. |
-| `.prod.mono.env` | `compose.prod.mono.yaml` only | Root domain, TLS email, production database credentials, and host data paths. |
-
-Review `.env` and the target overlay env file before starting a stack.
-These files are intentionally gitignored because they can contain local paths
-and production secrets.
-
-Shared `.env`:
+Variables used by `compose.yaml`:
 
 ```dotenv
 POSTGRES_OSM_USER=...
 POSTGRES_OSM_PASSWORD=...
 POSTGRES_OSM_DB=...
-```
 
-Local `.local.env`:
-
-```dotenv
 OPENMAPTILES_DIR=...
 SAT_RASTER_TILE_JSON_DIR=...
 OSM2STREETS_PMTILES_PATH=...
-VALHALLA_CUSTOM_FILES_DIR=...
 JLH_MAPS_DIST_DIR=...
-ROOT_DOMAIN=...
-LOCAL_SERVER_IP=...
+VALHALLA_CUSTOM_FILES_DIR=...
 ```
 
 `OPENMAPTILES_DIR`, `SAT_RASTER_TILE_JSON_DIR`,
 `OSM2STREETS_PMTILES_PATH`, and `VALHALLA_CUSTOM_FILES_DIR` point to data
-prepared outside this repository or generated by the one-shot jobs.
-`JLH_MAPS_DIST_DIR` points to the built Vite app output. For local Docker
-Desktop use, they must be paths Docker can mount. `OSM2STREETS_PMTILES_PATH`
-is required and must point to the generated PMTiles file.
+prepared outside this repository or generated by one-shot jobs.
+`JLH_MAPS_DIST_DIR` points to the built Vite app output. For Docker Desktop
+use, they must be paths Docker can mount. `OSM2STREETS_PMTILES_PATH` is
+required and must point to the generated PMTiles file.
+
+Variables used by `compose.local.yaml`:
+
+```dotenv
+ROOT_DOMAIN=...
+LOCAL_SERVER_IP=...
+LOCAL_DNS_UPSTREAM=... # optional; defaults to 1.1.1.1
+LOCAL_DNS_UPSTREAM_SECONDARY=... # optional; defaults to 9.9.9.9
+```
+
+Variables used by `compose.prod.mono.yaml`:
+
+```dotenv
+ROOT_DOMAIN=...
+TRAEFIK_ACME_EMAIL=...
+VALHALLA_SERVER_THREADS=... # optional; defaults to 2
+```
+
+The current local env files are loaded this way:
+
+| Setup | Env files loaded |
+| --- | --- |
+| Local serving stack | `.env`, then `.local.env` |
+| Production mono serving stack | `.env`, then `.prod.mono.env` |
+| OSM import job example | `.env` |
+
+These files are intentionally gitignored because they can contain local paths
+and production secrets. The artifact path variables currently live in `.env`
+because local and prod share the same mappings in this checkout; move any of
+them into `.local.env` or `.prod.mono.env` if an environment needs a different
+host path.
 
 `ROOT_DOMAIN` is the local domain suffix to test through Traefik, for example
 `jlh-maps.test`. `LOCAL_SERVER_IP` must be the LAN IP of the machine running
@@ -109,7 +127,7 @@ With `ROOT_DOMAIN=jlh-maps.test`, local Traefik accepts both the existing
 
 | Host | Service |
 | --- | --- |
-| `jlh-maps.test` | `frontend` |
+| `jlh-maps.test` | `static_frontend` |
 | `tiles.jlh-maps.test` | `omt_tileserver_gl` |
 | `static.jlh-maps.test` | `static_tile_server` |
 | `api.jlh-maps.test` | `core_service` |
@@ -119,29 +137,12 @@ Point a device's DNS server at `${LOCAL_SERVER_IP}` to use those names from the
 LAN. If port 53 is already occupied on the Docker host, stop the conflicting DNS
 service or move this stack to a host where DNS port 53 can be published.
 
-Production `.prod.mono.env` is only loaded by the prod mono recipe and should
-be edited on the target server. For local prod-mono testing, it can use the same
-data path variables as `.local.env`; Traefik ACME state remains in a dedicated
-Compose-managed volume.
-
-Example production domain settings:
-
-```dotenv
-OPENMAPTILES_DIR=...
-SAT_RASTER_TILE_JSON_DIR=...
-OSM2STREETS_PMTILES_PATH=...
-VALHALLA_CUSTOM_FILES_DIR=...
-JLH_MAPS_DIST_DIR=...
-ROOT_DOMAIN=example.com
-TRAEFIK_ACME_EMAIL=ops@example.com
-```
-
 With `ROOT_DOMAIN=example.com`, `compose.prod.mono.yaml` routes these fixed
 service subdomains through Traefik:
 
 | Host | Service |
 | --- | --- |
-| `example.com` | `frontend` |
+| `example.com` | `static_frontend` |
 | `tiles.example.com` | `omt_tileserver_gl` |
 | `static.example.com` | `static_tile_server` |
 | `api.example.com` | `core_service` |
@@ -155,7 +156,7 @@ for this subdomain layout.
 
 Valhalla CORS is configured for `https://${ROOT_DOMAIN}` and
 `https://maps.${ROOT_DOMAIN}`. If the frontend is hosted somewhere else, adjust
-the `valhalla_cors` labels in `compose.prod.mono.yaml`.
+the `valhalla_cors` middleware in `services/traefik/prod-mono.dynamic.yaml`.
 
 ### OpenMapTiles Vector Tiles
 
@@ -175,8 +176,7 @@ ${OPENMAPTILES_DIR}/
 `style/config.json` must reference the MBTiles and style assets available in
 the mounted `data`, `style`, and `build` directories.
 
-For `compose.prod.mono.yaml`, the same three directories are supplied by the
-same `OPENMAPTILES_DIR` host path used by the local overlay:
+`compose.yaml` mounts the same three directories from `OPENMAPTILES_DIR`:
 
 - `${OPENMAPTILES_DIR}/data` mounted at `/data`
 - `${OPENMAPTILES_DIR}/style` mounted at `/style`
@@ -184,7 +184,7 @@ same `OPENMAPTILES_DIR` host path used by the local overlay:
 
 ### Vite Frontend
 
-`frontend` serves the static output of the Vite application. Build it before
+`static_frontend` serves the static output of the Vite application. Build it before
 starting the local stack if `${JLH_MAPS_DIST_DIR}` points at the default
 `../packages/jlh_maps/dist` directory:
 
@@ -194,7 +194,7 @@ npm run build:local
 Pop-Location
 ```
 
-For `compose.prod.mono.yaml`, `${JLH_MAPS_DIST_DIR}` must contain the contents
+For production, `${JLH_MAPS_DIST_DIR}` must contain the contents
 of `packages/jlh_maps/dist` at the directory root. Build that bundle with:
 
 ```powershell
@@ -209,17 +209,24 @@ Pop-Location
 tiles under `/raster/sen2/` and the osm2streets PMTiles archive at
 `/roads/tiles.pmtiles`.
 
+The base Compose file mounts the tile data, while overlays provide the nginx
+server config:
+
+- `services/static_tile_server/nginx.local.conf` for local routing/CORS.
+- `services/static_tile_server/nginx.prod.conf` for prod routing, where CORS is
+  handled by Traefik.
+
 Generate the raster tiles before starting the service. See `crates/sat_ingest`
 for an example of converting satellite imagery to the expected raster tile
 format.
 
-For `compose.prod.mono.yaml`, `${SAT_RASTER_TILE_JSON_DIR}` must contain
+`${SAT_RASTER_TILE_JSON_DIR}` must contain
 `tilejson.json` and the generated `{z}/{x}/{y}.png` tree.
 `${OSM2STREETS_PMTILES_PATH}` must point to the generated PMTiles file.
 
 ### OSM Data For PostGIS
 
-The `osm2pgsql_osm_import` job downloads data from Geofabrik and
+The `postgres_osm_importer` job downloads data from Geofabrik and
 imports it into `postgres_osm`. Edit the URL in `compose.jobs.yaml` if a
 different extract is needed.
 
@@ -244,21 +251,17 @@ Generate these artifacts with Valhalla tooling for the same OSM extract you
 want to route over, then place them under `infra/geo/valhalla/custom_files`
 before starting the `valhalla` service.
 
-For `compose.prod.mono.yaml`, `${VALHALLA_CUSTOM_FILES_DIR}` must contain
-these files at the directory root.
-
-The prod mono overlay runs `valhalla_service` directly against the prebuilt
-`${VALHALLA_CUSTOM_FILES_DIR}/valhalla.json` instead of using the scripted image
-entrypoint. The scripted entrypoint is useful for preparing or updating data,
-but it rewrites files in `/custom_files` during startup, so it is incompatible
-with the prod read-only mount used for request serving.
+`${VALHALLA_CUSTOM_FILES_DIR}` must contain these files at the directory root.
+The local stack leaves the scripted Valhalla image entrypoint intact so it can
+prepare or update files under `/custom_files`. The prod mono overlay runs
+`valhalla_service` directly against the prebuilt
+`${VALHALLA_CUSTOM_FILES_DIR}/valhalla.json` and mounts the directory read-only.
 
 ## Production Mono Paths
 
 `compose.prod.mono.yaml` assumes one server running the Docker stack. The data
-paths in `.prod.mono.env` must already exist and be populated before starting
-the prod mono stack. When testing prod mono locally, these can intentionally be
-the same paths used by `.local.env`.
+paths used by the base artifact variables must already exist and be populated
+before starting the prod mono stack.
 
 Traefik certificate state is the exception: it is stored in the
 `traefik_letsencrypt` Compose-managed volume so ACME state survives container

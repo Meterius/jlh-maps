@@ -89,30 +89,16 @@ services:
   omt_tileserver_gl:
     <<: *prod-locked-down-service
 
-    volumes:
-      # Tile data/style/build artifacts are runtime inputs, not mutable service
-      # state, so keep them read-only.
-      - ${OPENMAPTILES_DIR}/data:/data:ro
-      - ${OPENMAPTILES_DIR}/style:/style:ro
-      - ${OPENMAPTILES_DIR}/build:/build:ro
-
   static_tile_server:
     <<: *prod-nginx-service
 
     volumes:
       # Prod CORS is handled by Traefik, so use a smaller nginx config here and
-      # keep the static tile data read-only.
+      # keep CORS policy at the proxy layer.
       - ./services/static_tile_server/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
-      - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
-      - ${OSM2STREETS_PMTILES_PATH:?OSM2STREETS_PMTILES_PATH is required}:/usr/share/nginx/html/roads/tiles.pmtiles:ro
 
-  frontend:
+  static_frontend:
     <<: *prod-nginx-service
-
-    volumes:
-      # The frontend is a built artifact volume. Serving it read-only prevents a
-      # web-server compromise from changing the deployed application bundle.
-      - ${JLH_MAPS_DIST_DIR}:/usr/share/nginx/html:ro
 
   core_service:
     <<: *prod-locked-down-service
@@ -123,9 +109,8 @@ services:
   valhalla:
     <<: *prod-locked-down-service
 
-    # The scripted image entrypoint is useful for building/updating data, but it
-    # rewrites files under /custom_files on startup. In prod serving mode, bypass
-    # that script and run Valhalla directly against prebuilt read-only data.
+    # In prod serving mode, bypass the scripted entrypoint because it rewrites
+    # files in /custom_files during startup.
     entrypoint:
       - valhalla_service
     command:

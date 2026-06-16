@@ -1,10 +1,10 @@
 http:
   routers:
-    frontend:
+    static_frontend:
       rule: Host(`{{ env "ROOT_DOMAIN" }}`)
       entryPoints:
         - websecure
-      service: frontend
+      service: static_frontend
       middlewares:
         - public_security_headers
       tls:
@@ -61,10 +61,10 @@ http:
         certResolver: letsencrypt
 
   services:
-    frontend:
+    static_frontend:
       loadBalancer:
         servers:
-          - url: http://frontend:8080
+          - url: http://static_frontend:8080
 
     core_service:
       loadBalancer:

@@ -1,17 +1,17 @@
 services:
-  # Deployment overlays must provide the data volumes/binds omitted here:
-  # - omt_tileserver_gl: /data, /style, /build
-  # - static_tile_server: /usr/share/nginx/html/raster/sen2, /usr/share/nginx/html/roads/tiles.pmtiles
-  # - frontend: /usr/share/nginx/html
-  # - valhalla: /custom_files
-  # compose.local.yaml and compose.prod.mono.yaml use host bind mounts.
+  # Environment files provide the host artifact paths mounted by this base stack:
+  # - OPENMAPTILES_DIR
+  # - SAT_RASTER_TILE_JSON_DIR
+  # - OSM2STREETS_PMTILES_PATH
+  # - JLH_MAPS_DIST_DIR
+  # - VALHALLA_CUSTOM_FILES_DIR
   traefik:
     image: traefik:v3.6
     networks:
       # Traefik is the only request entrypoint. It joins private backend
       # networks solely to reverse-proxy to each service.
       - traefik_public
-      - frontend_private
+      - static_frontend_private
       - api_private
       - tiles_private
       - static_tiles_private
@@ -48,6 +48,11 @@ services:
       - --config
       - "/style/config.json"
 
+    volumes:
+      - ${OPENMAPTILES_DIR}/data:/data:ro
+      - ${OPENMAPTILES_DIR}/style:/style:ro
+      - ${OPENMAPTILES_DIR}/build:/build:ro
+
     networks:
       - tiles_private
 
@@ -57,21 +62,24 @@ services:
     restart: unless-stopped
 
     volumes:
-      - ./services/static_tile_server/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Deployment overlays must provide /etc/nginx/conf.d/default.conf.
+      - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
+      - ${OSM2STREETS_PMTILES_PATH:?OSM2STREETS_PMTILES_PATH is required}:/usr/share/nginx/html/roads/tiles.pmtiles:ro
 
     networks:
       - static_tiles_private
 
-  frontend:
+  static_frontend:
     image: nginx:alpine
 
     restart: unless-stopped
 
     volumes:
-      - ./services/frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./services/static_frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${JLH_MAPS_DIST_DIR}:/usr/share/nginx/html:ro
 
     networks:
-      - frontend_private
+      - static_frontend_private
 
   core_service:
     build:
@@ -92,13 +100,18 @@ services:
   valhalla:
     image: ghcr.io/valhalla/valhalla-scripted:latest
 
+    volumes:
+      # Local uses the scripted image entrypoint, which can update this directory
+      # while preparing graph data. Prod replaces this with a read-only mount.
+      - ${VALHALLA_CUSTOM_FILES_DIR}:/custom_files
+
     networks:
       - valhalla_private
 
 networks:
   traefik_public:
     driver: bridge
-  frontend_private:
+  static_frontend_private:
     driver: bridge
     # Internal networks have no direct external routing. Public requests must
     # pass through Traefik rather than reaching backend containers directly.

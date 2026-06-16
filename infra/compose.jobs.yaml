@@ -1,5 +1,5 @@
 services:
-  osm2pgsql_osm_import:
+  postgres_osm_importer:
     image: iboates/osm2pgsql:latest
     environment:
       PGPASSWORD: ${POSTGRES_OSM_PASSWORD}
