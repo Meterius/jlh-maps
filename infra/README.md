@@ -38,7 +38,7 @@ dynamic routing files live under `services/`.
 
 | Service/job | Purpose | Inputs                                                                     | Output                                                                                       |
 | --- | --- |----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| `postgres_osm_importer` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `services/postgres_osm/osm2pgsql/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
+| `postgres_osm_importer` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `jobs/postgres_osm_importer/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
 
 Run the import job with the main stack file included so the `postgres_osm`
 dependency is available:
@@ -230,7 +230,7 @@ The `postgres_osm_importer` job downloads data from Geofabrik and
 imports it into `postgres_osm`. Edit the URL in `compose.jobs.yaml` if a
 different extract is needed.
 
-The job uses `services/postgres_osm/osm2pgsql/style.lua`, which writes all OSM object
+The job uses `jobs/postgres_osm_importer/style.lua`, which writes all OSM object
 types into one `unitable` table with `attrs`, `tags`, and `geom` columns.
 `core_service` depends on that table.
 

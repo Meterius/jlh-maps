@@ -5,7 +5,7 @@ services:
       PGPASSWORD: ${POSTGRES_OSM_PASSWORD}
 
     volumes:
-      - ./services/postgres_osm/osm2pgsql/:/data/
+      - ./jobs/postgres_osm_importer/style.lua:/data/style.lua:ro
 
     depends_on:
       - postgres_osm
