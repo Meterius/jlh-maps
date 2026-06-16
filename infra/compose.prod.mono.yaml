@@ -76,16 +76,6 @@ services:
       - "40080:8080"
       - "40443:8443"
 
-    networks:
-      # Traefik is the only service reachable from the host. It joins the
-      # private backend networks solely to reverse-proxy to each service.
-      - traefik_public
-      - frontend_private
-      - api_private
-      - tiles_private
-      - static_tiles_private
-      - valhalla_private
-
   postgres_osm:
     <<: *prod-service-defaults
 
@@ -93,13 +83,8 @@ services:
       # Postgres needs a writable data directory; other inputs are read-only so
       # a database compromise cannot rewrite initialization/config files.
       - postgres_osm_data:/var/lib/postgresql/data
-      - ./postgres_osm/postgres.conf:/etc/postgresql.conf:ro
-      - ./postgres_osm/init:/docker-entrypoint-initdb.d/:ro
-
-    networks:
-      # Postgres is not attached to any Traefik-facing network. Only the API can
-      # reach it over this private data network.
-      - postgres_private
+      - ./services/postgres_osm/postgres.conf:/etc/postgresql.conf:ro
+      - ./services/postgres_osm/init:/docker-entrypoint-initdb.d/:ro
 
   omt_tileserver_gl:
     <<: *prod-locked-down-service
@@ -111,21 +96,15 @@ services:
       - ${OPENMAPTILES_DIR}/style:/style:ro
       - ${OPENMAPTILES_DIR}/build:/build:ro
 
-    networks:
-      - tiles_private
-
   static_tile_server:
     <<: *prod-nginx-service
 
     volumes:
       # Prod CORS is handled by Traefik, so use a smaller nginx config here and
       # keep the static tile data read-only.
-      - ./static_tile_server/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./services/static_tile_server/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
       - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
       - ${OSM2STREETS_PMTILES_PATH:?OSM2STREETS_PMTILES_PATH is required}:/usr/share/nginx/html/roads/tiles.pmtiles:ro
-
-    networks:
-      - static_tiles_private
 
   frontend:
     <<: *prod-nginx-service
@@ -135,19 +114,11 @@ services:
       # web-server compromise from changing the deployed application bundle.
       - ${JLH_MAPS_DIST_DIR}:/usr/share/nginx/html:ro
 
-    networks:
-      - frontend_private
-
   core_service:
     <<: *prod-locked-down-service
     # Run the API as a high non-root uid/gid. The runtime image does not need to
     # own files because the service is stateless.
     user: "65532:65532"
-
-    networks:
-      # The API is the only public service that can also reach Postgres.
-      - api_private
-      - postgres_private
 
   valhalla:
     <<: *prod-locked-down-service
@@ -166,38 +137,11 @@ services:
       # not be writable by the request-serving container.
       - ${VALHALLA_CUSTOM_FILES_DIR}:/custom_files:ro
 
-    networks:
-      - valhalla_private
-
 configs:
   traefik_dynamic_prod_mono:
     # Compose can mount file-backed configs into read-only services. Inline
     # `content` configs are not supported when the service has read_only: true.
-    file: ./traefik/prod-mono.dynamic.yaml
-
-networks:
-  traefik_public:
-    driver: bridge
-  frontend_private:
-    driver: bridge
-    # Internal networks have no direct external routing. Public requests must
-    # pass through Traefik rather than reaching backend containers directly.
-    internal: true
-  api_private:
-    driver: bridge
-    internal: true
-  postgres_private:
-    driver: bridge
-    internal: true
-  tiles_private:
-    driver: bridge
-    internal: true
-  static_tiles_private:
-    driver: bridge
-    internal: true
-  valhalla_private:
-    driver: bridge
-    internal: true
+    file: ./services/traefik/prod-mono.dynamic.yaml
 
 volumes:
   traefik_letsencrypt:

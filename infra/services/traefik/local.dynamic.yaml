@@ -1,0 +1,76 @@
+http:
+  routers:
+    frontend:
+      rule: Host(`localhost`) || Host(`{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - web
+      service: frontend
+
+    core_service:
+      rule: Host(`api.jlh_maps.localhost`) || Host(`api.{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - web
+      service: core_service
+
+    omt_tileserver_gl:
+      rule: Host(`tiles.jlh_maps.localhost`) || Host(`tiles.{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - web
+      service: omt_tileserver_gl
+
+    static_tile_server:
+      rule: Host(`static.jlh_maps.localhost`) || Host(`static.{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - web
+      service: static_tile_server
+
+    valhalla:
+      rule: Host(`valhalla.jlh_maps.localhost`) || Host(`valhalla.{{ env "ROOT_DOMAIN" }}`)
+      entryPoints:
+        - web
+      service: valhalla
+      middlewares:
+        - valhalla_cors
+
+  services:
+    frontend:
+      loadBalancer:
+        servers:
+          - url: http://frontend:8080
+
+    core_service:
+      loadBalancer:
+        servers:
+          - url: http://core_service:8080
+
+    omt_tileserver_gl:
+      loadBalancer:
+        servers:
+          - url: http://omt_tileserver_gl:8080
+
+    static_tile_server:
+      loadBalancer:
+        servers:
+          - url: http://static_tile_server:8080
+
+    valhalla:
+      loadBalancer:
+        servers:
+          - url: http://valhalla:8002
+
+  middlewares:
+    valhalla_cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        accessControlAllowHeaders:
+          - Origin
+          - Accept
+          - Content-Type
+          - X-Client-Id
+        accessControlAllowOriginListRegex:
+          - ^https?://.+
+        accessControlMaxAge: 86400
+        addVaryHeader: true

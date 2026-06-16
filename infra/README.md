@@ -1,19 +1,23 @@
 # Infrastructure
 
 Docker Compose stack for the map data services used by `jlh_maps`.
-The base `compose.yaml` contains shared service definitions. Environment-specific
-overlays provide routing, published ports, and data volumes.
+The base `compose.yaml` contains shared service definitions, common networks, and
+common named volumes. Environment-specific overlays provide routing mode,
+published ports, and data volumes.
 
 Run commands from this `infra` directory unless otherwise noted.
 
 ## Services
 
+Service-specific Dockerfiles, nginx configs, Postgres configs, and Traefik
+dynamic routing files live under `services/`.
+
 ### Compose Files
 
 | File | Purpose |
 | --- | --- |
-| `compose.yaml` | Shared service definitions and common named volumes. Deployment-specific data mounts are intentionally omitted here. |
-| `compose.local.yaml` | Local Docker Desktop override with `.localhost` and `ROOT_DOMAIN` Traefik routing, local DNS, local host ports, and host bind-mounted data paths. |
+| `compose.yaml` | Shared service definitions, service network isolation, and common named volumes. Deployment-specific data mounts are intentionally omitted here. |
+| `compose.local.yaml` | Local Docker Desktop override with file-provider Traefik routing, local DNS, local host ports, and host bind-mounted data paths. |
 | `compose.prod.mono.yaml` | Single-server production override with HTTPS Traefik routing under fixed service subdomains and host bind-mounted data paths. |
 | `compose.jobs.yaml` | One-shot import jobs, such as loading OSM data into PostGIS. |
 
@@ -23,7 +27,7 @@ Run commands from this `infra` directory unless otherwise noted.
 | --- | --- | --- |-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `dnsmasq` | Local DNS forwarder. Resolves `${ROOT_DOMAIN}` and its subdomains to `${LOCAL_SERVER_IP}` for LAN testing. | DNS on `${LOCAL_SERVER_IP}:53` | Requires devices under test to use `${LOCAL_SERVER_IP}` as their DNS server.                                                                                                                  |
 | `traefik` | Reverse proxy for the HTTP services in this stack. | `http://localhost:80`; dashboard on `http://localhost:8081` |                                                                                                                                                                                               |
-| `postgres_osm` | PostGIS PostgreSQL database. Stores OSM data imported by the `osm2pgsql_osm_import` job. | PostgreSQL on `localhost:5433` | Automatically initialized from `postgres_osm/init/init.sql`; persisted in the `postgres_osm_data` Docker volume.                                                                              |
+| `postgres_osm` | PostGIS PostgreSQL database. Stores OSM data imported by the `osm2pgsql_osm_import` job. | PostgreSQL on `localhost:5433` | Automatically initialized from `services/postgres_osm/init/init.sql`; persisted in the `postgres_osm_data` Docker volume.                                                                              |
 | `omt_tileserver_gl` | Serves OpenMapTiles vector tiles and styles through TileServer GL. | `http://tiles.jlh_maps.localhost` | Requires `${OPENMAPTILES_DIR}/data`, `${OPENMAPTILES_DIR}/style`, and `${OPENMAPTILES_DIR}/build`; Populated by output of https://github.com/Meterius/jlh-sys-design-playground-openmaptiles. |
 | `static_tile_server` | Static nginx server for Sentinel-2 raster tiles and the local osm2streets PMTiles archive. | `http://static.jlh_maps.localhost/raster/sen2/tilejson.json` | Requires `${SAT_RASTER_TILE_JSON_DIR}` for Sentinel-2 raster tiles and `${OSM2STREETS_PMTILES_PATH}` for the PMTiles file. See `crates/sat_ingest` for populating raster tiles from satellite imagery. |
 | `frontend` | Static nginx server for the built Vite frontend. | `http://localhost` or `http://${ROOT_DOMAIN}` | Requires `${JLH_MAPS_DIST_DIR}` to point at the built `packages/jlh_maps/dist` directory. |
@@ -34,7 +38,7 @@ Run commands from this `infra` directory unless otherwise noted.
 
 | Service/job | Purpose | Inputs                                                                     | Output                                                                                       |
 | --- | --- |----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| `osm2pgsql_osm_import` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `postgres_osm/osm2pgsql/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
+| `osm2pgsql_osm_import` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `services/postgres_osm/osm2pgsql/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
 
 Run the import job with the main stack file included so the `postgres_osm`
 dependency is available:
@@ -219,7 +223,7 @@ The `osm2pgsql_osm_import` job downloads data from Geofabrik and
 imports it into `postgres_osm`. Edit the URL in `compose.jobs.yaml` if a
 different extract is needed.
 
-The job uses `postgres_osm/osm2pgsql/style.lua`, which writes all OSM object
+The job uses `services/postgres_osm/osm2pgsql/style.lua`, which writes all OSM object
 types into one `unitable` table with `attrs`, `tags`, and `geom` columns.
 `core_service` depends on that table.
 

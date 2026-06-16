@@ -7,10 +7,19 @@ services:
   # compose.local.yaml and compose.prod.mono.yaml use host bind mounts.
   traefik:
     image: traefik:v3.6
+    networks:
+      # Traefik is the only request entrypoint. It joins private backend
+      # networks solely to reverse-proxy to each service.
+      - traefik_public
+      - frontend_private
+      - api_private
+      - tiles_private
+      - static_tiles_private
+      - valhalla_private
 
   postgres_osm:
     build:
-      context: ./postgres_osm
+      context: ./services/postgres_osm
       dockerfile: Dockerfile
 
     restart: unless-stopped
@@ -19,13 +28,16 @@ services:
 
     volumes:
       - postgres_osm_data:/var/lib/postgresql/data
-      - ./postgres_osm/postgres.conf:/etc/postgresql.conf
-      - ./postgres_osm/init:/docker-entrypoint-initdb.d/
+      - ./services/postgres_osm/postgres.conf:/etc/postgresql.conf
+      - ./services/postgres_osm/init:/docker-entrypoint-initdb.d/
 
     environment:
       POSTGRES_USER: ${POSTGRES_OSM_USER}
       POSTGRES_PASSWORD: ${POSTGRES_OSM_PASSWORD}
       POSTGRES_DB: ${POSTGRES_OSM_DB}
+
+    networks:
+      - postgres_private
 
   omt_tileserver_gl:
     image: "maptiler/tileserver-gl:latest"
@@ -36,13 +48,19 @@ services:
       - --config
       - "/style/config.json"
 
+    networks:
+      - tiles_private
+
   static_tile_server:
     image: nginx:alpine
 
     restart: unless-stopped
 
     volumes:
-      - ./static_tile_server/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./services/static_tile_server/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+    networks:
+      - static_tiles_private
 
   frontend:
     image: nginx:alpine
@@ -50,12 +68,15 @@ services:
     restart: unless-stopped
 
     volumes:
-      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./services/frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+    networks:
+      - frontend_private
 
   core_service:
     build:
       context: ../
-      dockerfile: infra/core_service/Dockerfile
+      dockerfile: infra/services/core_service/Dockerfile
     restart: unless-stopped
 
     environment:
@@ -64,8 +85,39 @@ services:
       PORT: 8080
       POSTGRES_OSM_URL: postgres://${POSTGRES_OSM_USER}:${POSTGRES_OSM_PASSWORD}@postgres_osm:5432/${POSTGRES_OSM_DB}
 
+    networks:
+      - api_private
+      - postgres_private
+
   valhalla:
     image: ghcr.io/valhalla/valhalla-scripted:latest
+
+    networks:
+      - valhalla_private
+
+networks:
+  traefik_public:
+    driver: bridge
+  frontend_private:
+    driver: bridge
+    # Internal networks have no direct external routing. Public requests must
+    # pass through Traefik rather than reaching backend containers directly.
+    internal: true
+  api_private:
+    driver: bridge
+    internal: true
+  postgres_private:
+    driver: bridge
+    internal: true
+  tiles_private:
+    driver: bridge
+    internal: true
+  static_tiles_private:
+    driver: bridge
+    internal: true
+  valhalla_private:
+    driver: bridge
+    internal: true
 
 volumes:
   postgres_osm_data:

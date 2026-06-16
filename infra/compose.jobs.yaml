@@ -5,10 +5,14 @@ services:
       PGPASSWORD: ${POSTGRES_OSM_PASSWORD}
 
     volumes:
-      - ./postgres_osm/osm2pgsql/:/data/
+      - ./services/postgres_osm/osm2pgsql/:/data/
 
     depends_on:
       - postgres_osm
+
+    networks:
+      - postgres_private
+      - traefik_public
 
     command:
       - -d
