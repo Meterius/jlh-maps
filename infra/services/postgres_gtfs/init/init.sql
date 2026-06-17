@@ -12,8 +12,8 @@ CREATE TABLE gtfs_meta.feed_sources
     slug                TEXT NOT NULL UNIQUE,
     name                TEXT NOT NULL,
 
-    source_url          TEXT NOT NULL,
-    direct_download_url TEXT,
+    source_url          TEXT,
+    direct_download_url TEXT NOT NULL,
 
     license_url         TEXT,
     attribution         TEXT,
@@ -37,7 +37,6 @@ CREATE TABLE gtfs_meta.feed_versions
     status         TEXT        NOT NULL CHECK (
         status IN (
                    'downloaded',
-                   'importing',
                    'import_failed',
                    'imported',
                    'active'
@@ -55,18 +54,6 @@ ALTER TABLE gtfs_meta.feed_sources
     ADD CONSTRAINT feed_sources_active_version_fk
         FOREIGN KEY (active_version_id)
             REFERENCES gtfs_meta.feed_versions (id);
-
-CREATE TABLE gtfs_meta.feed_import_runs
-(
-    id          BIGSERIAL PRIMARY KEY,
-    source_id   BIGINT      NOT NULL REFERENCES gtfs_meta.feed_sources (id) ON DELETE CASCADE,
-    version_id  BIGINT      REFERENCES gtfs_meta.feed_versions (id) ON DELETE SET NULL,
-    worker_id   TEXT        NOT NULL,
-    state       TEXT        NOT NULL CHECK (state IN ('running', 'skipped', 'succeeded', 'failed')),
-    message     TEXT,
-    started_at  TIMESTAMPTZ NOT NULL,
-    finished_at TIMESTAMPTZ
-);
 
 --- Data Tables --
 

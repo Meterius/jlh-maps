@@ -29,6 +29,7 @@ dynamic routing files live under `services/`.
 | `traefik` | Reverse proxy for the HTTP services in this stack. | `http://localhost:80`; dashboard on `http://localhost:8081` |                                                                                                                                                                                               |
 | `postgres_osm` | PostGIS PostgreSQL database. Stores OSM data imported by the `postgres_osm_importer` job. | PostgreSQL on `localhost:5433` | Automatically initialized from `services/postgres_osm/init/init.sql`; persisted in the `postgres_osm_data` Docker volume.                                                                              |
 | `postgres_gtfs` | PostGIS PostgreSQL database for GTFS feed-source metadata and future imported schedule data. | PostgreSQL on `localhost:5434` | Automatically initialized from `services/postgres_gtfs/init/init.sql`; persisted in the `postgres_gtfs_data` Docker volume. |
+| `gtfs_artifact_store` | Garage S3-compatible object storage for immutable GTFS feed-version ZIP artifacts. | S3 API on `localhost:3900`; admin API on `localhost:3903` | Initialized as a single-node Garage deployment from `services/gtfs_artifact_store/garage.toml`; persisted in the `gtfs_artifact_store_meta` and `gtfs_artifact_store_data` Docker volumes. |
 | `omt_tileserver_gl` | Serves OpenMapTiles vector tiles and styles through TileServer GL. | `http://tiles.jlh_maps.localhost` | Requires `${OPENMAPTILES_DIR}/data`, `${OPENMAPTILES_DIR}/style`, and `${OPENMAPTILES_DIR}/build`; Populated by output of https://github.com/Meterius/jlh-sys-design-playground-openmaptiles. |
 | `static_tile_server` | Static nginx server for Sentinel-2 raster tiles and the local osm2streets PMTiles archive. | `http://static.jlh_maps.localhost/raster/sen2/tilejson.json` | Requires `${SAT_RASTER_TILE_JSON_DIR}` for Sentinel-2 raster tiles and `${OSM2STREETS_PMTILES_PATH}` for the PMTiles file. See `crates/sat_ingest` for populating raster tiles from satellite imagery. |
 | `static_frontend` | Static nginx server for the built Vite frontend. | `http://localhost` or `http://${ROOT_DOMAIN}` | Requires `${JLH_MAPS_DIST_DIR}` to point at the built `packages/jlh_maps/dist` directory. |
@@ -39,7 +40,8 @@ dynamic routing files live under `services/`.
 
 | Service/job | Purpose | Inputs                                                                     | Output                                                                                       |
 | --- | --- |----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| `gtfs_ingest_seed_sources` | One-shot GTFS feed-source seed job. It upserts configured sources into `postgres_gtfs`. | `config/gtfs_ingest_seed_sources.yaml` | Populates `gtfs_meta.feed_sources` in `postgres_gtfs`. |
+| `gtfs_ingest_seed_sources` | One-shot GTFS feed-source seed job. It upserts configured sources into `postgres_gtfs`. | `config/gtfs_feed_sources_seed.yaml` | Populates `gtfs_meta.feed_sources` in `postgres_gtfs`. |
+| `gtfs_ingest_sync_sources` | One-shot GTFS source sync job. It downloads changed feed sources, uploads the ZIP artifact to Garage, imports the feed into `postgres_gtfs`, and promotes the newest imported version. | `gtfs_meta.feed_sources`; direct download URLs; `gtfs_artifact_store` | Populates `gtfs_meta.feed_versions` and `gtfs.*` schedule tables; stores immutable feed ZIPs under `s3://$GTFS_ARTIFACT_S3_BUCKET/feed-sources/...`. |
 | `postgres_osm_importer` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `jobs/postgres_osm_importer/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
 
 Run the import job with the main stack file included so the `postgres_osm`
@@ -53,6 +55,20 @@ Seed GTFS feed sources after starting or creating the base database service:
 
 ```powershell
 just run-job local gtfs_ingest_seed_sources
+```
+
+Run the GTFS source sync after seeding sources:
+
+```powershell
+just run-job local gtfs_ingest_sync_sources
+```
+
+For manual retries, rerun the same sync job. To invoke the command explicitly
+through Compose while keeping the target's env files and overlay stack, use
+`exec`:
+
+```powershell
+just exec local -f compose.jobs.yaml run --rm gtfs_ingest_sync_sources sync-sources
 ```
 
 `run-job` takes the same target names as `run`, so `local` includes
@@ -101,6 +117,13 @@ POSTGRES_GTFS_USER=...
 POSTGRES_GTFS_PASSWORD=...
 POSTGRES_GTFS_DB=...
 
+GTFS_ARTIFACT_STORE_RPC_SECRET=...
+GTFS_ARTIFACT_STORE_ADMIN_TOKEN=...
+GTFS_ARTIFACT_STORE_METRICS_TOKEN=...
+GTFS_ARTIFACT_S3_BUCKET=...
+GTFS_ARTIFACT_S3_ACCESS_KEY_ID=...
+GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY=...
+
 OPENMAPTILES_DIR=...
 SAT_RASTER_TILE_JSON_DIR=...
 OSM2STREETS_PMTILES_PATH=...
@@ -114,6 +137,33 @@ prepared outside this repository or generated by one-shot jobs.
 `JLH_MAPS_DIST_DIR` points to the built Vite app output. For Docker Desktop
 use, they must be paths Docker can mount. `OSM2STREETS_PMTILES_PATH` is
 required and must point to the generated PMTiles file.
+
+The `GTFS_ARTIFACT_STORE_*` variables configure Garage's internal RPC/admin
+secrets. Generate real production values outside the repository; the checked-in
+Garage config contains only placeholders that are overridden by these
+environment variables. `GTFS_ARTIFACT_S3_*` defines the default S3 bucket and
+credentials Garage creates on first startup for GTFS feed artifacts.
+
+Variables used by `compose.jobs.yaml`:
+
+```dotenv
+POSTGRES_OSM_PASSWORD=...
+POSTGRES_OSM_DB=...
+POSTGRES_OSM_USER=...
+
+POSTGRES_GTFS_USER=...
+POSTGRES_GTFS_PASSWORD=...
+POSTGRES_GTFS_DB=...
+
+GTFS_ARTIFACT_S3_BUCKET=...
+GTFS_ARTIFACT_S3_ACCESS_KEY_ID=...
+GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY=...
+```
+
+`GTFS_ARTIFACT_S3_ENDPOINT` and `GTFS_ARTIFACT_S3_REGION` are intentionally
+hard-coded in the GTFS sync job environment as
+`http://gtfs_artifact_store:3900` and `garage`, because those are internal
+Compose service details rather than deployment secrets.
 
 Variables used by `compose.local.yaml`:
 
@@ -259,6 +309,45 @@ format.
 `${SAT_RASTER_TILE_JSON_DIR}` must contain
 `tilejson.json` and the generated `{z}/{x}/{y}.png` tree.
 `${OSM2STREETS_PMTILES_PATH}` must point to the generated PMTiles file.
+
+### GTFS Ingestion
+
+GTFS ingestion uses `postgres_gtfs` for metadata and imported schedule rows,
+and `gtfs_artifact_store` for immutable feed ZIP artifacts. The worker treats
+`gtfs::client` in `crates/gtfs_ingest_worker/src/gtfs/client.rs` as the public
+API. The artifact store adapter and the Postgres `model`, `core`, and
+`importer` modules are crate-private modules under `src/gtfs/`, so callers
+cannot upload an artifact, mutate version state, or promote a feed by skipping
+consistency checks.
+
+The core version states are:
+
+- `downloaded`: the feed ZIP was downloaded, hashed, uploaded to Garage, and a
+  `gtfs_meta.feed_versions` row exists.
+- `imported`: the version's GTFS files were copied directly into the durable
+  `gtfs.*` tables with PostgreSQL binary `COPY` in one transaction.
+- `active`: the version is the newest imported version for its source and
+  `gtfs_meta.feed_sources.active_version_id` points to it.
+
+If the worker exits during import, the transaction rolls back and another
+worker can continue from `downloaded` or `import_failed`. The worker serializes
+conflicting work with transaction-scoped Postgres advisory locks per feed source
+and per feed version. There is no separate job-run table; the version status is
+the recovery contract.
+
+The current import path parses the feed with `gtfs-structures`, maps relevant
+GTFS records to typed schema columns, and uses binary `COPY FROM STDIN` directly
+against the durable GTFS tables. This handles vendor extra columns while
+avoiding SQL-side string parsing, casts, and staging-table insert passes. The
+current binary COPY buffer is in memory per GTFS file; if the full Germany feed
+grows large enough to make memory pressure visible, the next refinement is to
+stream encoded rows into the SQLx COPY sink in chunks.
+
+`sync-sources` imports `stop_times.txt` as part of the fixed GTFS import path.
+
+Route geometry materialization, geometry indexes, read APIs, and PMTiles export
+are intentionally left out of this step. Those should build on the active GTFS
+version contract once the raw feed-version lifecycle is stable.
 
 ### OSM Data For PostGIS
 

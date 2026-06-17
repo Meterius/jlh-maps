@@ -1,14 +1,16 @@
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use gtfs_ingest_worker::gtfs::{
+    ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig, upsert_feed_sources_seed,
+};
 use gtfs_ingest_worker::model::SeedFile;
-use gtfs_ingest_worker::postgres_gtfs::upsert_feed_sources_seed;
 use std::path::PathBuf;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 #[derive(Debug, Parser)]
 #[command(name = "gtfs_ingest")]
-#[command(about = "GTFS schedule source seeding, ingestion, and PMTiles export")]
+#[command(about = "GTFS schedule source seeding, syncing, and artifact import")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -17,6 +19,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     SeedSources(SeedSourcesArgs),
+    SyncSources(SyncSourcesArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -28,6 +31,39 @@ pub struct SeedSourcesArgs {
     pub seed_file: PathBuf,
 }
 
+#[derive(Debug, Args, Clone)]
+pub struct SyncSourcesArgs {
+    #[command(flatten)]
+    pub client: ClientArgs,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ClientArgs {
+    #[arg(long, env = "POSTGRES_GTFS_URL")]
+    pub database_url: String,
+
+    #[command(flatten)]
+    pub artifact_store: ArtifactStoreArgs,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ArtifactStoreArgs {
+    #[arg(long, env = "GTFS_ARTIFACT_S3_ENDPOINT")]
+    pub endpoint: String,
+
+    #[arg(long, env = "GTFS_ARTIFACT_S3_REGION")]
+    pub region: String,
+
+    #[arg(long, env = "GTFS_ARTIFACT_S3_BUCKET")]
+    pub bucket: String,
+
+    #[arg(long, env = "GTFS_ARTIFACT_S3_ACCESS_KEY_ID")]
+    pub access_key_id: String,
+
+    #[arg(long, env = "GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY")]
+    pub secret_access_key: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
@@ -36,6 +72,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::SeedSources(args) => seed_sources(args).await,
+        Command::SyncSources(args) => sync_sources(args).await,
     }
 }
 
@@ -51,11 +88,7 @@ async fn seed_sources(args: SeedSourcesArgs) -> Result<()> {
     )
     .with_context(|| format!("failed to parse seed file {}", args.seed_file.display()))?;
 
-    info!("Upserting GTFS feed sources");
-
-    let pool = sqlx::PgPool::connect(&args.database_url).await?;
-
-    upsert_feed_sources_seed(&pool, &seed)
+    upsert_feed_sources_seed(&args.database_url, &seed)
         .await
         .with_context(|| {
             format!(
@@ -70,6 +103,35 @@ async fn seed_sources(args: SeedSourcesArgs) -> Result<()> {
     );
 
     Ok(())
+}
+
+async fn sync_sources(args: SyncSourcesArgs) -> Result<()> {
+    let client = connect_client(args.client).await?;
+    let outcomes = client
+        .sync_sources()
+        .await
+        .context("failed to sync GTFS sources")?;
+
+    info!(
+        source_count = outcomes.len(),
+        ?outcomes,
+        "completed GTFS sync-sources command"
+    );
+    Ok(())
+}
+
+async fn connect_client(args: ClientArgs) -> Result<GtfsIngestClient> {
+    GtfsIngestClient::connect(GtfsIngestConfig {
+        database_url: args.database_url,
+        artifact_store: ArtifactStoreConfig {
+            endpoint: args.artifact_store.endpoint,
+            region: args.artifact_store.region,
+            bucket: args.artifact_store.bucket,
+            access_key_id: args.artifact_store.access_key_id,
+            secret_access_key: args.artifact_store.secret_access_key,
+        },
+    })
+    .await
 }
 
 fn init_tracing() {

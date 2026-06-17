@@ -25,6 +25,36 @@ services:
       - --seed-file
       - /config/feed_sources_seed.yaml
 
+  gtfs_ingest_sync_sources:
+    build:
+      context: ../
+      dockerfile: infra/jobs/gtfs_ingest_worker/Dockerfile
+
+    init: true
+
+    environment:
+      POSTGRES_GTFS_URL: postgres://${POSTGRES_GTFS_USER}:${POSTGRES_GTFS_PASSWORD}@postgres_gtfs:5432/${POSTGRES_GTFS_DB}
+      GTFS_ARTIFACT_S3_ENDPOINT: http://gtfs_artifact_store:3900
+      GTFS_ARTIFACT_S3_REGION: garage
+      GTFS_ARTIFACT_S3_BUCKET: ${GTFS_ARTIFACT_S3_BUCKET:?GTFS_ARTIFACT_S3_BUCKET is required}
+      GTFS_ARTIFACT_S3_ACCESS_KEY_ID: ${GTFS_ARTIFACT_S3_ACCESS_KEY_ID:?GTFS_ARTIFACT_S3_ACCESS_KEY_ID is required}
+      GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY: ${GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY:?GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY is required}
+      RUST_LOG: info
+
+    depends_on:
+      postgres_gtfs:
+        condition: service_healthy
+      gtfs_artifact_store:
+        condition: service_healthy
+
+    networks:
+      - postgres_gtfs_private
+      - gtfs_artifact_private
+      - traefik_public
+
+    command:
+      - sync-sources
+
   postgres_osm_importer:
     image: iboates/osm2pgsql:latest
     environment:

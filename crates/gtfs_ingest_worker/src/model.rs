@@ -7,11 +7,13 @@ pub struct SeedFile {
 
 #[derive(Debug, Deserialize)]
 pub struct SeedSource {
+    /// Stable source key used by CLI commands and artifact paths.
     pub slug: String,
     pub name: String,
-    pub source_url: String,
-    pub direct_download_url: Option<String>,
+    /// Website for the source, if available.
+    pub source_url: Option<String>,
+    /// Required direct URL for the feed source GTFS ZIP file.
+    pub direct_download_url: String,
     pub license_url: Option<String>,
     pub attribution: Option<String>,
-    pub fetch_enabled: Option<bool>,
 }

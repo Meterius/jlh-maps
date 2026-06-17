@@ -96,6 +96,9 @@ services:
       - ./services/postgres_gtfs/postgres.conf:/etc/postgresql.conf:ro
       - ./services/postgres_gtfs/init:/docker-entrypoint-initdb.d/:ro
 
+  gtfs_artifact_store:
+    <<: *prod-service-defaults
+
   omt_tileserver_gl:
     <<: *prod-locked-down-service
 

@@ -1,2 +1,3 @@
+pub mod gtfs;
 pub mod model;
-pub mod postgres_gtfs;
+pub mod utils;
