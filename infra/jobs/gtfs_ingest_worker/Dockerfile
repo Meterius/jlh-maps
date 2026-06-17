@@ -1,0 +1,16 @@
+FROM rust:1.95 AS builder
+
+WORKDIR /repo
+
+COPY . .
+RUN cargo build --package gtfs_ingest_worker --release --bin gtfs_ingest
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /repo/target/release/gtfs_ingest /usr/local/bin/gtfs_ingest
+
+ENTRYPOINT ["gtfs_ingest"]

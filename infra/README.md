@@ -28,6 +28,7 @@ dynamic routing files live under `services/`.
 | `dnsmasq` | Local DNS forwarder. Resolves `${ROOT_DOMAIN}` and its subdomains to `${LOCAL_SERVER_IP}` for LAN testing. | DNS on `${LOCAL_SERVER_IP}:53` | Requires devices under test to use `${LOCAL_SERVER_IP}` as their DNS server.                                                                                                                  |
 | `traefik` | Reverse proxy for the HTTP services in this stack. | `http://localhost:80`; dashboard on `http://localhost:8081` |                                                                                                                                                                                               |
 | `postgres_osm` | PostGIS PostgreSQL database. Stores OSM data imported by the `postgres_osm_importer` job. | PostgreSQL on `localhost:5433` | Automatically initialized from `services/postgres_osm/init/init.sql`; persisted in the `postgres_osm_data` Docker volume.                                                                              |
+| `postgres_gtfs` | PostGIS PostgreSQL database for GTFS feed-source metadata and future imported schedule data. | PostgreSQL on `localhost:5434` | Automatically initialized from `services/postgres_gtfs/init/init.sql`; persisted in the `postgres_gtfs_data` Docker volume. |
 | `omt_tileserver_gl` | Serves OpenMapTiles vector tiles and styles through TileServer GL. | `http://tiles.jlh_maps.localhost` | Requires `${OPENMAPTILES_DIR}/data`, `${OPENMAPTILES_DIR}/style`, and `${OPENMAPTILES_DIR}/build`; Populated by output of https://github.com/Meterius/jlh-sys-design-playground-openmaptiles. |
 | `static_tile_server` | Static nginx server for Sentinel-2 raster tiles and the local osm2streets PMTiles archive. | `http://static.jlh_maps.localhost/raster/sen2/tilejson.json` | Requires `${SAT_RASTER_TILE_JSON_DIR}` for Sentinel-2 raster tiles and `${OSM2STREETS_PMTILES_PATH}` for the PMTiles file. See `crates/sat_ingest` for populating raster tiles from satellite imagery. |
 | `static_frontend` | Static nginx server for the built Vite frontend. | `http://localhost` or `http://${ROOT_DOMAIN}` | Requires `${JLH_MAPS_DIST_DIR}` to point at the built `packages/jlh_maps/dist` directory. |
@@ -38,13 +39,43 @@ dynamic routing files live under `services/`.
 
 | Service/job | Purpose | Inputs                                                                     | Output                                                                                       |
 | --- | --- |----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| `gtfs_ingest_seed_sources` | One-shot GTFS feed-source seed job. It upserts configured sources into `postgres_gtfs`. | `config/gtfs_ingest_seed_sources.yaml` | Populates `gtfs_meta.feed_sources` in `postgres_gtfs`. |
 | `postgres_osm_importer` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `jobs/postgres_osm_importer/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
 
 Run the import job with the main stack file included so the `postgres_osm`
 dependency is available:
 
 ```powershell
-docker compose --env-file .env -f compose.yaml -f compose.jobs.yaml run --rm postgres_osm_importer
+just run-job local postgres_osm_importer
+```
+
+Seed GTFS feed sources after starting or creating the base database service:
+
+```powershell
+just run-job local gtfs_ingest_seed_sources
+```
+
+`run-job` takes the same target names as `run`, so `local` includes
+`.local.env` and `compose.local.yaml`, while `prod-mono` includes
+`.prod.mono.env` and `compose.prod.mono.yaml`. Use the same target that was
+used to start the stack so job dependencies, env files, and overlay services
+match the active Compose shape.
+
+`run` and `run-job` both accept optional arguments for their underlying Docker
+Compose subcommand:
+
+```powershell
+just run prod-mono -d --build
+just run-job local gtfs_ingest_seed_sources --no-deps
+```
+
+For arbitrary Docker Compose commands with the target's env files and Compose
+file stack already inserted, use `exec`:
+
+```powershell
+just exec local ps
+just exec local logs -f postgres_gtfs
+just exec prod-mono config
 ```
 
 Generate osm2streets PMTiles with `crates/osm2streets_ingest`, then set
@@ -65,6 +96,10 @@ Variables used by `compose.yaml`:
 POSTGRES_OSM_USER=...
 POSTGRES_OSM_PASSWORD=...
 POSTGRES_OSM_DB=...
+
+POSTGRES_GTFS_USER=...
+POSTGRES_GTFS_PASSWORD=...
+POSTGRES_GTFS_DB=...
 
 OPENMAPTILES_DIR=...
 SAT_RASTER_TILE_JSON_DIR=...
@@ -103,7 +138,8 @@ The current local env files are loaded this way:
 | --- | --- |
 | Local serving stack | `.env`, then `.local.env` |
 | Production mono serving stack | `.env`, then `.prod.mono.env` |
-| OSM import job example | `.env` |
+| Local one-off jobs | `.env`, then `.local.env` |
+| Production mono one-off jobs | `.env`, then `.prod.mono.env` |
 
 These files are intentionally gitignored because they can contain local paths
 and production secrets. The artifact path variables currently live in `.env`

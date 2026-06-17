@@ -39,6 +39,35 @@ services:
     networks:
       - postgres_private
 
+  postgres_gtfs:
+    image: postgis/postgis:17-3.5
+
+    restart: unless-stopped
+
+    command: -c config_file=/etc/postgresql.conf
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    volumes:
+      - postgres_gtfs_data:/var/lib/postgresql/data
+      - ./services/postgres_gtfs/postgres.conf:/etc/postgresql.conf
+      - ./services/postgres_gtfs/init:/docker-entrypoint-initdb.d/
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_GTFS_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_GTFS_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_GTFS_DB}
+
+    networks:
+      - postgres_gtfs_private
+
   omt_tileserver_gl:
     image: "maptiler/tileserver-gl:latest"
 
@@ -122,6 +151,9 @@ networks:
   postgres_private:
     driver: bridge
     internal: true
+  postgres_gtfs_private:
+    driver: bridge
+    internal: true
   tiles_private:
     driver: bridge
     internal: true
@@ -134,3 +166,4 @@ networks:
 
 volumes:
   postgres_osm_data:
+  postgres_gtfs_data:

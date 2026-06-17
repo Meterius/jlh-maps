@@ -1,4 +1,30 @@
 services:
+  gtfs_ingest_seed_sources:
+    build:
+      context: ../
+      dockerfile: infra/jobs/gtfs_ingest_worker/Dockerfile
+
+    init: true
+
+    environment:
+      POSTGRES_GTFS_URL: postgres://${POSTGRES_GTFS_USER}:${POSTGRES_GTFS_PASSWORD}@postgres_gtfs:5432/${POSTGRES_GTFS_DB}
+      RUST_LOG: info
+
+    volumes:
+      - ./config/gtfs_feed_sources_seed.yaml:/config/feed_sources_seed.yaml:ro
+
+    depends_on:
+      postgres_gtfs:
+        condition: service_healthy
+
+    networks:
+      - postgres_gtfs_private
+
+    command:
+      - seed-sources
+      - --seed-file
+      - /config/feed_sources_seed.yaml
+
   postgres_osm_importer:
     image: iboates/osm2pgsql:latest
     environment:

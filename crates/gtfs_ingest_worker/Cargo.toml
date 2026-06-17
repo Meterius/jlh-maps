@@ -1,0 +1,18 @@
+[package]
+name = "gtfs_ingest_worker"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "gtfs_ingest"
+path = "src/bin/gtfs_ingest.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive", "env"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
+tokio = { version = "1.52.3", features = ["fs", "io-util", "macros", "rt-multi-thread"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }

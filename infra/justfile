@@ -1,8 +1,14 @@
-run target:
-    @just _run-{{target}}
+run target *up_args:
+    @just _exec-{{target}} up {{up_args}}
 
-_run-local:
-    docker compose --env-file .env --env-file .local.env -f compose.yaml -f compose.local.yaml up
+run-job target job_name *run_args:
+    @just _exec-{{target}} -f compose.jobs.yaml run --rm {{run_args}} {{job_name}}
 
-_run-prod-mono:
-    docker compose --env-file .env --env-file .prod.mono.env -f compose.yaml -f compose.prod.mono.yaml up
+exec target +compose_args:
+    @just _exec-{{target}} {{compose_args}}
+
+_exec-local +compose_args:
+    docker compose --env-file .env --env-file .local.env -f compose.yaml -f compose.local.yaml {{compose_args}}
+
+_exec-prod-mono +compose_args:
+    docker compose --env-file .env --env-file .prod.mono.env -f compose.yaml -f compose.prod.mono.yaml {{compose_args}}

@@ -86,6 +86,16 @@ services:
       - ./services/postgres_osm/postgres.conf:/etc/postgresql.conf:ro
       - ./services/postgres_osm/init:/docker-entrypoint-initdb.d/:ro
 
+  postgres_gtfs:
+    <<: *prod-service-defaults
+
+    volumes:
+      # Postgres needs a writable data directory; other inputs are read-only so
+      # a database compromise cannot rewrite initialization/config files.
+      - postgres_gtfs_data:/var/lib/postgresql/data
+      - ./services/postgres_gtfs/postgres.conf:/etc/postgresql.conf:ro
+      - ./services/postgres_gtfs/init:/docker-entrypoint-initdb.d/:ro
+
   omt_tileserver_gl:
     <<: *prod-locked-down-service
 

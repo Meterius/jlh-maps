@@ -1,0 +1,7 @@
+sources:
+  - slug: gtfs-de-de-full
+    name: GTFS.DE Deutschland gesamt
+    source_url: https://gtfs.de/de/feeds/de_full/
+    direct_download_url: https://download.gtfs.de/germany/free/latest.zip
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    attribution: GTFS.DE / DELFI e.V.
