@@ -1,9 +1,11 @@
 use crate::gtfs::postgres::locking::lock_feed_source;
 use anyhow::{Context, Result};
+use futures_util::Stream;
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use tracing::info;
 
 const MAX_WEB_MERCATOR_LATITUDE: f64 = 85.051_128_78;
+pub const GTFS_TILING_ZOOM: i32 = 14;
 
 // Syncing
 
@@ -80,6 +82,155 @@ pub async fn sync_tiling_for_source(
         tiled_version_id: Some(active_version_id),
         status: SyncTilingStatus::Synced,
     })
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct TilingExportTile {
+    pub z: i32,
+    pub x: i32,
+    pub y: i32,
+    pub tile: Vec<u8>,
+}
+
+pub fn stream_tiling_export_tiles<'a>(
+    pool: &'a PgPool,
+    source_slug: Option<&'a str>,
+) -> Result<impl Stream<Item = std::result::Result<TilingExportTile, sqlx::Error>> + 'a> {
+    Ok(sqlx::query_as::<_, TilingExportTile>(
+        r#"
+        WITH selected_tilings AS (
+            SELECT
+                tiling.source_id,
+                tiling.version_id,
+                source.slug AS source_slug,
+                $2::INTEGER AS zoom
+            FROM gtfs_tiling.source_tilings tiling
+            JOIN gtfs_meta.feed_sources source
+              ON source.id = tiling.source_id
+            WHERE ($1::TEXT IS NULL OR source.slug = $1)
+        ),
+        feature_extent AS (
+            SELECT ST_Extent(stop.geom) AS bounds
+            FROM gtfs_tiling.stop_points stop
+            JOIN selected_tilings tiling
+              ON tiling.source_id = stop.source_id
+             AND tiling.version_id = stop.version_id
+        ),
+        zoom_inputs AS (
+            SELECT
+                zooms.zoom AS z,
+                POWER(2.0, zooms.zoom)::INTEGER AS n,
+                GREATEST(-180.0, LEAST(180.0, ST_XMin(bounds))) AS min_lon,
+                GREATEST(-180.0, LEAST(180.0, ST_XMax(bounds))) AS max_lon,
+                GREATEST($3, LEAST($4, ST_YMin(bounds))) AS min_lat,
+                GREATEST($3, LEAST($4, ST_YMax(bounds))) AS max_lat
+            FROM feature_extent
+            CROSS JOIN LATERAL generate_series($2::INTEGER, $2::INTEGER) AS zooms(zoom)
+            WHERE bounds IS NOT NULL
+        ),
+        tile_ranges AS (
+            SELECT
+                z,
+                GREATEST(
+                    0,
+                    LEAST(n - 1, FLOOR(((min_lon + 180.0) / 360.0) * n)::INTEGER)
+                ) AS x_min,
+                GREATEST(
+                    0,
+                    LEAST(n - 1, FLOOR(((max_lon + 180.0) / 360.0) * n)::INTEGER)
+                ) AS x_max,
+                GREATEST(
+                    0,
+                    LEAST(
+                        n - 1,
+                        FLOOR(
+                            (
+                                (
+                                    1.0
+                                    - LN(TAN(RADIANS(max_lat)) + 1.0 / COS(RADIANS(max_lat))) / PI()
+                                )
+                                / 2.0
+                            )
+                            * n
+                        )::INTEGER
+                    )
+                ) AS y_min,
+                GREATEST(
+                    0,
+                    LEAST(
+                        n - 1,
+                        FLOOR(
+                            (
+                                (
+                                    1.0
+                                    - LN(TAN(RADIANS(min_lat)) + 1.0 / COS(RADIANS(min_lat))) / PI()
+                                )
+                                / 2.0
+                            )
+                            * n
+                        )::INTEGER
+                    )
+                ) AS y_max
+            FROM zoom_inputs
+        ),
+        tile_coords AS (
+            SELECT z, x, y
+            FROM tile_ranges
+            CROSS JOIN LATERAL generate_series(x_min, x_max) x
+            CROSS JOIN LATERAL generate_series(y_min, y_max) y
+        ),
+        mvt_tiles AS (
+            SELECT
+                coord.z,
+                coord.x,
+                coord.y,
+                COALESCE((
+                    SELECT ST_AsMVT(stop_feature, 'stops', 4096, 'geom')
+                    FROM (
+                        SELECT
+                            ST_AsMVTGeom(
+                                ST_Transform(stop.geom, 3857),
+                                tile_bounds.bounds_3857,
+                                4096,
+                                64,
+                                TRUE
+                            ) AS geom,
+                            tiling.source_slug,
+                            stop.stop_id,
+                            stop.stop_code,
+                            stop.stop_name,
+                            stop.location_type,
+                            stop.wheelchair_boarding,
+                            stop.platform_code
+                        FROM gtfs_tiling.stop_points stop
+                        JOIN selected_tilings tiling
+                          ON tiling.source_id = stop.source_id
+                         AND tiling.version_id = stop.version_id
+                        WHERE stop.geom && tile_bounds.bounds_4326
+                          AND ST_Intersects(stop.geom, tile_bounds.bounds_4326)
+                    ) stop_feature
+                ), ''::BYTEA) AS tile
+            FROM tile_coords coord
+            CROSS JOIN LATERAL (
+                SELECT
+                    bounds_3857,
+                    ST_Transform(bounds_3857, 4326) AS bounds_4326
+                FROM (
+                    SELECT ST_TileEnvelope(coord.z, coord.x, coord.y) AS bounds_3857
+                ) bounds
+            ) tile_bounds
+        )
+        SELECT z, x, y, tile
+        FROM mvt_tiles
+        WHERE OCTET_LENGTH(tile) > 0
+        ORDER BY z, x, y
+        "#,
+    )
+    .bind(source_slug)
+    .bind(GTFS_TILING_ZOOM)
+    .bind(-MAX_WEB_MERCATOR_LATITUDE)
+    .bind(MAX_WEB_MERCATOR_LATITUDE)
+    .fetch(pool))
 }
 
 #[derive(Debug, FromRow)]

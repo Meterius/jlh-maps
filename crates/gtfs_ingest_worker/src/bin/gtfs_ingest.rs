@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use gtfs_ingest_worker::gtfs::{
-    ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig, sync_tiling, upsert_feed_sources_seed,
+    ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig, export_tiling, sync_tiling,
+    upsert_feed_sources_seed,
 };
 use gtfs_ingest_worker::model::SeedFile;
 use std::path::PathBuf;
@@ -21,6 +22,7 @@ enum Command {
     SeedSources(SeedSourcesArgs),
     SyncSources(SyncSourcesArgs),
     SyncTiling(SyncTilingArgs),
+    ExportTiling(ExportTilingArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -42,6 +44,18 @@ pub struct SyncSourcesArgs {
 pub struct SyncTilingArgs {
     #[arg(long, env = "POSTGRES_GTFS_URL")]
     pub database_url: String,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct ExportTilingArgs {
+    #[arg(long, env = "POSTGRES_GTFS_URL")]
+    pub database_url: String,
+
+    #[arg(long)]
+    pub source_slug: Option<String>,
+
+    #[arg(long)]
+    pub output_file: PathBuf,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -81,6 +95,7 @@ async fn main() -> Result<()> {
         Command::SeedSources(args) => seed_sources(args).await,
         Command::SyncSources(args) => sync_sources(args).await,
         Command::SyncTiling(args) => sync_tiling_command(args).await,
+        Command::ExportTiling(args) => export_tiling_command(args).await,
     }
 }
 
@@ -138,6 +153,19 @@ async fn sync_tiling_command(args: SyncTilingArgs) -> Result<()> {
         ?outcomes,
         "completed GTFS sync-tiling command"
     );
+    Ok(())
+}
+
+async fn export_tiling_command(args: ExportTilingArgs) -> Result<()> {
+    let outcome = export_tiling(
+        &args.database_url,
+        args.source_slug.as_deref(),
+        &args.output_file,
+    )
+    .await
+    .context("failed to export GTFS tiling")?;
+
+    info!(?outcome, "completed GTFS export-tiling command");
     Ok(())
 }
 

@@ -3,8 +3,9 @@ mod client;
 mod postgres;
 
 pub use {
-    artifact_store::ArtifactStoreConfig, client::FeedVersion, client::GtfsIngestClient,
-    client::GtfsIngestConfig, client::ImportFeedVersionOutcome,
+    artifact_store::ArtifactStoreConfig, client::ExportTilingOutcome, client::FeedVersion,
+    client::GtfsIngestClient, client::GtfsIngestConfig, client::ImportFeedVersionOutcome,
     client::PrepareLatestFeedVersionOutcome, client::PromoteFeedVersionOutcome,
-    client::SyncSourceOutcome, client::sync_tiling, client::upsert_feed_sources_seed,
+    client::SyncSourceOutcome, client::export_tiling, client::sync_tiling,
+    client::upsert_feed_sources_seed,
 };

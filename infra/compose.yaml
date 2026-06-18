@@ -3,6 +3,7 @@ services:
   # - OPENMAPTILES_DIR
   # - SAT_RASTER_TILE_JSON_DIR
   # - OSM2STREETS_PMTILES_PATH
+  # - GTFS_PMTILES_DIR
   # - JLH_MAPS_DIST_DIR
   # - VALHALLA_CUSTOM_FILES_DIR
   traefik:
@@ -132,6 +133,7 @@ services:
       # Deployment overlays must provide /etc/nginx/conf.d/default.conf.
       - ${SAT_RASTER_TILE_JSON_DIR}:/usr/share/nginx/html/raster/sen2:ro
       - ${OSM2STREETS_PMTILES_PATH:?OSM2STREETS_PMTILES_PATH is required}:/usr/share/nginx/html/roads/tiles.pmtiles:ro
+      - ${GTFS_PMTILES_DIR:?GTFS_PMTILES_DIR is required}:/usr/share/nginx/html/gtfs:ro
 
     networks:
       - static_tiles_private

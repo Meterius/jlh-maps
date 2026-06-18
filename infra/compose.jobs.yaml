@@ -76,6 +76,32 @@ services:
     command:
       - sync-tiling
 
+  gtfs_ingest_export_tiling:
+    build:
+      context: ../
+      dockerfile: infra/jobs/gtfs_ingest_worker/Dockerfile
+
+    init: true
+
+    environment:
+      POSTGRES_GTFS_URL: postgres://${POSTGRES_GTFS_USER}:${POSTGRES_GTFS_PASSWORD}@postgres_gtfs:5432/${POSTGRES_GTFS_DB}
+      RUST_LOG: info
+
+    volumes:
+      - ${GTFS_PMTILES_DIR:?GTFS_PMTILES_DIR is required}:/pmtiles
+
+    depends_on:
+      postgres_gtfs:
+        condition: service_healthy
+
+    networks:
+      - postgres_gtfs_private
+
+    command:
+      - export-tiling
+      - --output-file
+      - /pmtiles/tiles.pmtiles
+
   postgres_osm_importer:
     image: iboates/osm2pgsql:latest
     environment:

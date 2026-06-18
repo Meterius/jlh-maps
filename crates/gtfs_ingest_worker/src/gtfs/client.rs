@@ -2,12 +2,17 @@ use crate::gtfs::artifact_store::{
     ArtifactStore, ArtifactStoreConfig as InternalArtifactStoreConfig, ArtifactStoreConfig,
 };
 use crate::gtfs::postgres::{
-    self, FeedVersionInfo, PromoteVersionOutcome, SyncTilingSourceOutcome,
+    self, FeedVersionInfo, GTFS_TILING_ZOOM, PromoteVersionOutcome, SyncTilingSourceOutcome,
 };
 use crate::model::SeedFile;
 use anyhow::{Context, Result, bail};
+use futures_util::TryStreamExt;
+use pmtiles::{PmTilesWriter, TileCoord, TileType};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use std::fs::File;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 /// Runtime dependencies for the GTFS ingestion client.
@@ -59,6 +64,13 @@ pub struct SyncSourceOutcome {
     pub prepared: PrepareLatestFeedVersionOutcome,
     pub imported: Option<ImportFeedVersionOutcome>,
     pub promoted: Option<PromoteFeedVersionOutcome>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportTilingOutcome {
+    pub source_slug: Option<String>,
+    pub tile_count: i64,
+    pub output_file: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -333,6 +345,24 @@ pub async fn sync_tiling(database_url: &str) -> Result<Vec<SyncTilingSourceOutco
     Ok(outcomes)
 }
 
+pub async fn export_tiling(
+    database_url: &str,
+    source_slug: Option<&str>,
+    output_file: &Path,
+) -> Result<ExportTilingOutcome> {
+    let pool = PgPool::connect(database_url)
+        .await
+        .context("failed to connect to GTFS Postgres database")?;
+
+    let tile_count = write_pmtiles(&pool, source_slug, output_file).await?;
+
+    Ok(ExportTilingOutcome {
+        source_slug: source_slug.map(str::to_owned),
+        tile_count,
+        output_file: output_file.to_owned(),
+    })
+}
+
 fn prepared_version(outcome: &PrepareLatestFeedVersionOutcome) -> Option<&FeedVersion> {
     match outcome {
         PrepareLatestFeedVersionOutcome::AlreadyActive { .. } => None,
@@ -376,6 +406,159 @@ fn sha256_hex(body: &[u8]) -> String {
 
 fn feed_artifact_path(source_slug: &str, content_sha256: &str) -> String {
     format!("feed-sources/{source_slug}/versions/{content_sha256}.zip")
+}
+
+async fn write_pmtiles(
+    pool: &PgPool,
+    source_slug: Option<&str>,
+    output_file: &Path,
+) -> Result<i64> {
+    if let Some(parent) = output_file.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create GTFS PMTiles output directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let temp_file = temp_output_path(output_file);
+    let file = File::create(&temp_file).with_context(|| {
+        format!(
+            "failed to create temporary GTFS PMTiles file {}",
+            temp_file.display()
+        )
+    })?;
+
+    let metadata = tiling_metadata(source_slug)?;
+
+    fn to_zoom_u8(zoom: i32) -> Result<u8> {
+        zoom.try_into()
+            .with_context(|| format!("invalid PMTiles zoom {}", zoom))
+    }
+
+    fn to_tile_u32(value: i32) -> Result<u32> {
+        value
+            .try_into()
+            .with_context(|| format!("invalid PMTiles tile coordinate {}", value))
+    }
+
+    let mut writer = PmTilesWriter::new(TileType::Mvt)
+        .min_zoom(to_zoom_u8(GTFS_TILING_ZOOM)?)
+        .max_zoom(to_zoom_u8(GTFS_TILING_ZOOM)?)
+        .center_zoom(to_zoom_u8(GTFS_TILING_ZOOM)?)
+        .center(0.0, 0.0)
+        .bounds(-180.0, -85.051_128_78, 180.0, 85.051_128_78)
+        .metadata(&metadata)
+        .create(file)
+        .context("failed to initialize GTFS PMTiles writer")?;
+
+    let mut tile_stream = postgres::stream_tiling_export_tiles(pool, source_slug)?;
+    let mut tile_count = 0_i64;
+
+    while let Some(tile) = tile_stream
+        .try_next()
+        .await
+        .context("failed to stream GTFS MVT tiles for export")?
+    {
+        let coord = TileCoord::new(
+            to_zoom_u8(tile.z)?,
+            to_tile_u32(tile.x)?,
+            to_tile_u32(tile.y)?,
+        )
+        .context("failed to create GTFS PMTiles tile coordinate")?;
+
+        writer.add_tile(coord, &tile.tile).with_context(|| {
+            format!(
+                "failed to write GTFS PMTiles tile {}/{}/{}",
+                tile.z, tile.x, tile.y
+            )
+        })?;
+
+        tile_count += 1;
+    }
+
+    writer
+        .finalize()
+        .context("failed to finalize GTFS PMTiles archive")?;
+
+    if tile_count == 0 {
+        let _ = std::fs::remove_file(&temp_file);
+        match source_slug {
+            Some(source_slug) => bail!(
+                "GTFS tiling for source {} has no tiles to export",
+                source_slug
+            ),
+            None => bail!("GTFS tiling has no tiles to export"),
+        }
+    }
+
+    replace_file(&temp_file, output_file)?;
+
+    Ok(tile_count)
+}
+
+fn tiling_metadata(source_slug: Option<&str>) -> Result<String> {
+    Ok(json!({
+        "name": "gtfs",
+        "description": "GTFS schedule stop vector tiles",
+        "version": source_slug.unwrap_or("gtfs"),
+        "vector_layers": [
+            {
+                "id": "stops",
+                "description": "GTFS stop and station points",
+                "fields": {
+                    "source_slug": "String",
+                    "stop_id": "String",
+                    "stop_code": "String",
+                    "stop_name": "String",
+                    "location_type": "Number",
+                    "wheelchair_boarding": "Number",
+                    "platform_code": "String"
+                }
+            }
+        ]
+    })
+    .to_string())
+}
+
+fn temp_output_path(output_file: &Path) -> PathBuf {
+    let file_name = output_file
+        .file_name()
+        .map(|file_name| file_name.to_string_lossy())
+        .unwrap_or_else(|| "tiles.pmtiles".into());
+    output_file.with_file_name(format!(".{file_name}.tmp"))
+}
+
+fn replace_file(temp_file: &Path, output_file: &Path) -> Result<()> {
+    match std::fs::rename(temp_file, output_file) {
+        Ok(()) => Ok(()),
+        Err(error) if output_file.exists() => {
+            std::fs::remove_file(output_file).with_context(|| {
+                format!(
+                    "failed to remove previous GTFS PMTiles file {}",
+                    output_file.display()
+                )
+            })?;
+            std::fs::rename(temp_file, output_file).with_context(|| {
+                format!(
+                    "failed to move GTFS PMTiles file from {} to {} after removing previous output: {}",
+                    temp_file.display(),
+                    output_file.display(),
+                    error
+                )
+            })
+        }
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "failed to move GTFS PMTiles file from {} to {}",
+                temp_file.display(),
+                output_file.display()
+            )
+        }),
+    }
 }
 
 impl From<FeedVersionInfo> for FeedVersion {

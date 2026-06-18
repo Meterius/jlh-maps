@@ -10,4 +10,6 @@ pub use core::{
     list_feed_source_slugs, mark_import_failed, promote_feed_version, upsert_feed_sources_seed,
 };
 pub use model::FeedVersionInfo;
-pub use tiling::{SyncTilingSourceOutcome, sync_tiling_for_source};
+pub use tiling::{
+    GTFS_TILING_ZOOM, SyncTilingSourceOutcome, stream_tiling_export_tiles, sync_tiling_for_source,
+};

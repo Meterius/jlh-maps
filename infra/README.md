@@ -31,7 +31,7 @@ dynamic routing files live under `services/`.
 | `postgres_gtfs` | PostGIS PostgreSQL database for GTFS feed-source metadata and future imported schedule data. | PostgreSQL on `localhost:5434` | Automatically initialized from `services/postgres_gtfs/init/init.sql`; persisted in the `postgres_gtfs_data` Docker volume. |
 | `gtfs_artifact_store` | Garage S3-compatible object storage for immutable GTFS feed-version ZIP artifacts. | S3 API on `localhost:3900`; admin API on `localhost:3903` | Initialized as a single-node Garage deployment from `services/gtfs_artifact_store/garage.toml`; persisted in the `gtfs_artifact_store_meta` and `gtfs_artifact_store_data` Docker volumes. |
 | `omt_tileserver_gl` | Serves OpenMapTiles vector tiles and styles through TileServer GL. | `http://tiles.jlh_maps.localhost` | Requires `${OPENMAPTILES_DIR}/data`, `${OPENMAPTILES_DIR}/style`, and `${OPENMAPTILES_DIR}/build`; Populated by output of https://github.com/Meterius/jlh-sys-design-playground-openmaptiles. |
-| `static_tile_server` | Static nginx server for Sentinel-2 raster tiles and the local osm2streets PMTiles archive. | `http://static.jlh_maps.localhost/raster/sen2/tilejson.json` | Requires `${SAT_RASTER_TILE_JSON_DIR}` for Sentinel-2 raster tiles and `${OSM2STREETS_PMTILES_PATH}` for roads PMTiles. |
+| `static_tile_server` | Static nginx server for Sentinel-2 raster tiles, the local osm2streets PMTiles archive, and exported GTFS PMTiles. | `http://static.jlh_maps.localhost/raster/sen2/tilejson.json` | Requires `${SAT_RASTER_TILE_JSON_DIR}` for Sentinel-2 raster tiles, `${OSM2STREETS_PMTILES_PATH}` for roads PMTiles, and `${GTFS_PMTILES_DIR}` for GTFS PMTiles. |
 | `static_frontend` | Static nginx server for the built Vite frontend. | `http://localhost` or `http://${ROOT_DOMAIN}` | Requires `${JLH_MAPS_DIST_DIR}` to point at the built `packages/jlh_maps/dist` directory. |
 | `core_service` | Rust API for looking up imported OSM element metadata from `postgres_osm`. | `http://api.jlh_maps.localhost` | Requires the `unitable` table produced by the OSM import job of `postgres_osm`.                                                                                                               |
 | `valhalla` | Valhalla routing service backed by a prebuilt routing graph. | `http://valhalla.jlh_maps.localhost` | Requires generated Valhalla files under `valhalla/custom_files`.                                                                                                                              |
@@ -43,6 +43,7 @@ dynamic routing files live under `services/`.
 | `gtfs_ingest_seed_sources` | One-shot GTFS feed-source seed job. It upserts configured sources into `postgres_gtfs`. | `config/gtfs_feed_sources_seed.yaml` | Populates `gtfs_meta.feed_sources` in `postgres_gtfs`. |
 | `gtfs_ingest_sync_sources` | One-shot GTFS source sync job. It downloads changed feed sources, uploads the ZIP artifact to Garage, imports the feed into `postgres_gtfs`, and promotes the newest imported version. | `gtfs_meta.feed_sources`; direct download URLs; `gtfs_artifact_store` | Populates `gtfs_meta.feed_versions` and `gtfs.*` schedule tables; stores immutable feed ZIPs under `s3://$GTFS_ARTIFACT_S3_BUCKET/feed-sources/...`. |
 | `gtfs_ingest_sync_tiling` | One-shot GTFS tiling sync job. It refreshes persisted stop geometries for any source whose active version is not the currently tiled version. | `gtfs_meta.feed_sources.active_version_id`; `gtfs.stops` | Populates `gtfs_tiling.source_tilings` and `gtfs_tiling.stop_points`. |
+| `gtfs_ingest_export_tiling` | One-shot GTFS PMTiles export job. It computes z14 MVT stop tiles from persisted tiling geometries and writes them to the static tile directory. | `gtfs_tiling.stop_points`; `${GTFS_PMTILES_DIR}` | Writes `${GTFS_PMTILES_DIR}/tiles.pmtiles`, served as `/gtfs/tiles.pmtiles`. |
 | `postgres_osm_importer` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `jobs/postgres_osm_importer/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
 
 Run the import job with the main stack file included so the `postgres_osm`
@@ -69,6 +70,12 @@ version:
 
 ```powershell
 just run-job local gtfs_ingest_sync_tiling
+```
+
+Export GTFS stop tiles to the static PMTiles directory:
+
+```powershell
+just run-job local gtfs_ingest_export_tiling
 ```
 
 For manual retries, rerun the same sync job. To invoke the command explicitly
@@ -135,16 +142,19 @@ GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY=...
 OPENMAPTILES_DIR=...
 SAT_RASTER_TILE_JSON_DIR=...
 OSM2STREETS_PMTILES_PATH=...
+GTFS_PMTILES_DIR=...
 JLH_MAPS_DIST_DIR=...
 VALHALLA_CUSTOM_FILES_DIR=...
 ```
 
 `OPENMAPTILES_DIR`, `SAT_RASTER_TILE_JSON_DIR`,
-`OSM2STREETS_PMTILES_PATH`, and `VALHALLA_CUSTOM_FILES_DIR` point to data
+`OSM2STREETS_PMTILES_PATH`, `GTFS_PMTILES_DIR`, and
+`VALHALLA_CUSTOM_FILES_DIR` point to data
 prepared outside this repository or generated by one-shot jobs.
 `JLH_MAPS_DIST_DIR` points to the built Vite app output. For Docker Desktop
 use, they must be paths Docker can mount. `OSM2STREETS_PMTILES_PATH` is
-required and must point to the generated roads PMTiles file.
+required and must point to the generated roads PMTiles file. `GTFS_PMTILES_DIR`
+is a directory; the GTFS export job writes `tiles.pmtiles` into it.
 
 The `GTFS_ARTIFACT_STORE_*` variables configure Garage's internal RPC/admin
 secrets. Generate real production values outside the repository; the checked-in
@@ -166,6 +176,8 @@ POSTGRES_GTFS_DB=...
 GTFS_ARTIFACT_S3_BUCKET=...
 GTFS_ARTIFACT_S3_ACCESS_KEY_ID=...
 GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY=...
+
+GTFS_PMTILES_DIR=...
 ```
 
 `GTFS_ARTIFACT_S3_ENDPOINT` and `GTFS_ARTIFACT_S3_REGION` are intentionally
@@ -300,8 +312,8 @@ Pop-Location
 ### Static Tiles
 
 `static_tile_server` only serves files. It currently exposes Sentinel-2 raster
-tiles under `/raster/sen2/` and the osm2streets PMTiles archive at
-`/roads/tiles.pmtiles`.
+tiles under `/raster/sen2/`, the osm2streets PMTiles archive at
+`/roads/tiles.pmtiles`, and exported GTFS stop tiles at `/gtfs/tiles.pmtiles`.
 
 The base Compose file mounts the tile data, while overlays provide the nginx
 server config:
@@ -317,6 +329,8 @@ format.
 `${SAT_RASTER_TILE_JSON_DIR}` must contain
 `tilejson.json` and the generated `{z}/{x}/{y}.png` tree.
 `${OSM2STREETS_PMTILES_PATH}` must point to the generated PMTiles file.
+`${GTFS_PMTILES_DIR}` is mounted at `/gtfs/`; after export,
+`${GTFS_PMTILES_DIR}/tiles.pmtiles` is served as `/gtfs/tiles.pmtiles`.
 
 ### GTFS Ingestion
 
@@ -347,9 +361,8 @@ The current import path parses the feed with `gtfs-structures`, maps relevant
 GTFS records to typed schema columns, and uses binary `COPY FROM STDIN` directly
 against the durable GTFS tables. This handles vendor extra columns while
 avoiding SQL-side string parsing, casts, and staging-table insert passes. The
-current binary COPY buffer is in memory per GTFS file; if the full Germany feed
-grows large enough to make memory pressure visible, the next refinement is to
-stream encoded rows into the SQLx COPY sink in chunks.
+binary COPY writer streams encoded rows to the SQLx COPY sink in chunks, so it
+does not allocate one complete COPY payload per GTFS file.
 
 `sync-sources` imports `stop_times.txt` as part of the fixed GTFS import path.
 
@@ -362,8 +375,12 @@ features.
 The tiling transaction keeps at most one tiled version per feed source. If a
 source has no active version, any stale tiling for that source is removed.
 `source_tilings` only records which source version has materialized geometry;
-feature counts are derived when syncing. MVT/PMTiles export is intentionally
-not part of the current worker surface; only `sync-tiling` remains.
+feature counts are derived when syncing or exporting.
+
+`export-tiling` calculates z14 MVT tile bytes on demand from `stop_points`, then
+writes them into a PMTiles archive. By default it exports all currently tiled
+sources into one `stops` vector layer; pass `--source-slug` when invoking the
+command manually to export only one feed source.
 
 ### OSM Data For PostGIS
 

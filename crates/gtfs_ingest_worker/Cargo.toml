@@ -11,11 +11,14 @@ path = "src/bin/gtfs_ingest.rs"
 anyhow = "1.0.102"
 chrono = "0.4.42"
 clap = { version = "4.6.1", features = ["derive", "env"] }
+futures-util = "0.3.31"
 gtfs-structures = { version = "0.48.0", default-features = false }
+pmtiles = { version = "0.23.0", default-features = false, features = ["write"] }
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls"] }
 rgb = "0.8.52"
 rust-s3 = { version = "0.37.2", default-features = false, features = ["tokio-rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
 serde_yaml = "0.9.34"
 sha2 = "0.10.9"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
