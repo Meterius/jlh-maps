@@ -1,7 +1,9 @@
 use crate::gtfs::artifact_store::{
     ArtifactStore, ArtifactStoreConfig as InternalArtifactStoreConfig, ArtifactStoreConfig,
 };
-use crate::gtfs::postgres::{self, FeedVersionInfo, PromoteVersionOutcome};
+use crate::gtfs::postgres::{
+    self, FeedVersionInfo, PromoteVersionOutcome, SyncTilingSourceOutcome,
+};
 use crate::model::SeedFile;
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
@@ -313,6 +315,22 @@ pub async fn upsert_feed_sources_seed(database_url: &str, seed: &SeedFile) -> Re
         .context("failed to connect to GTFS Postgres database")?;
 
     postgres::upsert_feed_sources_seed(&pool, seed).await
+}
+
+pub async fn sync_tiling(database_url: &str) -> Result<Vec<SyncTilingSourceOutcome>> {
+    let pool = PgPool::connect(database_url)
+        .await
+        .context("failed to connect to GTFS Postgres database")?;
+
+    let source_slugs = postgres::list_feed_source_slugs(&pool).await?;
+    let mut outcomes = Vec::with_capacity(source_slugs.len());
+
+    for source_slug in source_slugs {
+        info!(%source_slug, "syncing GTFS tiling for feed source");
+        outcomes.push(postgres::sync_tiling_for_source(&pool, &source_slug).await?);
+    }
+
+    Ok(outcomes)
 }
 
 fn prepared_version(outcome: &PrepareLatestFeedVersionOutcome) -> Option<&FeedVersion> {

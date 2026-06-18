@@ -17,7 +17,6 @@ pub async fn import_feed_version(
 ) -> Result<()> {
     let gtfs = GtfsReader::default()
         .trim_fields(false)
-        .read_stop_times(true)
         .raw()
         .read_from_reader(Cursor::new(zip_body))
         .with_context(|| format!("failed to parse GTFS artifact for version {}", version_id))?;

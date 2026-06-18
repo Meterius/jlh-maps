@@ -6,5 +6,5 @@ pub use {
     artifact_store::ArtifactStoreConfig, client::FeedVersion, client::GtfsIngestClient,
     client::GtfsIngestConfig, client::ImportFeedVersionOutcome,
     client::PrepareLatestFeedVersionOutcome, client::PromoteFeedVersionOutcome,
-    client::SyncSourceOutcome, client::upsert_feed_sources_seed,
+    client::SyncSourceOutcome, client::sync_tiling, client::upsert_feed_sources_seed,
 };

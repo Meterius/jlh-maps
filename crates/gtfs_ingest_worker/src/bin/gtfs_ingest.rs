@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use gtfs_ingest_worker::gtfs::{
-    ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig, upsert_feed_sources_seed,
+    ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig, sync_tiling, upsert_feed_sources_seed,
 };
 use gtfs_ingest_worker::model::SeedFile;
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ struct Cli {
 enum Command {
     SeedSources(SeedSourcesArgs),
     SyncSources(SyncSourcesArgs),
+    SyncTiling(SyncTilingArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -35,6 +36,12 @@ pub struct SeedSourcesArgs {
 pub struct SyncSourcesArgs {
     #[command(flatten)]
     pub client: ClientArgs,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct SyncTilingArgs {
+    #[arg(long, env = "POSTGRES_GTFS_URL")]
+    pub database_url: String,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -73,6 +80,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::SeedSources(args) => seed_sources(args).await,
         Command::SyncSources(args) => sync_sources(args).await,
+        Command::SyncTiling(args) => sync_tiling_command(args).await,
     }
 }
 
@@ -116,6 +124,19 @@ async fn sync_sources(args: SyncSourcesArgs) -> Result<()> {
         source_count = outcomes.len(),
         ?outcomes,
         "completed GTFS sync-sources command"
+    );
+    Ok(())
+}
+
+async fn sync_tiling_command(args: SyncTilingArgs) -> Result<()> {
+    let outcomes = sync_tiling(&args.database_url)
+        .await
+        .context("failed to sync GTFS tiling")?;
+
+    info!(
+        source_count = outcomes.len(),
+        ?outcomes,
+        "completed GTFS sync-tiling command"
     );
     Ok(())
 }

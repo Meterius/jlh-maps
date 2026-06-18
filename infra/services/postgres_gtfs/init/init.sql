@@ -2,6 +2,7 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 
 CREATE SCHEMA IF NOT EXISTS gtfs_meta;
 CREATE SCHEMA IF NOT EXISTS gtfs;
+CREATE SCHEMA IF NOT EXISTS gtfs_tiling;
 
 --- Meta Tables ---
 
@@ -181,17 +182,35 @@ CREATE TABLE gtfs.feed_info
     feed_contact_url    TEXT
 );
 
-CREATE TABLE gtfs.route_geometries
+--- Tiling Tables ---
+
+CREATE TABLE gtfs_tiling.source_tilings
 (
-    version_id       BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    route_id         TEXT   NOT NULL,
-    route_short_name TEXT,
-    route_long_name  TEXT,
-    route_type       INTEGER,
-    route_color      TEXT,
-    route_text_color TEXT,
-    trip_count       BIGINT NOT NULL DEFAULT 0,
-    geometry_source  TEXT   NOT NULL CHECK (geometry_source IN ('shape', 'stop_sequence')),
-    geom             geometry(LineString, 4326) NOT NULL,
-    PRIMARY KEY (version_id, route_id, geometry_source)
+    source_id    BIGINT PRIMARY KEY REFERENCES gtfs_meta.feed_sources (id) ON DELETE CASCADE,
+    version_id   BIGINT      NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    generated_at TIMESTAMPTZ NOT NULL,
+
+    UNIQUE (source_id, version_id)
 );
+
+CREATE TABLE gtfs_tiling.stop_points
+(
+    source_id             BIGINT NOT NULL,
+    version_id            BIGINT NOT NULL,
+    stop_id               TEXT   NOT NULL,
+    stop_code             TEXT,
+    stop_name             TEXT,
+    stop_desc             TEXT,
+    location_type         INTEGER,
+    wheelchair_boarding   INTEGER,
+    platform_code         TEXT,
+    geom                  geometry(Point, 4326) NOT NULL,
+
+    PRIMARY KEY (source_id, version_id, stop_id),
+    FOREIGN KEY (source_id, version_id)
+        REFERENCES gtfs_tiling.source_tilings (source_id, version_id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX gtfs_tiling_stop_points_geom_gix
+    ON gtfs_tiling.stop_points USING GIST (geom);

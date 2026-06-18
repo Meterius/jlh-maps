@@ -5,13 +5,7 @@ use super::{
 use crate::model::SeedFile;
 use anyhow::{Context, Result, bail};
 use sqlx::{PgPool, Postgres, Transaction};
-
-#[derive(Debug, Clone)]
-pub enum PromoteVersionOutcome {
-    Promoted(FeedVersionInfo),
-    CurrentActiveIsNewer(FeedVersionInfo),
-    AlreadyActive(FeedVersionInfo),
-}
+use crate::gtfs::postgres::locking::{lock_feed_source, lock_feed_version};
 
 // Queries
 
@@ -260,6 +254,13 @@ pub async fn mark_import_failed(pool: &PgPool, version_id: i64, error_message: &
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+pub enum PromoteVersionOutcome {
+    Promoted(FeedVersionInfo),
+    CurrentActiveIsNewer(FeedVersionInfo),
+    AlreadyActive(FeedVersionInfo),
+}
+
 /// Promotes a feed version to the active state, handling the de-promotion of a previous active version.
 /// - Will not promote if the active version was fetched more recently than the promotion candidate
 pub async fn promote_feed_version(pool: &PgPool, version_id: i64) -> Result<PromoteVersionOutcome> {
@@ -365,24 +366,4 @@ pub async fn promote_feed_version(pool: &PgPool, version_id: i64) -> Result<Prom
         .context("failed to commit GTFS promotion transaction")?;
 
     Ok(PromoteVersionOutcome::Promoted(promoted))
-}
-
-// Helpers
-
-async fn lock_feed_source(tx: &mut Transaction<'_, Postgres>, source_id: i64) -> Result<()> {
-    lock_name(tx, &format!("gtfs_feed_source:{source_id}")).await
-}
-
-async fn lock_feed_version(tx: &mut Transaction<'_, Postgres>, version_id: i64) -> Result<()> {
-    lock_name(tx, &format!("gtfs_feed_version:{version_id}")).await
-}
-
-async fn lock_name(tx: &mut Transaction<'_, Postgres>, lock_name: &str) -> Result<()> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(lock_name)
-        .execute(&mut **tx)
-        .await
-        .with_context(|| format!("failed to acquire advisory lock {}", lock_name))?;
-
-    Ok(())
 }
