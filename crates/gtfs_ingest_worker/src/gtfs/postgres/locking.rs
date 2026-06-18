@@ -1,11 +1,17 @@
 use anyhow::Context;
 use sqlx::{Postgres, Transaction};
 
-pub async fn lock_feed_source(tx: &mut Transaction<'_, Postgres>, source_id: i64) -> anyhow::Result<()> {
+pub async fn lock_feed_source(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: i64,
+) -> anyhow::Result<()> {
     lock_name(tx, &format!("gtfs_feed_source:{source_id}")).await
 }
 
-pub async fn lock_feed_version(tx: &mut Transaction<'_, Postgres>, version_id: i64) -> anyhow::Result<()> {
+pub async fn lock_feed_version(
+    tx: &mut Transaction<'_, Postgres>,
+    version_id: i64,
+) -> anyhow::Result<()> {
     lock_name(tx, &format!("gtfs_feed_version:{version_id}")).await
 }
 

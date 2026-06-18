@@ -1,17 +1,9 @@
+use crate::gtfs::postgres::locking::lock_feed_source;
 use anyhow::{Context, Result};
 use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use tracing::info;
-use crate::gtfs::postgres::locking::lock_feed_source;
 
 const MAX_WEB_MERCATOR_LATITUDE: f64 = 85.051_128_78;
-
-#[derive(Debug, FromRow)]
-struct TilingSourceState {
-    source_id: i64,
-    source_slug: String,
-    active_version_id: Option<i64>,
-    tiled_version_id: Option<i64>,
-}
 
 // Syncing
 
@@ -44,7 +36,7 @@ pub async fn sync_tiling_for_source(
     let previous_tiled_version_id = source.tiled_version_id;
     let Some(active_version_id) = source.active_version_id else {
         delete_source_tiling(&mut tx, source.source_id).await?;
-        
+
         tx.commit()
             .await
             .context("failed to commit GTFS tiling no-active transaction")?;
@@ -88,6 +80,14 @@ pub async fn sync_tiling_for_source(
         tiled_version_id: Some(active_version_id),
         status: SyncTilingStatus::Synced,
     })
+}
+
+#[derive(Debug, FromRow)]
+struct TilingSourceState {
+    source_id: i64,
+    source_slug: String,
+    active_version_id: Option<i64>,
+    tiled_version_id: Option<i64>,
 }
 
 async fn fetch_tiling_source_state_for_update(
@@ -213,6 +213,6 @@ async fn import_source_tiling_stop_points(
     .execute(&mut **tx)
     .await
     .context("failed to materialize GTFS stop points for tiling")?;
-    
+
     Ok(())
 }

@@ -2,10 +2,10 @@ use super::{
     importer,
     model::{FeedSourceDownloadInfo, FeedVersionInfo},
 };
+use crate::gtfs::postgres::locking::{lock_feed_source, lock_feed_version};
 use crate::model::SeedFile;
 use anyhow::{Context, Result, bail};
 use sqlx::{PgPool, Postgres, Transaction};
-use crate::gtfs::postgres::locking::{lock_feed_source, lock_feed_version};
 
 // Queries
 
