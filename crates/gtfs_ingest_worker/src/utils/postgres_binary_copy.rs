@@ -5,6 +5,11 @@
 //! - https://www.postgresql.org/docs/current/libpq-copy.html
 
 use anyhow::{Context, Result, bail};
+use sqlx::PgConnection;
+use sqlx::postgres::PgCopyIn;
+use std::ops::DerefMut;
+
+const DEFAULT_FLUSH_THRESHOLD_BYTES: usize = 8 * 1024 * 1024;
 
 pub trait BinaryCopyValue {
     fn write_to(self, buffer: &mut BinaryCopyInBuffer);
@@ -62,6 +67,18 @@ impl BinaryCopyInBuffer {
         Ok(())
     }
 
+    pub fn byte_count(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn row_count(&self) -> u64 {
+        self.row_count
+    }
+
+    pub fn take_bytes(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.bytes)
+    }
+
     pub fn write_null(&mut self) {
         self.bytes.extend_from_slice(&(-1_i32).to_be_bytes());
     }
@@ -71,14 +88,112 @@ impl BinaryCopyInBuffer {
     }
 
     pub fn finish(mut self) -> (Vec<u8>, u64) {
-        self.bytes.extend_from_slice(&(-1_i16).to_be_bytes());
+        self.write_trailer();
         (self.bytes, self.row_count)
+    }
+
+    fn write_trailer(&mut self) {
+        self.bytes.extend_from_slice(&(-1_i16).to_be_bytes());
     }
 
     fn write_bytes(&mut self, value: &[u8]) {
         let length = i32::try_from(value.len()).expect("binary COPY field exceeds i32 length");
         self.bytes.extend_from_slice(&length.to_be_bytes());
         self.bytes.extend_from_slice(value);
+    }
+}
+
+pub struct BinaryCopyInWriter<C>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    copy: PgCopyIn<C>,
+    buffer: BinaryCopyInBuffer,
+    flush_threshold_bytes: usize,
+}
+
+impl<C> BinaryCopyInWriter<C>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    pub fn new(copy: PgCopyIn<C>, column_count: usize) -> Result<Self> {
+        Self::with_flush_threshold(copy, column_count, DEFAULT_FLUSH_THRESHOLD_BYTES)
+    }
+
+    pub fn with_flush_threshold(
+        copy: PgCopyIn<C>,
+        column_count: usize,
+        flush_threshold_bytes: usize,
+    ) -> Result<Self> {
+        Ok(Self {
+            copy,
+            buffer: BinaryCopyInBuffer::new(column_count)?,
+            flush_threshold_bytes,
+        })
+    }
+
+    pub fn row_count(&self) -> u64 {
+        self.buffer.row_count()
+    }
+
+    pub async fn write_row<R>(&mut self, row: R) -> Result<()>
+    where
+        R: BinaryCopyRow,
+    {
+        self.buffer.write_row(row)?;
+        self.flush_if_needed().await
+    }
+
+    pub async fn write_rows<I, R>(&mut self, rows: I) -> Result<u64>
+    where
+        I: IntoIterator<Item = R>,
+        R: BinaryCopyRow,
+    {
+        let start_row_count = self.row_count();
+
+        for row in rows {
+            self.write_row(row).await?;
+        }
+
+        Ok(self.row_count() - start_row_count)
+    }
+
+    pub async fn finish(mut self) -> Result<u64> {
+        self.buffer.write_trailer();
+        self.flush().await?;
+        self.copy
+            .finish()
+            .await
+            .context("failed to finish binary COPY stream")
+    }
+
+    pub async fn abort(self, message: impl Into<String>) -> Result<()> {
+        self.copy
+            .abort(message)
+            .await
+            .context("failed to abort binary COPY stream")
+    }
+
+    async fn flush_if_needed(&mut self) -> Result<()> {
+        if self.buffer.byte_count() >= self.flush_threshold_bytes {
+            self.flush().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn flush(&mut self) -> Result<()> {
+        if self.buffer.byte_count() == 0 {
+            return Ok(());
+        }
+
+        let bytes = self.buffer.take_bytes();
+        self.copy
+            .send(bytes.as_slice())
+            .await
+            .context("failed to send binary COPY chunk")?;
+
+        Ok(())
     }
 }
 

@@ -1,12 +1,13 @@
-use crate::utils::postgres_binary_copy::{BinaryCopyInBuffer, BinaryCopyNull};
+use crate::utils::postgres_binary_copy::{BinaryCopyInWriter, BinaryCopyNull};
 use anyhow::{Context, Result, bail};
 use gtfs_structures::{
     Agency, Availability, Calendar, CalendarDate, DirectionType, Exception, FeedInfo, GtfsReader,
     LocationType, PickupDropOffType, RawStopTime, RawTrip, Route, RouteType, Shape, Stop,
     TimepointType,
 };
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgConnection, Postgres, Transaction};
 use std::io::Cursor;
+use std::ops::DerefMut;
 use tracing::info;
 
 /// Parses a GTFS ZIP and replaces rows for the given version inside the caller's transaction.
@@ -80,10 +81,23 @@ impl ParsedGtfsFiles {
 // Copy / Mutators
 
 struct ImportSpec {
+    kind: ImportKind,
     name: &'static str,
     target_table: &'static str,
     columns: &'static [&'static str],
-    build_copy_body: fn(&ParsedGtfsFiles, i64) -> Result<(Vec<u8>, u64)>,
+}
+
+#[derive(Clone, Copy)]
+enum ImportKind {
+    Agency,
+    Stops,
+    Routes,
+    Trips,
+    StopTimes,
+    Shapes,
+    Calendar,
+    CalendarDates,
+    FeedInfo,
 }
 
 async fn copy_gtfs_to_tables(
@@ -92,9 +106,7 @@ async fn copy_gtfs_to_tables(
     version_id: i64,
 ) -> Result<()> {
     for spec in IMPORT_SPECS {
-        let copy_body = (spec.build_copy_body)(parsed, version_id)
-            .with_context(|| format!("failed to build binary COPY body for {}", spec.name))?;
-        copy_records_to_table(tx, spec, version_id, copy_body).await?;
+        copy_records_to_table(tx, spec, parsed, version_id).await?;
     }
 
     Ok(())
@@ -103,8 +115,8 @@ async fn copy_gtfs_to_tables(
 async fn copy_records_to_table(
     tx: &mut Transaction<'_, Postgres>,
     spec: &ImportSpec,
+    parsed: &ParsedGtfsFiles,
     version_id: i64,
-    (copy_body, row_count): (Vec<u8>, u64),
 ) -> Result<()> {
     let copy_sql = format!(
         "COPY {} ({}) FROM STDIN WITH (FORMAT binary)",
@@ -112,18 +124,27 @@ async fn copy_records_to_table(
         spec.columns.join(", ")
     );
 
-    let mut copy = tx
+    let copy = tx
         .copy_in_raw(&copy_sql)
         .await
         .with_context(|| format!("failed to start COPY for {}", spec.target_table))?;
 
-    if let Err(error) = copy.send(copy_body.as_slice()).await {
-        let _ = copy.abort(error.to_string()).await;
-        return Err(error)
-            .with_context(|| format!("failed to stream COPY for {}", spec.target_table));
+    let mut writer = BinaryCopyInWriter::new(copy, spec.columns.len())
+        .with_context(|| format!("failed to create binary COPY writer for {}", spec.name))?;
+
+    if let Err(error) = write_records(&mut writer, spec, parsed, version_id).await {
+        let abort_message = error.to_string();
+        let _ = writer.abort(abort_message).await;
+        return Err(error).with_context(|| {
+            format!(
+                "failed to stream binary COPY rows for {}",
+                spec.target_table
+            )
+        });
     }
 
-    let copied_rows = copy
+    let row_count = writer.row_count();
+    let copied_rows = writer
         .finish()
         .await
         .with_context(|| format!("failed to finish COPY for {}", spec.target_table))?;
@@ -147,6 +168,28 @@ async fn copy_records_to_table(
     Ok(())
 }
 
+async fn write_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    spec: &ImportSpec,
+    parsed: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    match spec.kind {
+        ImportKind::Agency => write_agency_records(writer, parsed, version_id).await,
+        ImportKind::Stops => write_stops_records(writer, parsed, version_id).await,
+        ImportKind::Routes => write_routes_records(writer, parsed, version_id).await,
+        ImportKind::Trips => write_trips_records(writer, parsed, version_id).await,
+        ImportKind::StopTimes => write_stop_times_records(writer, parsed, version_id).await,
+        ImportKind::Shapes => write_shapes_records(writer, parsed, version_id).await,
+        ImportKind::Calendar => write_calendar_records(writer, parsed, version_id).await,
+        ImportKind::CalendarDates => write_calendar_dates_records(writer, parsed, version_id).await,
+        ImportKind::FeedInfo => write_feed_info_records(writer, parsed, version_id).await,
+    }
+}
+
 async fn delete_existing_gtfs_rows(
     tx: &mut Transaction<'_, Postgres>,
     version_id: i64,
@@ -166,58 +209,58 @@ async fn delete_existing_gtfs_rows(
 
 const IMPORT_SPECS: &[ImportSpec] = &[
     ImportSpec {
+        kind: ImportKind::Agency,
         name: "agency",
         target_table: "gtfs.agency",
         columns: AGENCY_COLUMNS,
-        build_copy_body: build_agency_copy_body,
     },
     ImportSpec {
+        kind: ImportKind::Stops,
         name: "stops",
         target_table: "gtfs.stops",
         columns: STOPS_COLUMNS,
-        build_copy_body: build_stops_copy_body,
     },
     ImportSpec {
+        kind: ImportKind::Routes,
         name: "routes",
         target_table: "gtfs.routes",
         columns: ROUTES_COLUMNS,
-        build_copy_body: build_routes_copy_body,
     },
     ImportSpec {
+        kind: ImportKind::Trips,
         name: "trips",
         target_table: "gtfs.trips",
         columns: TRIPS_COLUMNS,
-        build_copy_body: build_trips_copy_body,
     },
     ImportSpec {
+        kind: ImportKind::StopTimes,
         name: "stop_times",
         target_table: "gtfs.stop_times",
         columns: STOP_TIMES_COLUMNS,
-        build_copy_body: build_stop_times_copy_body,
     },
     ImportSpec {
+        kind: ImportKind::Shapes,
         name: "shapes",
         target_table: "gtfs.shapes",
         columns: SHAPES_COLUMNS,
-        build_copy_body: build_shapes_copy_body,
     },
     ImportSpec {
+        kind: ImportKind::Calendar,
         name: "calendar",
         target_table: "gtfs.calendar",
         columns: CALENDAR_COLUMNS,
-        build_copy_body: build_calendar_copy_body,
     },
     ImportSpec {
+        kind: ImportKind::CalendarDates,
         name: "calendar_dates",
         target_table: "gtfs.calendar_dates",
         columns: CALENDAR_DATES_COLUMNS,
-        build_copy_body: build_calendar_dates_copy_body,
     },
     ImportSpec {
+        kind: ImportKind::FeedInfo,
         name: "feed_info",
         target_table: "gtfs.feed_info",
         columns: FEED_INFO_COLUMNS,
-        build_copy_body: build_feed_info_copy_body,
     },
 ];
 
@@ -324,189 +367,239 @@ const FEED_INFO_COLUMNS: &[&str] = &[
     "feed_contact_url",
 ];
 
-fn build_agency_copy_body(files: &ParsedGtfsFiles, version_id: i64) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(AGENCY_COLUMNS.len())?;
-
-    for agency in &files.agencies {
-        body.write_row((
-            version_id,
-            agency.id.as_deref(),
-            &agency.name,
-            &agency.url,
-            &agency.timezone,
-            agency.lang.as_deref(),
-            agency.phone.as_deref(),
-        ))?;
-    }
-
-    Ok(body.finish())
-}
-
-fn build_stops_copy_body(files: &ParsedGtfsFiles, version_id: i64) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(STOPS_COLUMNS.len())?;
-
-    for stop in &files.stops {
-        body.write_row((
-            version_id,
-            &stop.id,
-            stop.code.as_deref(),
-            stop.name.as_deref(),
-            stop.description.as_deref(),
-            stop.latitude,
-            stop.longitude,
-            stop.zone_id.as_deref(),
-            stop.url.as_deref(),
-            location_type_code(stop.location_type),
-            stop.parent_station.as_deref(),
-            availability_code(stop.wheelchair_boarding),
-            stop.platform_code.as_deref(),
-            BinaryCopyNull,
-        ))?;
-    }
-
-    Ok(body.finish())
-}
-
-fn build_routes_copy_body(files: &ParsedGtfsFiles, version_id: i64) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(ROUTES_COLUMNS.len())?;
-
-    for route in &files.routes {
-        body.write_row((
-            version_id,
-            &route.id,
-            route.agency_id.as_deref(),
-            route.short_name.as_deref(),
-            route.long_name.as_deref(),
-            route.desc.as_deref(),
-            route_type_code(route.route_type),
-            route.url.as_deref(),
-            route.color.map(format_color),
-            route.text_color.map(format_color),
-        ))?;
-    }
-
-    Ok(body.finish())
-}
-
-fn build_trips_copy_body(files: &ParsedGtfsFiles, version_id: i64) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(TRIPS_COLUMNS.len())?;
-
-    for trip in &files.trips {
-        body.write_row((
-            version_id,
-            &trip.route_id,
-            &trip.service_id,
-            &trip.id,
-            trip.trip_headsign.as_deref(),
-            trip.direction_id.map(direction_type_code),
-            trip.block_id.as_deref(),
-            trip.shape_id.as_deref(),
-        ))?;
-    }
-
-    Ok(body.finish())
-}
-
-fn build_stop_times_copy_body(files: &ParsedGtfsFiles, version_id: i64) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(STOP_TIMES_COLUMNS.len())?;
-
-    for stop_time in &files.stop_times {
-        body.write_row((
-            version_id,
-            &stop_time.trip_id,
-            stop_time.arrival_time.map(format_gtfs_time),
-            stop_time.departure_time.map(format_gtfs_time),
-            &stop_time.stop_id,
-            i32::try_from(stop_time.stop_sequence)
-                .context("GTFS stop_sequence exceeds Postgres INTEGER range")?,
-            pickup_drop_off_code(stop_time.pickup_type),
-            pickup_drop_off_code(stop_time.drop_off_type),
-            stop_time.shape_dist_traveled.map(f64::from),
-            timepoint_code(stop_time.timepoint),
-        ))?;
-    }
-
-    Ok(body.finish())
-}
-
-fn build_shapes_copy_body(files: &ParsedGtfsFiles, version_id: i64) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(SHAPES_COLUMNS.len())?;
-
-    for shape in &files.shapes {
-        body.write_row((
-            version_id,
-            &shape.id,
-            shape.latitude,
-            shape.longitude,
-            i32::try_from(shape.sequence)
-                .context("GTFS shape_pt_sequence exceeds Postgres INTEGER range")?,
-            shape.dist_traveled.map(f64::from),
-            BinaryCopyNull,
-        ))?;
-    }
-
-    Ok(body.finish())
-}
-
-fn build_calendar_copy_body(files: &ParsedGtfsFiles, version_id: i64) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(CALENDAR_COLUMNS.len())?;
-
-    for calendar in &files.calendar {
-        body.write_row((
-            version_id,
-            &calendar.id,
-            calendar.monday,
-            calendar.tuesday,
-            calendar.wednesday,
-            calendar.thursday,
-            calendar.friday,
-            calendar.saturday,
-            calendar.sunday,
-            format_gtfs_date(calendar.start_date),
-            format_gtfs_date(calendar.end_date),
-        ))?;
-    }
-
-    Ok(body.finish())
-}
-
-fn build_calendar_dates_copy_body(
+async fn write_agency_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
     files: &ParsedGtfsFiles,
     version_id: i64,
-) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(CALENDAR_DATES_COLUMNS.len())?;
-
-    for calendar_date in &files.calendar_dates {
-        body.write_row((
-            version_id,
-            &calendar_date.service_id,
-            format_gtfs_date(calendar_date.date),
-            exception_code(calendar_date.exception_type),
-        ))?;
-    }
-
-    Ok(body.finish())
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    writer
+        .write_rows(files.agencies.iter().map(|agency| {
+            (
+                version_id,
+                agency.id.as_deref(),
+                &agency.name,
+                &agency.url,
+                &agency.timezone,
+                agency.lang.as_deref(),
+                agency.phone.as_deref(),
+            )
+        }))
+        .await
 }
 
-fn build_feed_info_copy_body(files: &ParsedGtfsFiles, version_id: i64) -> Result<(Vec<u8>, u64)> {
-    let mut body = BinaryCopyInBuffer::new(FEED_INFO_COLUMNS.len())?;
+async fn write_stops_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    files: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    writer
+        .write_rows(files.stops.iter().map(|stop| {
+            (
+                version_id,
+                &stop.id,
+                stop.code.as_deref(),
+                stop.name.as_deref(),
+                stop.description.as_deref(),
+                stop.latitude,
+                stop.longitude,
+                stop.zone_id.as_deref(),
+                stop.url.as_deref(),
+                location_type_code(stop.location_type),
+                stop.parent_station.as_deref(),
+                availability_code(stop.wheelchair_boarding),
+                stop.platform_code.as_deref(),
+                BinaryCopyNull,
+            )
+        }))
+        .await
+}
 
-    for feed_info in &files.feed_info {
-        body.write_row((
-            version_id,
-            &feed_info.name,
-            &feed_info.url,
-            &feed_info.lang,
-            feed_info.default_lang.as_deref(),
-            feed_info.start_date.map(format_gtfs_date),
-            feed_info.end_date.map(format_gtfs_date),
-            feed_info.version.as_deref(),
-            feed_info.contact_email.as_deref(),
-            feed_info.contact_url.as_deref(),
-        ))?;
+async fn write_routes_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    files: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    writer
+        .write_rows(files.routes.iter().map(|route| {
+            (
+                version_id,
+                &route.id,
+                route.agency_id.as_deref(),
+                route.short_name.as_deref(),
+                route.long_name.as_deref(),
+                route.desc.as_deref(),
+                route_type_code(route.route_type),
+                route.url.as_deref(),
+                route.color.map(format_color),
+                route.text_color.map(format_color),
+            )
+        }))
+        .await
+}
+
+async fn write_trips_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    files: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    writer
+        .write_rows(files.trips.iter().map(|trip| {
+            (
+                version_id,
+                &trip.route_id,
+                &trip.service_id,
+                &trip.id,
+                trip.trip_headsign.as_deref(),
+                trip.direction_id.map(direction_type_code),
+                trip.block_id.as_deref(),
+                trip.shape_id.as_deref(),
+            )
+        }))
+        .await
+}
+
+async fn write_stop_times_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    files: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    let start_row_count = writer.row_count();
+
+    for stop_time in &files.stop_times {
+        writer
+            .write_row((
+                version_id,
+                &stop_time.trip_id,
+                stop_time.arrival_time.map(format_gtfs_time),
+                stop_time.departure_time.map(format_gtfs_time),
+                &stop_time.stop_id,
+                i32::try_from(stop_time.stop_sequence)
+                    .context("GTFS stop_sequence exceeds Postgres INTEGER range")?,
+                pickup_drop_off_code(stop_time.pickup_type),
+                pickup_drop_off_code(stop_time.drop_off_type),
+                stop_time.shape_dist_traveled.map(f64::from),
+                timepoint_code(stop_time.timepoint),
+            ))
+            .await?;
     }
 
-    Ok(body.finish())
+    Ok(writer.row_count() - start_row_count)
+}
+
+async fn write_shapes_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    files: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    let start_row_count = writer.row_count();
+
+    for shape in &files.shapes {
+        writer
+            .write_row((
+                version_id,
+                &shape.id,
+                shape.latitude,
+                shape.longitude,
+                i32::try_from(shape.sequence)
+                    .context("GTFS shape_pt_sequence exceeds Postgres INTEGER range")?,
+                shape.dist_traveled.map(f64::from),
+                BinaryCopyNull,
+            ))
+            .await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
+}
+
+async fn write_calendar_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    files: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    writer
+        .write_rows(files.calendar.iter().map(|calendar| {
+            (
+                version_id,
+                &calendar.id,
+                calendar.monday,
+                calendar.tuesday,
+                calendar.wednesday,
+                calendar.thursday,
+                calendar.friday,
+                calendar.saturday,
+                calendar.sunday,
+                format_gtfs_date(calendar.start_date),
+                format_gtfs_date(calendar.end_date),
+            )
+        }))
+        .await
+}
+
+async fn write_calendar_dates_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    files: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    writer
+        .write_rows(files.calendar_dates.iter().map(|calendar_date| {
+            (
+                version_id,
+                &calendar_date.service_id,
+                format_gtfs_date(calendar_date.date),
+                exception_code(calendar_date.exception_type),
+            )
+        }))
+        .await
+}
+
+async fn write_feed_info_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    files: &ParsedGtfsFiles,
+    version_id: i64,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    writer
+        .write_rows(files.feed_info.iter().map(|feed_info| {
+            (
+                version_id,
+                &feed_info.name,
+                &feed_info.url,
+                &feed_info.lang,
+                feed_info.default_lang.as_deref(),
+                feed_info.start_date.map(format_gtfs_date),
+                feed_info.end_date.map(format_gtfs_date),
+                feed_info.version.as_deref(),
+                feed_info.contact_email.as_deref(),
+                feed_info.contact_url.as_deref(),
+            )
+        }))
+        .await
 }
 
 // Value Encodings
