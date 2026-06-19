@@ -381,6 +381,11 @@ avoiding SQL-side string parsing, casts, and staging-table insert passes. The
 binary COPY writer streams encoded rows to the SQLx COPY sink in chunks, so it
 does not allocate one complete COPY payload per GTFS file.
 
+Feed versions store HTTP `ETag` and `Last-Modified` validators when providers
+return them. Later syncs send `If-None-Match` and `If-Modified-Since` for the
+active version, so providers that return `304 Not Modified` can skip the full
+archive download and hash comparison.
+
 `sync-sources` imports `stop_times.txt` as part of the fixed GTFS import path.
 
 GTFS tiling is separate from feed ingestion. `sync-tiling` reads each source's

@@ -2,14 +2,18 @@ use crate::gtfs::artifact_store::{
     ArtifactStore, ArtifactStoreConfig as InternalArtifactStoreConfig, ArtifactStoreConfig,
 };
 use crate::gtfs::postgres::{
-    self, FeedVersionInfo, GTFS_TILING_EXPORT_CHUNK_ZOOM, GTFS_TILING_ZOOM, PromoteVersionOutcome,
-    SyncTilingSourceOutcome,
+    self, FeedVersionImportInfo, GTFS_TILING_EXPORT_CHUNK_ZOOM, GTFS_TILING_ZOOM,
+    PromoteVersionOutcome, SyncTilingSourceOutcome,
 };
 use crate::model::SeedFile;
 use anyhow::{Context, Result, bail};
 use futures_util::stream::{self, BoxStream};
 use futures_util::{StreamExt, TryStreamExt};
 use pmtiles::{PmTilesWriter, TileCoord, TileType};
+use reqwest::StatusCode;
+use reqwest::header::{
+    ETAG, HeaderMap, HeaderName, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, USER_AGENT,
+};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -36,13 +40,24 @@ pub struct FeedVersion {
     pub id: i64,
     pub source_id: i64,
     pub download_url: String,
-    /// SHA-256 hash of the stored GTFS ZIP artifact.
     pub content_sha256: String,
     pub file_bytes: i64,
-    /// Object-store key for the stored GTFS ZIP artifact.
     pub file_path: String,
-    /// Lifecycle state: downloaded, import_failed, imported, or active.
     pub status: String,
+}
+
+impl From<FeedVersionImportInfo> for FeedVersion {
+    fn from(record: FeedVersionImportInfo) -> Self {
+        Self {
+            id: record.id,
+            source_id: record.source_id,
+            download_url: record.download_url,
+            content_sha256: record.content_sha256,
+            file_bytes: record.file_bytes,
+            file_path: record.file_path,
+            status: record.status,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +130,7 @@ pub struct ExportTilingOutcome {
 pub struct GtfsIngestClient {
     pool: PgPool,
     artifact_store: ArtifactStore,
+    http_client: reqwest::Client,
 }
 
 impl GtfsIngestClient {
@@ -134,6 +150,7 @@ impl GtfsIngestClient {
         Ok(Self {
             pool,
             artifact_store,
+            http_client: reqwest::Client::new(),
         })
     }
 
@@ -154,22 +171,57 @@ impl GtfsIngestClient {
             "downloading latest GTFS feed"
         );
 
-        let feed_bytes = download_feed(download_url).await?;
+        let active_version_info =
+            postgres::fetch_active_version_download_info(&self.pool, source.id).await?;
+
+        let downloaded_feed = match download_feed(
+            &self.http_client,
+            download_url,
+            active_version_info.as_ref(),
+        )
+        .await?
+        {
+            DownloadFeedOutcome::NotModified => {
+                let active_download_cache = active_version_info
+                    .context("GTFS feed returned 304 without an active cached version")?;
+                info!(
+                    source_slug = %source.slug,
+                    content_sha256 = %active_download_cache.content_sha256,
+                    active_version_id = active_download_cache.id,
+                    "latest GTFS feed is already active by HTTP cache validators"
+                );
+                return Ok(PrepareLatestFeedVersionOutcome::AlreadyActive {
+                    content_sha256: active_download_cache.content_sha256,
+                });
+            }
+            DownloadFeedOutcome::Downloaded(downloaded_feed) => downloaded_feed,
+        };
+
+        let feed_bytes = downloaded_feed.body;
         let content_sha256 = sha256_hex(&feed_bytes);
         let file_bytes: i64 = feed_bytes
             .len()
             .try_into()
             .context("GTFS feed artifact is too large to record byte length")?;
 
-        if let Some(active_content_sha256) =
-            postgres::fetch_active_version_content_hash(&self.pool, source.id).await?
-            && active_content_sha256 == content_sha256
+        if let Some(active_download_cache) = active_version_info.as_ref()
+            && active_download_cache.content_sha256 == content_sha256
         {
+            postgres::update_version_http_download_info(
+                &self.pool,
+                active_download_cache.id,
+                downloaded_feed.http_etag.as_deref(),
+                downloaded_feed.http_last_modified.as_deref(),
+            )
+            .await?;
+
             info!(
                 source_slug = %source.slug,
                 %content_sha256,
-                "latest GTFS feed is already active"
+                active_version_id = active_download_cache.id,
+                "latest GTFS feed is already active after content hash comparison"
             );
+
             return Ok(PrepareLatestFeedVersionOutcome::AlreadyActive { content_sha256 });
         }
 
@@ -189,11 +241,15 @@ impl GtfsIngestClient {
 
         let version = postgres::create_downloaded_version(
             &self.pool,
-            &source,
-            download_url,
-            &content_sha256,
-            file_bytes,
-            &file_path,
+            postgres::CreateDownloadVersionInput {
+                source: &source,
+                download_url,
+                content_sha256: &content_sha256,
+                file_bytes,
+                file_path: &file_path,
+                http_etag: downloaded_feed.http_etag.as_deref(),
+                http_last_modified: downloaded_feed.http_last_modified.as_deref(),
+            },
         )
         .await?;
 
@@ -215,7 +271,7 @@ impl GtfsIngestClient {
         source_slug: &str,
         version_id: i64,
     ) -> Result<ImportFeedVersionOutcome> {
-        let version = postgres::fetch_version_info(&self.pool, version_id).await?;
+        let version = postgres::fetch_version_import_info(&self.pool, version_id).await?;
 
         if matches!(version.status.as_str(), "imported" | "active") {
             info!(
@@ -249,7 +305,7 @@ impl GtfsIngestClient {
 
         match postgres::import_feed_version_from_zip(&self.pool, version_id, zip_body).await {
             Ok(()) => {
-                let version = postgres::fetch_version_info(&self.pool, version_id).await?;
+                let version = postgres::fetch_version_import_info(&self.pool, version_id).await?;
                 if matches!(version.status.as_str(), "imported") {
                     info!(
                         source_slug = %source_slug,
@@ -422,6 +478,99 @@ pub async fn upsert_feed_sources_seed(
     postgres::upsert_feed_sources_seed(&pool, seed, delete_existing).await
 }
 
+// Source Sync
+
+struct DownloadedFeed {
+    body: Vec<u8>,
+    http_etag: Option<String>,
+    http_last_modified: Option<String>,
+}
+
+enum DownloadFeedOutcome {
+    NotModified,
+    Downloaded(DownloadedFeed),
+}
+
+async fn download_feed(
+    client: &reqwest::Client,
+    download_url: &str,
+    active_download_cache: Option<&postgres::FeedVersionDownloadInfo>,
+) -> Result<DownloadFeedOutcome> {
+    let mut request = client.get(download_url).header(
+        USER_AGENT,
+        concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
+    );
+
+    if let Some(active_download_cache) = active_download_cache {
+        if let Some(http_etag) = active_download_cache.http_etag.as_deref() {
+            request = request.header(IF_NONE_MATCH, http_etag);
+        }
+
+        if let Some(http_last_modified) = active_download_cache.http_last_modified.as_deref() {
+            request = request.header(IF_MODIFIED_SINCE, http_last_modified);
+        }
+    }
+
+    let response = request
+        .send()
+        .await
+        .with_context(|| format!("failed to request GTFS feed {}", download_url))?;
+
+    if response.status() == StatusCode::NOT_MODIFIED {
+        return Ok(DownloadFeedOutcome::NotModified);
+    }
+
+    let response = response
+        .error_for_status()
+        .with_context(|| format!("GTFS feed request failed for {}", download_url))?;
+
+    let headers = response.headers().clone();
+
+    let body = response
+        .bytes()
+        .await
+        .with_context(|| format!("failed to read GTFS feed {}", download_url))?;
+
+    Ok(DownloadFeedOutcome::Downloaded(DownloadedFeed {
+        body: body.to_vec(),
+        http_etag: header_to_string(&headers, ETAG),
+        http_last_modified: header_to_string(&headers, LAST_MODIFIED),
+    }))
+}
+
+fn header_to_string(headers: &HeaderMap, header_name: HeaderName) -> Option<String> {
+    headers
+        .get(header_name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+}
+
+fn sha256_hex(body: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(body);
+    format!("{:x}", hasher.finalize())
+}
+
+fn feed_artifact_path(source_slug: &str, content_sha256: &str) -> String {
+    format!("feed-sources/{source_slug}/versions/{content_sha256}.zip")
+}
+
+fn prepared_version(outcome: &PrepareLatestFeedVersionOutcome) -> Option<&FeedVersion> {
+    match outcome {
+        PrepareLatestFeedVersionOutcome::AlreadyActive { .. } => None,
+        PrepareLatestFeedVersionOutcome::Prepared { version } => Some(version),
+    }
+}
+
+fn imported_version(outcome: &ImportFeedVersionOutcome) -> &FeedVersion {
+    match outcome {
+        ImportFeedVersionOutcome::AlreadyStable { version } => version,
+        ImportFeedVersionOutcome::Imported { version } => version,
+    }
+}
+
+// Tiling Sync
+
 pub async fn sync_tiling(database_url: &str, parallelism: usize) -> Result<SyncTilingOutcome> {
     let parallelism = parallelism.max(1);
 
@@ -475,6 +624,8 @@ pub async fn sync_tiling(database_url: &str, parallelism: usize) -> Result<SyncT
     Ok(partition_sync_results(results))
 }
 
+// Tiling Export
+
 pub async fn export_tiling(
     database_url: &str,
     source_slug: Option<&str>,
@@ -492,67 +643,6 @@ pub async fn export_tiling(
         tile_count,
         output_file: output_file.to_owned(),
     })
-}
-
-fn prepared_version(outcome: &PrepareLatestFeedVersionOutcome) -> Option<&FeedVersion> {
-    match outcome {
-        PrepareLatestFeedVersionOutcome::AlreadyActive { .. } => None,
-        PrepareLatestFeedVersionOutcome::Prepared { version } => Some(version),
-    }
-}
-
-fn imported_version(outcome: &ImportFeedVersionOutcome) -> &FeedVersion {
-    match outcome {
-        ImportFeedVersionOutcome::AlreadyStable { version } => version,
-        ImportFeedVersionOutcome::Imported { version } => version,
-    }
-}
-
-fn partition_sync_results<T>(
-    results: Vec<std::result::Result<T, SyncFailure>>,
-) -> SyncCommandOutcome<T> {
-    let mut succeeded = Vec::new();
-    let mut failed = Vec::new();
-
-    for result in results {
-        match result {
-            Ok(outcome) => succeeded.push(outcome),
-            Err(failure) => failed.push(failure),
-        }
-    }
-
-    SyncCommandOutcome { succeeded, failed }
-}
-
-async fn download_feed(download_url: &str) -> Result<Vec<u8>> {
-    let response = reqwest::Client::new()
-        .get(download_url)
-        .header(
-            reqwest::header::USER_AGENT,
-            concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),
-        )
-        .send()
-        .await
-        .with_context(|| format!("failed to request GTFS feed {}", download_url))?
-        .error_for_status()
-        .with_context(|| format!("GTFS feed request failed for {}", download_url))?;
-
-    let body = response
-        .bytes()
-        .await
-        .with_context(|| format!("failed to read GTFS feed {}", download_url))?;
-
-    Ok(body.to_vec())
-}
-
-fn sha256_hex(body: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(body);
-    format!("{:x}", hasher.finalize())
-}
-
-fn feed_artifact_path(source_slug: &str, content_sha256: &str) -> String {
-    format!("feed-sources/{source_slug}/versions/{content_sha256}.zip")
 }
 
 async fn write_pmtiles(
@@ -780,16 +870,20 @@ fn replace_file(temp_file: &Path, output_file: &Path) -> Result<()> {
     }
 }
 
-impl From<FeedVersionInfo> for FeedVersion {
-    fn from(record: FeedVersionInfo) -> Self {
-        Self {
-            id: record.id,
-            source_id: record.source_id,
-            download_url: record.download_url,
-            content_sha256: record.content_sha256,
-            file_bytes: record.file_bytes,
-            file_path: record.file_path,
-            status: record.status,
+// Helpers
+
+fn partition_sync_results<T>(
+    results: Vec<std::result::Result<T, SyncFailure>>,
+) -> SyncCommandOutcome<T> {
+    let mut succeeded = Vec::new();
+    let mut failed = Vec::new();
+
+    for result in results {
+        match result {
+            Ok(outcome) => succeeded.push(outcome),
+            Err(failure) => failed.push(failure),
         }
     }
+
+    SyncCommandOutcome { succeeded, failed }
 }

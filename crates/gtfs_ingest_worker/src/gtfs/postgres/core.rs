@@ -1,6 +1,6 @@
 use super::{
     importer,
-    model::{FeedSourceDownloadInfo, FeedVersionInfo},
+    model::{FeedSourceDownloadInfo, FeedVersionDownloadInfo, FeedVersionImportInfo},
 };
 use crate::gtfs::postgres::locking::{lock_feed_source, lock_feed_version};
 use crate::model::SeedFile;
@@ -43,13 +43,17 @@ pub async fn fetch_feed_source_download_info(
     Ok(row)
 }
 
-pub async fn fetch_active_version_content_hash(
+pub async fn fetch_active_version_download_info(
     pool: &PgPool,
     source_id: i64,
-) -> Result<Option<String>> {
-    let row = sqlx::query_as::<_, (String,)>(
+) -> Result<Option<FeedVersionDownloadInfo>> {
+    let row = sqlx::query_as::<_, FeedVersionDownloadInfo>(
         r#"
-        SELECT version.content_sha256
+        SELECT
+            version.id,
+            version.content_sha256,
+            version.http_etag,
+            version.http_last_modified
         FROM gtfs_meta.feed_sources source
         JOIN gtfs_meta.feed_versions version ON version.id = source.active_version_id
         WHERE source.id = $1
@@ -58,16 +62,19 @@ pub async fn fetch_active_version_content_hash(
     .bind(source_id)
     .fetch_optional(pool)
     .await
-    .context("failed to inspect active GTFS version content hash")?;
+    .context("failed to inspect active GTFS version download info")?;
 
-    Ok(row.map(|row| row.0))
+    Ok(row)
 }
 
-pub async fn fetch_version_info<'e, E>(executor: E, version_id: i64) -> Result<FeedVersionInfo>
+pub async fn fetch_version_import_info<'e, E>(
+    executor: E,
+    version_id: i64,
+) -> Result<FeedVersionImportInfo>
 where
     E: sqlx::Executor<'e, Database = Postgres>,
 {
-    sqlx::query_as::<_, FeedVersionInfo>(
+    sqlx::query_as::<_, FeedVersionImportInfo>(
         r#"
         SELECT id, source_id, download_url, content_sha256, file_bytes, file_path, status
         FROM gtfs_meta.feed_versions
@@ -80,12 +87,12 @@ where
     .with_context(|| format!("failed to fetch GTFS version {}", version_id))
 }
 
-/// Like `fetch_version_info`, but locks via `FOR UPDATE`.
-async fn fetch_version_info_for_update(
+/// Like `fetch_version_import_info`, but locks via `FOR UPDATE`.
+async fn fetch_version_import_info_for_update(
     tx: &mut Transaction<'_, Postgres>,
     version_id: i64,
-) -> Result<FeedVersionInfo> {
-    sqlx::query_as::<_, FeedVersionInfo>(
+) -> Result<FeedVersionImportInfo> {
+    sqlx::query_as::<_, FeedVersionImportInfo>(
         r#"
         SELECT id, source_id, download_url, content_sha256, file_bytes, file_path, status
         FROM gtfs_meta.feed_versions
@@ -171,17 +178,23 @@ pub async fn upsert_feed_sources_seed(
     Ok(())
 }
 
+pub struct CreateDownloadVersionInput<'a> {
+    pub source: &'a FeedSourceDownloadInfo,
+    pub download_url: &'a str,
+    pub content_sha256: &'a str,
+    pub file_bytes: i64,
+    pub file_path: &'a str,
+    pub http_etag: Option<&'a str>,
+    pub http_last_modified: Option<&'a str>,
+}
+
 /// Creates a new feed version initialized to the downloaded state.
 /// - Expects artifact to have already been stored
 pub async fn create_downloaded_version(
     pool: &PgPool,
-    source: &FeedSourceDownloadInfo,
-    download_url: &str,
-    content_sha256: &str,
-    file_bytes: i64,
-    file_path: &str,
-) -> Result<FeedVersionInfo> {
-    sqlx::query_as::<_, FeedVersionInfo>(
+    input: CreateDownloadVersionInput<'_>,
+) -> Result<FeedVersionImportInfo> {
+    sqlx::query_as::<_, FeedVersionImportInfo>(
         r#"
         INSERT INTO gtfs_meta.feed_versions (
             source_id,
@@ -189,22 +202,50 @@ pub async fn create_downloaded_version(
             content_sha256,
             file_bytes,
             file_path,
+            http_etag,
+            http_last_modified,
             status,
             error_message,
             fetched_at
         )
-        VALUES ($1, $2, $3, $4, $5, 'downloaded', NULL, now())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'downloaded', NULL, now())
         RETURNING id, source_id, download_url, content_sha256, file_bytes, file_path, status
         "#,
     )
-    .bind(source.id)
-    .bind(download_url)
-    .bind(content_sha256)
-    .bind(file_bytes)
-    .bind(file_path)
+    .bind(input.source.id)
+    .bind(input.download_url)
+    .bind(input.content_sha256)
+    .bind(input.file_bytes)
+    .bind(input.file_path)
+    .bind(input.http_etag)
+    .bind(input.http_last_modified)
     .fetch_one(pool)
     .await
     .context("failed to insert downloaded GTFS feed version")
+}
+
+pub async fn update_version_http_download_info(
+    pool: &PgPool,
+    version_id: i64,
+    http_etag: Option<&str>,
+    http_last_modified: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE gtfs_meta.feed_versions
+        SET http_etag = COALESCE($2, http_etag),
+            http_last_modified = COALESCE($3, http_last_modified)
+        WHERE id = $1
+        "#,
+    )
+    .bind(version_id)
+    .bind(http_etag)
+    .bind(http_last_modified)
+    .execute(pool)
+    .await
+    .context("failed to update GTFS feed version HTTP cache validators")?;
+
+    Ok(())
 }
 
 /// Imports the feed version archive file into the database, removing any entries for the feed version.
@@ -226,7 +267,7 @@ pub async fn import_feed_version_from_zip(
         .await
         .context("failed to set import transaction throughput options")?;
 
-    let version = fetch_version_info_for_update(&mut tx, version_id).await?;
+    let version = fetch_version_import_info_for_update(&mut tx, version_id).await?;
     match version.status.as_str() {
         "imported" | "active" => {
             tx.commit()
@@ -288,9 +329,9 @@ pub async fn mark_import_failed(pool: &PgPool, version_id: i64, error_message: &
 
 #[derive(Debug, Clone)]
 pub enum PromoteVersionOutcome {
-    Promoted(FeedVersionInfo),
-    CurrentActiveIsNewer(FeedVersionInfo),
-    AlreadyActive(FeedVersionInfo),
+    Promoted(FeedVersionImportInfo),
+    CurrentActiveIsNewer(FeedVersionImportInfo),
+    AlreadyActive(FeedVersionImportInfo),
 }
 
 /// Promotes a feed version to the active state, handling the de-promotion of a previous active version.
@@ -301,12 +342,14 @@ pub async fn promote_feed_version(pool: &PgPool, version_id: i64) -> Result<Prom
         .await
         .context("failed to start GTFS promotion transaction")?;
 
-    let source_id = fetch_version_info(&mut *tx, version_id).await?.source_id;
+    let source_id = fetch_version_import_info(&mut *tx, version_id)
+        .await?
+        .source_id;
 
     lock_feed_source(&mut tx, source_id).await?;
     lock_feed_version(&mut tx, version_id).await?;
 
-    let version = fetch_version_info_for_update(&mut tx, version_id).await?;
+    let version = fetch_version_import_info_for_update(&mut tx, version_id).await?;
     match version.status.as_str() {
         "active" => {
             tx.commit()
@@ -364,7 +407,7 @@ pub async fn promote_feed_version(pool: &PgPool, version_id: i64) -> Result<Prom
     .await
     .context("failed to demote previous active GTFS version")?;
 
-    let promoted = sqlx::query_as::<_, FeedVersionInfo>(
+    let promoted = sqlx::query_as::<_, FeedVersionImportInfo>(
         r#"
         UPDATE gtfs_meta.feed_versions
         SET status = 'active',

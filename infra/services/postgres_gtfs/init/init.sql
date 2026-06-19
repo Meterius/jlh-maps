@@ -31,9 +31,13 @@ CREATE TABLE gtfs_meta.feed_versions
     source_id      BIGINT      NOT NULL REFERENCES gtfs_meta.feed_sources (id) ON DELETE CASCADE,
 
     download_url   TEXT        NOT NULL,
+
     content_sha256 CHAR(64)    NOT NULL,
     file_bytes     BIGINT      NOT NULL,
     file_path      TEXT        NOT NULL,
+
+    http_etag          TEXT,
+    http_last_modified TEXT,
 
     status         TEXT        NOT NULL CHECK (
         status IN (
