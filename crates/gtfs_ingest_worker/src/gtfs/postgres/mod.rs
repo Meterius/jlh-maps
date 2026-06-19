@@ -6,10 +6,9 @@ mod tiling;
 
 pub use core::{
     CreateDownloadVersionInput, PromoteVersionOutcome, create_downloaded_version,
-    fetch_active_version_download_info, fetch_feed_source_download_info,
-    fetch_version_import_info, import_feed_version_from_zip, list_feed_source_slugs,
-    mark_import_failed, promote_feed_version, update_version_http_download_info,
-    upsert_feed_sources_seed,
+    fetch_active_version_download_info, fetch_feed_source_download_info, fetch_version_import_info,
+    import_feed_version_from_zip, list_feed_source_slugs, mark_import_failed, promote_feed_version,
+    update_version_http_download_info, upsert_feed_sources_seed,
 };
 pub use model::{FeedVersionDownloadInfo, FeedVersionImportInfo};
 pub use tiling::{

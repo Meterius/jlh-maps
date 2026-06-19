@@ -431,29 +431,39 @@ impl GtfsIngestClient {
             parallelism, "syncing GTFS feed sources"
         );
 
+        let sync_log_counters = Arc::new(SyncLogCounters::new(source_slugs.len()));
+
         let results = stream::iter(source_slugs)
-            .map(|source_slug| async move {
-                info!(
-                    source_slug = %source_slug,
-                    "syncing GTFS feed source"
-                );
-                match self.sync_source(&source_slug).await {
-                    Ok(outcome) => {
-                        info!(
-                            source_slug = %source_slug,
-                            ?outcome,
-                            "completed GTFS feed source sync"
-                        );
-                        Ok(outcome)
-                    }
-                    Err(error) => {
-                        let error = format!("{error:#}");
-                        error!(
-                            source_slug = %source_slug,
-                            error = %error,
-                            "failed GTFS feed source sync"
-                        );
-                        Err(SyncFailure { source_slug, error })
+            .map(|source_slug| {
+                let sync_log_counters = Arc::clone(&sync_log_counters);
+
+                async move {
+                    info!(
+                        source_slug = %source_slug,
+                        "syncing GTFS feed source"
+                    );
+                    match self.sync_source(&source_slug).await {
+                        Ok(outcome) => {
+                            let progress = sync_log_counters.record_success();
+                            info!(
+                                source_slug = %source_slug,
+                                ?outcome,
+                                ?progress,
+                                "completed GTFS feed source sync"
+                            );
+                            Ok(outcome)
+                        }
+                        Err(error) => {
+                            let progress = sync_log_counters.record_failure();
+                            let error = format!("{error:#}");
+                            error!(
+                                source_slug = %source_slug,
+                                error = %error,
+                                ?progress,
+                                "failed GTFS feed source sync"
+                            );
+                            Err(SyncFailure { source_slug, error })
+                        }
                     }
                 }
             })
@@ -585,9 +595,13 @@ pub async fn sync_tiling(database_url: &str, parallelism: usize) -> Result<SyncT
         parallelism, "syncing GTFS tiling sources"
     );
 
+    let sync_log_counters = Arc::new(SyncLogCounters::new(source_slugs.len()));
+
     let results = stream::iter(source_slugs)
         .map(|source_slug| {
             let pool = &pool;
+            let sync_log_counters = Arc::clone(&sync_log_counters);
+
             async move {
                 info!(
                     source_slug = %source_slug,
@@ -595,9 +609,11 @@ pub async fn sync_tiling(database_url: &str, parallelism: usize) -> Result<SyncT
                 );
                 match postgres::sync_tiling_for_source(pool, &source_slug).await {
                     Ok(outcome) => {
+                        let progress = sync_log_counters.record_success();
                         info!(
                             source_slug = %source_slug,
                             ?outcome,
+                            ?progress,
                             "completed GTFS tiling source sync"
                         );
                         Ok(SyncTilingSourceResult {
@@ -606,10 +622,12 @@ pub async fn sync_tiling(database_url: &str, parallelism: usize) -> Result<SyncT
                         })
                     }
                     Err(error) => {
+                        let progress = sync_log_counters.record_failure();
                         let error = format!("{error:#}");
                         error!(
                             source_slug = %source_slug,
                             error = %error,
+                            ?progress,
                             "failed GTFS tiling source sync"
                         );
                         Err(SyncFailure { source_slug, error })
@@ -886,4 +904,50 @@ fn partition_sync_results<T>(
     }
 
     SyncCommandOutcome { succeeded, failed }
+}
+
+struct SyncLogCounters {
+    total_count: usize,
+    succeeded_count: AtomicUsize,
+    failed_count: AtomicUsize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+struct SyncLogProgress {
+    succeeded_count: usize,
+    failed_count: usize,
+    remaining_count: usize,
+}
+
+impl SyncLogCounters {
+    fn new(total_count: usize) -> Self {
+        Self {
+            total_count,
+            succeeded_count: AtomicUsize::new(0),
+            failed_count: AtomicUsize::new(0),
+        }
+    }
+
+    fn record_success(&self) -> SyncLogProgress {
+        let succeeded_count = self.succeeded_count.fetch_add(1, Ordering::AcqRel) + 1;
+        let failed_count = self.failed_count.load(Ordering::Acquire);
+        self.progress(succeeded_count, failed_count)
+    }
+
+    fn record_failure(&self) -> SyncLogProgress {
+        let failed_count = self.failed_count.fetch_add(1, Ordering::AcqRel) + 1;
+        let succeeded_count = self.succeeded_count.load(Ordering::Acquire);
+        self.progress(succeeded_count, failed_count)
+    }
+
+    fn progress(&self, succeeded_count: usize, failed_count: usize) -> SyncLogProgress {
+        SyncLogProgress {
+            succeeded_count,
+            failed_count,
+            remaining_count: self
+                .total_count
+                .saturating_sub(succeeded_count + failed_count),
+        }
+    }
 }
