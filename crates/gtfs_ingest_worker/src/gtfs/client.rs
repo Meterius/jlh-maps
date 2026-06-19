@@ -2,17 +2,23 @@ use crate::gtfs::artifact_store::{
     ArtifactStore, ArtifactStoreConfig as InternalArtifactStoreConfig, ArtifactStoreConfig,
 };
 use crate::gtfs::postgres::{
-    self, FeedVersionInfo, GTFS_TILING_ZOOM, PromoteVersionOutcome, SyncTilingSourceOutcome,
+    self, FeedVersionInfo, GTFS_TILING_EXPORT_CHUNK_ZOOM, GTFS_TILING_ZOOM, PromoteVersionOutcome,
+    SyncTilingSourceOutcome,
 };
 use crate::model::SeedFile;
 use anyhow::{Context, Result, bail};
-use futures_util::TryStreamExt;
+use futures_util::stream::{self, BoxStream};
+use futures_util::{StreamExt, TryStreamExt};
 use pmtiles::{PmTilesWriter, TileCoord, TileType};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use tracing::info;
 
 /// Runtime dependencies for the GTFS ingestion client.
@@ -172,12 +178,16 @@ impl GtfsIngestClient {
     }
 
     /// Imports a downloaded or failed version into durable GTFS tables.
-    pub async fn import_feed_version(&self, version_id: i64) -> Result<ImportFeedVersionOutcome> {
+    pub async fn import_feed_version(
+        &self,
+        source_slug: &str,
+        version_id: i64,
+    ) -> Result<ImportFeedVersionOutcome> {
         let version = postgres::fetch_version_info(&self.pool, version_id).await?;
 
         if matches!(version.status.as_str(), "imported" | "active") {
             info!(
-                version_id,
+                source_slug = %source_slug,
                 status = %version.status,
                 "GTFS feed version import is already stable"
             );
@@ -187,7 +197,7 @@ impl GtfsIngestClient {
         }
 
         info!(
-            version_id,
+            source_slug = %source_slug,
             file_path = %version.file_path,
             "downloading GTFS artifact for import"
         );
@@ -209,7 +219,10 @@ impl GtfsIngestClient {
             Ok(()) => {
                 let version = postgres::fetch_version_info(&self.pool, version_id).await?;
                 if matches!(version.status.as_str(), "imported") {
-                    info!(version_id, "imported GTFS feed version");
+                    info!(
+                        source_slug = %source_slug,
+                        "imported GTFS feed version"
+                    );
                     Ok(ImportFeedVersionOutcome::Imported {
                         version: version.into(),
                     })
@@ -230,18 +243,24 @@ impl GtfsIngestClient {
     /// Promotes an imported version if it is not older than the active version.
     pub async fn try_promote_latest_feed_version(
         &self,
+        source_slug: &str,
         version_id: i64,
     ) -> Result<PromoteFeedVersionOutcome> {
         match postgres::promote_feed_version(&self.pool, version_id).await? {
             PromoteVersionOutcome::AlreadyActive(version) => {
-                info!(version_id, "GTFS feed version is already active");
+                info!(
+                    source_slug = %source_slug,
+                    status = %version.status,
+                    "GTFS feed version is already active"
+                );
                 Ok(PromoteFeedVersionOutcome::AlreadyActive {
                     version: version.into(),
                 })
             }
             PromoteVersionOutcome::CurrentActiveIsNewer(version) => {
                 info!(
-                    version_id,
+                    source_slug = %source_slug,
+                    status = %version.status,
                     "skipped GTFS promotion because current active version is newer"
                 );
                 Ok(PromoteFeedVersionOutcome::CurrentActiveIsNewer {
@@ -249,7 +268,11 @@ impl GtfsIngestClient {
                 })
             }
             PromoteVersionOutcome::Promoted(version) => {
-                info!(version_id, "promoted GTFS feed version");
+                info!(
+                    source_slug = %source_slug,
+                    status = %version.status,
+                    "promoted GTFS feed version"
+                );
                 Ok(PromoteFeedVersionOutcome::Promoted {
                     version: version.into(),
                 })
@@ -274,7 +297,10 @@ impl GtfsIngestClient {
             prepared_version.status.as_str(),
             "downloaded" | "import_failed"
         ) {
-            Some(self.import_feed_version(prepared_version.id).await?)
+            Some(
+                self.import_feed_version(source_slug, prepared_version.id)
+                    .await?,
+            )
         } else {
             None
         };
@@ -287,7 +313,7 @@ impl GtfsIngestClient {
             None
         } else if candidate_version.status == "imported" {
             Some(
-                self.try_promote_latest_feed_version(candidate_version.id)
+                self.try_promote_latest_feed_version(source_slug, candidate_version.id)
                     .await?,
             )
         } else {
@@ -307,16 +333,33 @@ impl GtfsIngestClient {
     }
 
     /// Runs sync for every configured feed source.
-    pub async fn sync_sources(&self) -> Result<Vec<SyncSourceOutcome>> {
+    pub async fn sync_sources(&self, parallelism: usize) -> Result<Vec<SyncSourceOutcome>> {
+        let parallelism = parallelism.max(1);
+
         let source_slugs = postgres::list_feed_source_slugs(&self.pool).await?;
-        let mut outcomes = Vec::with_capacity(source_slugs.len());
 
-        for source_slug in source_slugs {
-            info!(%source_slug, "syncing GTFS feed source");
-            outcomes.push(self.sync_source(&source_slug).await?);
-        }
+        info!(
+            source_count = source_slugs.len(),
+            parallelism, "syncing GTFS feed sources"
+        );
 
-        Ok(outcomes)
+        stream::iter(source_slugs)
+            .map(|source_slug| async move {
+                info!(
+                    source_slug = %source_slug,
+                    "syncing GTFS feed source"
+                );
+                let outcome = self.sync_source(&source_slug).await?;
+                info!(
+                    source_slug = %source_slug,
+                    ?outcome,
+                    "completed GTFS feed source sync"
+                );
+                Ok(outcome)
+            })
+            .buffer_unordered(parallelism)
+            .try_collect()
+            .await
     }
 }
 
@@ -329,32 +372,56 @@ pub async fn upsert_feed_sources_seed(database_url: &str, seed: &SeedFile) -> Re
     postgres::upsert_feed_sources_seed(&pool, seed).await
 }
 
-pub async fn sync_tiling(database_url: &str) -> Result<Vec<SyncTilingSourceOutcome>> {
+pub async fn sync_tiling(
+    database_url: &str,
+    parallelism: usize,
+) -> Result<Vec<SyncTilingSourceOutcome>> {
+    let parallelism = parallelism.max(1);
+
     let pool = PgPool::connect(database_url)
         .await
         .context("failed to connect to GTFS Postgres database")?;
 
     let source_slugs = postgres::list_feed_source_slugs(&pool).await?;
-    let mut outcomes = Vec::with_capacity(source_slugs.len());
 
-    for source_slug in source_slugs {
-        info!(%source_slug, "syncing GTFS tiling for feed source");
-        outcomes.push(postgres::sync_tiling_for_source(&pool, &source_slug).await?);
-    }
+    info!(
+        source_count = source_slugs.len(),
+        parallelism, "syncing GTFS tiling sources"
+    );
 
-    Ok(outcomes)
+    stream::iter(source_slugs)
+        .map(|source_slug| {
+            let pool = &pool;
+            async move {
+                info!(
+                    source_slug = %source_slug,
+                    "syncing GTFS tiling for feed source"
+                );
+                let outcome = postgres::sync_tiling_for_source(pool, &source_slug).await?;
+                info!(
+                    source_slug = %source_slug,
+                    ?outcome,
+                    "completed GTFS tiling source sync"
+                );
+                Ok(outcome)
+            }
+        })
+        .buffer_unordered(parallelism)
+        .try_collect()
+        .await
 }
 
 pub async fn export_tiling(
     database_url: &str,
     source_slug: Option<&str>,
     output_file: &Path,
+    parallelism: usize,
 ) -> Result<ExportTilingOutcome> {
     let pool = PgPool::connect(database_url)
         .await
         .context("failed to connect to GTFS Postgres database")?;
 
-    let tile_count = write_pmtiles(&pool, source_slug, output_file).await?;
+    let tile_count = write_pmtiles(&pool, source_slug, output_file, parallelism).await?;
 
     Ok(ExportTilingOutcome {
         source_slug: source_slug.map(str::to_owned),
@@ -412,7 +479,10 @@ async fn write_pmtiles(
     pool: &PgPool,
     source_slug: Option<&str>,
     output_file: &Path,
+    parallelism: usize,
 ) -> Result<i64> {
+    let parallelism = parallelism.max(1);
+
     if let Some(parent) = output_file.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -455,7 +525,16 @@ async fn write_pmtiles(
         .create(file)
         .context("failed to initialize GTFS PMTiles writer")?;
 
-    let mut tile_stream = postgres::stream_tiling_export_tiles(pool, source_slug)?;
+    info!(
+        source_slug = %source_slug.unwrap_or("<all>"),
+        output_file = %output_file.display(),
+        parallelism,
+        chunk_zoom = GTFS_TILING_EXPORT_CHUNK_ZOOM,
+        export_zoom = GTFS_TILING_ZOOM,
+        "streaming GTFS PMTiles export tiles"
+    );
+
+    let mut tile_stream = stream_tiling_export_tiles(pool, source_slug, parallelism);
     let mut tile_count = 0_i64;
 
     while let Some(tile) = tile_stream
@@ -497,7 +576,67 @@ async fn write_pmtiles(
 
     replace_file(&temp_file, output_file)?;
 
+    info!(
+        source_slug = %source_slug.unwrap_or("<all>"),
+        output_file = %output_file.display(),
+        tile_count,
+        "finished GTFS PMTiles export"
+    );
+
     Ok(tile_count)
+}
+
+fn stream_tiling_export_tiles<'a>(
+    pool: &'a PgPool,
+    source_slug: Option<&'a str>,
+    parallelism: usize,
+) -> BoxStream<'a, std::result::Result<postgres::TilingExportTile, sqlx::Error>> {
+    let max_processed_chunk_index = Arc::new(AtomicUsize::new(0));
+    let chunk_stream = postgres::stream_tile_ids_intersecting_geometry(
+        pool,
+        source_slug,
+        GTFS_TILING_EXPORT_CHUNK_ZOOM,
+    )
+    .map_ok({
+        let max_processed_chunk_index = Arc::clone(&max_processed_chunk_index);
+        move |tile_id| {
+            let (chunk_index, total_chunks) = chunk_progress_index(&tile_id);
+            let previous_max = max_processed_chunk_index.fetch_max(chunk_index, Ordering::AcqRel);
+            let processed_chunks = previous_max.max(chunk_index);
+            let remaining_chunks = total_chunks.saturating_sub(processed_chunks);
+
+            info!(
+                source_slug = %source_slug.unwrap_or("<all>"),
+                chunk_z = tile_id.z,
+                chunk_x = tile_id.x,
+                chunk_y = tile_id.y,
+                processed_chunks,
+                remaining_chunks,
+                total_chunks,
+                progress = %format_args!("{processed_chunks}/{total_chunks}"),
+                "processing GTFS PMTiles export chunk"
+            );
+
+            postgres::stream_export_tiles(pool, source_slug, tile_id).boxed()
+        }
+    });
+
+    if parallelism <= 1 {
+        chunk_stream.try_flatten().boxed()
+    } else {
+        chunk_stream
+            .try_flatten_unordered(Some(parallelism))
+            .boxed()
+    }
+}
+
+fn chunk_progress_index(tile_id: &postgres::TilingExportTileId) -> (usize, usize) {
+    let z = tile_id.z.max(0) as u32;
+    let tile_axis_count = 1_usize << z;
+    let chunk_index = tile_id.y.max(0) as usize * tile_axis_count + tile_id.x.max(0) as usize + 1;
+    let total_chunks = tile_axis_count * tile_axis_count;
+
+    (chunk_index, total_chunks)
 }
 
 fn tiling_metadata(source_slug: Option<&str>) -> Result<String> {

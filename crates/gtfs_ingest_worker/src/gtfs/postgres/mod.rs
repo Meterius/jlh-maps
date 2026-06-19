@@ -11,5 +11,7 @@ pub use core::{
 };
 pub use model::FeedVersionInfo;
 pub use tiling::{
-    GTFS_TILING_ZOOM, SyncTilingSourceOutcome, stream_tiling_export_tiles, sync_tiling_for_source,
+    GTFS_TILING_EXPORT_CHUNK_ZOOM, GTFS_TILING_ZOOM, SyncTilingSourceOutcome, TilingExportTile,
+    TilingExportTileId, stream_export_tiles, stream_tile_ids_intersecting_geometry,
+    sync_tiling_for_source,
 };

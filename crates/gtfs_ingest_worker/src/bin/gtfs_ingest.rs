@@ -9,6 +9,10 @@ use std::path::PathBuf;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
+const DEFAULT_SYNC_SOURCES_PARALLELISM: usize = 4;
+const DEFAULT_SYNC_TILING_PARALLELISM: usize = 2;
+const DEFAULT_EXPORT_TILING_PARALLELISM: usize = 2;
+
 #[derive(Debug, Parser)]
 #[command(name = "gtfs_ingest")]
 #[command(about = "GTFS schedule source seeding, syncing, and artifact import")]
@@ -38,12 +42,18 @@ pub struct SeedSourcesArgs {
 pub struct SyncSourcesArgs {
     #[command(flatten)]
     pub client: ClientArgs,
+
+    #[arg(long, default_value_t = DEFAULT_SYNC_SOURCES_PARALLELISM)]
+    pub parallelism: usize,
 }
 
 #[derive(Debug, Args, Clone)]
 pub struct SyncTilingArgs {
     #[arg(long, env = "POSTGRES_GTFS_URL")]
     pub database_url: String,
+
+    #[arg(long, default_value_t = DEFAULT_SYNC_TILING_PARALLELISM)]
+    pub parallelism: usize,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -56,6 +66,9 @@ pub struct ExportTilingArgs {
 
     #[arg(long)]
     pub output_file: PathBuf,
+
+    #[arg(long, default_value_t = DEFAULT_EXPORT_TILING_PARALLELISM)]
+    pub parallelism: usize,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -101,6 +114,7 @@ async fn main() -> Result<()> {
 
 async fn seed_sources(args: SeedSourcesArgs) -> Result<()> {
     info!(
+        seed_file = %args.seed_file.display(),
         "Seeding GTFS feed sources from seed file {}",
         args.seed_file.display()
     );
@@ -131,7 +145,7 @@ async fn seed_sources(args: SeedSourcesArgs) -> Result<()> {
 async fn sync_sources(args: SyncSourcesArgs) -> Result<()> {
     let client = connect_client(args.client).await?;
     let outcomes = client
-        .sync_sources()
+        .sync_sources(args.parallelism)
         .await
         .context("failed to sync GTFS sources")?;
 
@@ -144,7 +158,7 @@ async fn sync_sources(args: SyncSourcesArgs) -> Result<()> {
 }
 
 async fn sync_tiling_command(args: SyncTilingArgs) -> Result<()> {
-    let outcomes = sync_tiling(&args.database_url)
+    let outcomes = sync_tiling(&args.database_url, args.parallelism)
         .await
         .context("failed to sync GTFS tiling")?;
 
@@ -161,6 +175,7 @@ async fn export_tiling_command(args: ExportTilingArgs) -> Result<()> {
         &args.database_url,
         args.source_slug.as_deref(),
         &args.output_file,
+        args.parallelism,
     )
     .await
     .context("failed to export GTFS tiling")?;

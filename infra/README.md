@@ -41,8 +41,8 @@ dynamic routing files live under `services/`.
 | Service/job | Purpose | Inputs                                                                     | Output                                                                                       |
 | --- | --- |----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
 | `gtfs_ingest_seed_sources` | One-shot GTFS feed-source seed job. It upserts configured sources into `postgres_gtfs`. | `config/gtfs_feed_sources_seed.yaml` | Populates `gtfs_meta.feed_sources` in `postgres_gtfs`. |
-| `gtfs_ingest_sync_sources` | One-shot GTFS source sync job. It downloads changed feed sources, uploads the ZIP artifact to Garage, imports the feed into `postgres_gtfs`, and promotes the newest imported version. | `gtfs_meta.feed_sources`; direct download URLs; `gtfs_artifact_store` | Populates `gtfs_meta.feed_versions` and `gtfs.*` schedule tables; stores immutable feed ZIPs under `s3://$GTFS_ARTIFACT_S3_BUCKET/feed-sources/...`. |
-| `gtfs_ingest_sync_tiling` | One-shot GTFS tiling sync job. It refreshes persisted stop geometries for any source whose active version is not the currently tiled version. | `gtfs_meta.feed_sources.active_version_id`; `gtfs.stops` | Populates `gtfs_tiling.source_tilings` and `gtfs_tiling.stop_points`. |
+| `gtfs_ingest_sync_sources` | One-shot GTFS source sync job. It downloads changed feed sources, uploads the ZIP artifact to Garage, imports the feed into `postgres_gtfs`, and promotes the newest imported version. Sources run in parallel, bounded by the `sync-sources --parallelism` CLI option. | `gtfs_meta.feed_sources`; direct download URLs; `gtfs_artifact_store` | Populates `gtfs_meta.feed_versions` and `gtfs.*` schedule tables; stores immutable feed ZIPs under `s3://$GTFS_ARTIFACT_S3_BUCKET/feed-sources/...`. |
+| `gtfs_ingest_sync_tiling` | One-shot GTFS tiling sync job. It refreshes persisted stop geometries for any source whose active version is not the currently tiled version. Sources run in parallel, bounded by the `sync-tiling --parallelism` CLI option. | `gtfs_meta.feed_sources.active_version_id`; `gtfs.stops` | Populates `gtfs_tiling.source_tilings` and `gtfs_tiling.stop_points`. |
 | `gtfs_ingest_export_tiling` | One-shot GTFS PMTiles export job. It computes z14 MVT stop tiles from persisted tiling geometries and writes them to the static tile directory. | `gtfs_tiling.stop_points`; `${GTFS_PMTILES_DIR}` | Writes `${GTFS_PMTILES_DIR}/tiles.pmtiles`, served as `/gtfs/tiles.pmtiles`. |
 | `postgres_osm_importer` | One-shot OSM import job. It runs `osm2pgsql` in flex mode and loads OSM data into `postgres_osm`. | `jobs/postgres_osm_importer/style.lua`; `https://download.geofabrik.de/europe` | Populates the `unitable` table for `postgres_osm`. |
 
@@ -184,6 +184,9 @@ GTFS_PMTILES_DIR=...
 hard-coded in the GTFS sync job environment as
 `http://gtfs_artifact_store:3900` and `garage`, because those are internal
 Compose service details rather than deployment secrets.
+GTFS job parallelism is controlled by the command-line `--parallelism` option.
+The compiled defaults are `sync-sources --parallelism 4`,
+`sync-tiling --parallelism 2`, and `export-tiling --parallelism 2`.
 
 Variables used by `compose.local.yaml`:
 
@@ -377,8 +380,12 @@ source has no active version, any stale tiling for that source is removed.
 `source_tilings` only records which source version has materialized geometry;
 feature counts are derived when syncing or exporting.
 
-`export-tiling` calculates z14 MVT tile bytes on demand from `stop_points`, then
-writes them into a PMTiles archive. By default it exports all currently tiled
+`export-tiling` first streams z7 parent tile IDs whose bounds intersect any
+materialized stop geometry. Each parent tile then streams its z14 child MVT
+tiles into the PMTiles writer, bounded by the `export-tiling --parallelism`
+CLI option.
+This avoids allocating the full tile list in memory and skips parent chunks that
+cannot produce non-empty child tiles. By default it exports all currently tiled
 sources into one `stops` vector layer; pass `--source-slug` when invoking the
 command manually to export only one feed source.
 

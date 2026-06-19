@@ -94,7 +94,7 @@ async fn copy_gtfs_to_tables(
     for spec in IMPORT_SPECS {
         let copy_body = (spec.build_copy_body)(parsed, version_id)
             .with_context(|| format!("failed to build binary COPY body for {}", spec.name))?;
-        copy_records_to_table(tx, spec, copy_body).await?;
+        copy_records_to_table(tx, spec, version_id, copy_body).await?;
     }
 
     Ok(())
@@ -103,6 +103,7 @@ async fn copy_gtfs_to_tables(
 async fn copy_records_to_table(
     tx: &mut Transaction<'_, Postgres>,
     spec: &ImportSpec,
+    version_id: i64,
     (copy_body, row_count): (Vec<u8>, u64),
 ) -> Result<()> {
     let copy_sql = format!(
@@ -137,6 +138,7 @@ async fn copy_records_to_table(
     }
 
     info!(
+        version_id,
         target_table = spec.target_table,
         rows = copied_rows,
         "copied GTFS rows to durable table"

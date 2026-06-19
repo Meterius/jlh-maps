@@ -6,6 +6,7 @@ use tracing::info;
 
 const MAX_WEB_MERCATOR_LATITUDE: f64 = 85.051_128_78;
 pub const GTFS_TILING_ZOOM: i32 = 14;
+pub const GTFS_TILING_EXPORT_CHUNK_ZOOM: i32 = 7;
 
 // Syncing
 
@@ -73,7 +74,6 @@ pub async fn sync_tiling_for_source(
 
     info!(
         source_slug = %source.source_slug,
-        version_id = active_version_id,
         "synced GTFS stop tiling geometries"
     );
 
@@ -85,6 +85,13 @@ pub async fn sync_tiling_for_source(
 }
 
 #[derive(Debug, Clone, FromRow)]
+pub struct TilingExportTileId {
+    pub z: i32,
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Debug, Clone, FromRow)]
 pub struct TilingExportTile {
     pub z: i32,
     pub x: i32,
@@ -92,18 +99,18 @@ pub struct TilingExportTile {
     pub tile: Vec<u8>,
 }
 
-pub fn stream_tiling_export_tiles<'a>(
+pub fn stream_tile_ids_intersecting_geometry<'a>(
     pool: &'a PgPool,
     source_slug: Option<&'a str>,
-) -> Result<impl Stream<Item = std::result::Result<TilingExportTile, sqlx::Error>> + 'a> {
-    Ok(sqlx::query_as::<_, TilingExportTile>(
+    zoom: i32,
+) -> impl Stream<Item = std::result::Result<TilingExportTileId, sqlx::Error>> + 'a {
+    sqlx::query_as::<_, TilingExportTileId>(
         r#"
         WITH selected_tilings AS (
             SELECT
                 tiling.source_id,
                 tiling.version_id,
-                source.slug AS source_slug,
-                $2::INTEGER AS zoom
+                source.slug AS source_slug
             FROM gtfs_tiling.source_tilings tiling
             JOIN gtfs_meta.feed_sources source
               ON source.id = tiling.source_id
@@ -118,14 +125,13 @@ pub fn stream_tiling_export_tiles<'a>(
         ),
         zoom_inputs AS (
             SELECT
-                zooms.zoom AS z,
-                POWER(2.0, zooms.zoom)::INTEGER AS n,
+                $2::INTEGER AS z,
+                POWER(2.0, $2::INTEGER)::INTEGER AS n,
                 GREATEST(-180.0, LEAST(180.0, ST_XMin(bounds))) AS min_lon,
                 GREATEST(-180.0, LEAST(180.0, ST_XMax(bounds))) AS max_lon,
                 GREATEST($3, LEAST($4, ST_YMin(bounds))) AS min_lat,
                 GREATEST($3, LEAST($4, ST_YMax(bounds))) AS max_lat
             FROM feature_extent
-            CROSS JOIN LATERAL generate_series($2::INTEGER, $2::INTEGER) AS zooms(zoom)
             WHERE bounds IS NOT NULL
         ),
         tile_ranges AS (
@@ -172,6 +178,62 @@ pub fn stream_tiling_export_tiles<'a>(
                     )
                 ) AS y_max
             FROM zoom_inputs
+        ),
+        candidate_tiles AS (
+            SELECT z, x, y
+            FROM tile_ranges
+            CROSS JOIN LATERAL generate_series(x_min, x_max) x
+            CROSS JOIN LATERAL generate_series(y_min, y_max) y
+        )
+        SELECT coord.z, coord.x, coord.y
+        FROM candidate_tiles coord
+        CROSS JOIN LATERAL (
+            SELECT ST_Transform(ST_TileEnvelope(coord.z, coord.x, coord.y), 4326) AS bounds_4326
+        ) tile_bounds
+        WHERE EXISTS (
+            SELECT 1
+            FROM gtfs_tiling.stop_points stop
+            JOIN selected_tilings tiling
+              ON tiling.source_id = stop.source_id
+             AND tiling.version_id = stop.version_id
+            WHERE stop.geom && tile_bounds.bounds_4326
+              AND ST_Intersects(stop.geom, tile_bounds.bounds_4326)
+        )
+        ORDER BY coord.z, coord.x, coord.y
+        "#,
+    )
+    .bind(source_slug)
+    .bind(zoom)
+    .bind(-MAX_WEB_MERCATOR_LATITUDE)
+    .bind(MAX_WEB_MERCATOR_LATITUDE)
+    .fetch(pool)
+}
+
+pub fn stream_export_tiles<'a>(
+    pool: &'a PgPool,
+    source_slug: Option<&'a str>,
+    chunk_tile_id: TilingExportTileId,
+) -> impl Stream<Item = std::result::Result<TilingExportTile, sqlx::Error>> + 'a {
+    sqlx::query_as::<_, TilingExportTile>(
+        r#"
+        WITH selected_tilings AS (
+            SELECT
+                tiling.source_id,
+                tiling.version_id,
+                source.slug AS source_slug
+            FROM gtfs_tiling.source_tilings tiling
+            JOIN gtfs_meta.feed_sources source
+              ON source.id = tiling.source_id
+            WHERE ($1::TEXT IS NULL OR source.slug = $1)
+        ),
+        tile_ranges AS (
+            SELECT
+                $2::INTEGER AS z,
+                ($4::INTEGER * POWER(2.0, $2::INTEGER - $3::INTEGER)::INTEGER) AS x_min,
+                (($4::INTEGER + 1) * POWER(2.0, $2::INTEGER - $3::INTEGER)::INTEGER - 1) AS x_max,
+                ($5::INTEGER * POWER(2.0, $2::INTEGER - $3::INTEGER)::INTEGER) AS y_min,
+                (($5::INTEGER + 1) * POWER(2.0, $2::INTEGER - $3::INTEGER)::INTEGER - 1) AS y_max
+            WHERE $3::INTEGER <= $2::INTEGER
         ),
         tile_coords AS (
             SELECT z, x, y
@@ -228,9 +290,10 @@ pub fn stream_tiling_export_tiles<'a>(
     )
     .bind(source_slug)
     .bind(GTFS_TILING_ZOOM)
-    .bind(-MAX_WEB_MERCATOR_LATITUDE)
-    .bind(MAX_WEB_MERCATOR_LATITUDE)
-    .fetch(pool))
+    .bind(chunk_tile_id.z)
+    .bind(chunk_tile_id.x)
+    .bind(chunk_tile_id.y)
+    .fetch(pool)
 }
 
 #[derive(Debug, FromRow)]
