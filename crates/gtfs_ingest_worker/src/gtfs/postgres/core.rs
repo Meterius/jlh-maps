@@ -101,7 +101,35 @@ async fn fetch_version_info_for_update(
 
 // Mutators
 
-pub async fn upsert_feed_sources_seed(pool: &PgPool, seed: &SeedFile) -> Result<()> {
+pub async fn upsert_feed_sources_seed(
+    pool: &PgPool,
+    seed: &SeedFile,
+    delete_existing: bool,
+) -> Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("failed to start GTFS feed source seed transaction")?;
+
+    if delete_existing {
+        let seed_slugs = seed
+            .sources
+            .iter()
+            .map(|source| source.slug.clone())
+            .collect::<Vec<_>>();
+
+        sqlx::query(
+            r#"
+            DELETE FROM gtfs_meta.feed_sources
+            WHERE NOT (slug = ANY($1::TEXT[]))
+            "#,
+        )
+        .bind(seed_slugs)
+        .execute(&mut *tx)
+        .await
+        .context("failed to delete GTFS feed sources missing from seed")?;
+    }
+
     for source in seed.sources.iter() {
         sqlx::query(
             r#"
@@ -131,10 +159,14 @@ pub async fn upsert_feed_sources_seed(pool: &PgPool, seed: &SeedFile) -> Result<
         .bind(&source.direct_download_url)
         .bind(&source.license_url)
         .bind(&source.attribution)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| format!("failed to upsert GTFS source {}", source.slug))?;
     }
+
+    tx.commit()
+        .await
+        .context("failed to commit GTFS feed source seed transaction")?;
 
     Ok(())
 }

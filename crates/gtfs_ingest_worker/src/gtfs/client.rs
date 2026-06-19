@@ -19,7 +19,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use tracing::info;
+use tracing::{error, info};
 
 /// Runtime dependencies for the GTFS ingestion client.
 #[derive(Debug, Clone)]
@@ -71,6 +71,38 @@ pub struct SyncSourceOutcome {
     pub imported: Option<ImportFeedVersionOutcome>,
     pub promoted: Option<PromoteFeedVersionOutcome>,
 }
+
+#[derive(Debug, Clone)]
+pub struct SyncFailure {
+    pub source_slug: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SyncCommandOutcome<T> {
+    pub succeeded: Vec<T>,
+    pub failed: Vec<SyncFailure>,
+}
+
+impl<T> SyncCommandOutcome<T> {
+    pub fn has_failures(&self) -> bool {
+        !self.failed.is_empty()
+    }
+
+    pub fn total_count(&self) -> usize {
+        self.succeeded.len() + self.failed.len()
+    }
+}
+
+pub type SyncSourcesOutcome = SyncCommandOutcome<SyncSourceOutcome>;
+
+#[derive(Debug, Clone)]
+pub struct SyncTilingSourceResult {
+    pub source_slug: String,
+    pub outcome: SyncTilingSourceOutcome,
+}
+
+pub type SyncTilingOutcome = SyncCommandOutcome<SyncTilingSourceResult>;
 
 #[derive(Debug, Clone)]
 pub struct ExportTilingOutcome {
@@ -333,7 +365,7 @@ impl GtfsIngestClient {
     }
 
     /// Runs sync for every configured feed source.
-    pub async fn sync_sources(&self, parallelism: usize) -> Result<Vec<SyncSourceOutcome>> {
+    pub async fn sync_sources(&self, parallelism: usize) -> Result<SyncSourcesOutcome> {
         let parallelism = parallelism.max(1);
 
         let source_slugs = postgres::list_feed_source_slugs(&self.pool).await?;
@@ -343,39 +375,54 @@ impl GtfsIngestClient {
             parallelism, "syncing GTFS feed sources"
         );
 
-        stream::iter(source_slugs)
+        let results = stream::iter(source_slugs)
             .map(|source_slug| async move {
                 info!(
                     source_slug = %source_slug,
                     "syncing GTFS feed source"
                 );
-                let outcome = self.sync_source(&source_slug).await?;
-                info!(
-                    source_slug = %source_slug,
-                    ?outcome,
-                    "completed GTFS feed source sync"
-                );
-                Ok(outcome)
+                match self.sync_source(&source_slug).await {
+                    Ok(outcome) => {
+                        info!(
+                            source_slug = %source_slug,
+                            ?outcome,
+                            "completed GTFS feed source sync"
+                        );
+                        Ok(outcome)
+                    }
+                    Err(error) => {
+                        let error = format!("{error:#}");
+                        error!(
+                            source_slug = %source_slug,
+                            error = %error,
+                            "failed GTFS feed source sync"
+                        );
+                        Err(SyncFailure { source_slug, error })
+                    }
+                }
             })
             .buffer_unordered(parallelism)
-            .try_collect()
-            .await
+            .collect::<Vec<_>>()
+            .await;
+
+        Ok(partition_sync_results(results))
     }
 }
 
 /// Upserts feed sources from a seed file model.
-pub async fn upsert_feed_sources_seed(database_url: &str, seed: &SeedFile) -> Result<()> {
+pub async fn upsert_feed_sources_seed(
+    database_url: &str,
+    seed: &SeedFile,
+    delete_existing: bool,
+) -> Result<()> {
     let pool = PgPool::connect(database_url)
         .await
         .context("failed to connect to GTFS Postgres database")?;
 
-    postgres::upsert_feed_sources_seed(&pool, seed).await
+    postgres::upsert_feed_sources_seed(&pool, seed, delete_existing).await
 }
 
-pub async fn sync_tiling(
-    database_url: &str,
-    parallelism: usize,
-) -> Result<Vec<SyncTilingSourceOutcome>> {
+pub async fn sync_tiling(database_url: &str, parallelism: usize) -> Result<SyncTilingOutcome> {
     let parallelism = parallelism.max(1);
 
     let pool = PgPool::connect(database_url)
@@ -389,7 +436,7 @@ pub async fn sync_tiling(
         parallelism, "syncing GTFS tiling sources"
     );
 
-    stream::iter(source_slugs)
+    let results = stream::iter(source_slugs)
         .map(|source_slug| {
             let pool = &pool;
             async move {
@@ -397,18 +444,35 @@ pub async fn sync_tiling(
                     source_slug = %source_slug,
                     "syncing GTFS tiling for feed source"
                 );
-                let outcome = postgres::sync_tiling_for_source(pool, &source_slug).await?;
-                info!(
-                    source_slug = %source_slug,
-                    ?outcome,
-                    "completed GTFS tiling source sync"
-                );
-                Ok(outcome)
+                match postgres::sync_tiling_for_source(pool, &source_slug).await {
+                    Ok(outcome) => {
+                        info!(
+                            source_slug = %source_slug,
+                            ?outcome,
+                            "completed GTFS tiling source sync"
+                        );
+                        Ok(SyncTilingSourceResult {
+                            source_slug,
+                            outcome,
+                        })
+                    }
+                    Err(error) => {
+                        let error = format!("{error:#}");
+                        error!(
+                            source_slug = %source_slug,
+                            error = %error,
+                            "failed GTFS tiling source sync"
+                        );
+                        Err(SyncFailure { source_slug, error })
+                    }
+                }
             }
         })
         .buffer_unordered(parallelism)
-        .try_collect()
-        .await
+        .collect::<Vec<_>>()
+        .await;
+
+    Ok(partition_sync_results(results))
 }
 
 pub async fn export_tiling(
@@ -442,6 +506,22 @@ fn imported_version(outcome: &ImportFeedVersionOutcome) -> &FeedVersion {
         ImportFeedVersionOutcome::AlreadyStable { version } => version,
         ImportFeedVersionOutcome::Imported { version } => version,
     }
+}
+
+fn partition_sync_results<T>(
+    results: Vec<std::result::Result<T, SyncFailure>>,
+) -> SyncCommandOutcome<T> {
+    let mut succeeded = Vec::new();
+    let mut failed = Vec::new();
+
+    for result in results {
+        match result {
+            Ok(outcome) => succeeded.push(outcome),
+            Err(failure) => failed.push(failure),
+        }
+    }
+
+    SyncCommandOutcome { succeeded, failed }
 }
 
 async fn download_feed(download_url: &str) -> Result<Vec<u8>> {

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use gtfs_ingest_worker::gtfs::{
     ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig, export_tiling, sync_tiling,
@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
-const DEFAULT_SYNC_SOURCES_PARALLELISM: usize = 4;
-const DEFAULT_SYNC_TILING_PARALLELISM: usize = 2;
-const DEFAULT_EXPORT_TILING_PARALLELISM: usize = 2;
+const DEFAULT_SYNC_SOURCES_PARALLELISM: usize = 8;
+const DEFAULT_SYNC_TILING_PARALLELISM: usize = 8;
+const DEFAULT_EXPORT_TILING_PARALLELISM: usize = 16;
 
 #[derive(Debug, Parser)]
 #[command(name = "gtfs_ingest")]
@@ -36,6 +36,9 @@ pub struct SeedSourcesArgs {
 
     #[arg(long)]
     pub seed_file: PathBuf,
+
+    #[arg(long, default_value_t = false)]
+    pub delete_existing: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -125,7 +128,7 @@ async fn seed_sources(args: SeedSourcesArgs) -> Result<()> {
     )
     .with_context(|| format!("failed to parse seed file {}", args.seed_file.display()))?;
 
-    upsert_feed_sources_seed(&args.database_url, &seed)
+    upsert_feed_sources_seed(&args.database_url, &seed, args.delete_existing)
         .await
         .with_context(|| {
             format!(
@@ -144,29 +147,51 @@ async fn seed_sources(args: SeedSourcesArgs) -> Result<()> {
 
 async fn sync_sources(args: SyncSourcesArgs) -> Result<()> {
     let client = connect_client(args.client).await?;
-    let outcomes = client
+    let outcome = client
         .sync_sources(args.parallelism)
         .await
         .context("failed to sync GTFS sources")?;
 
     info!(
-        source_count = outcomes.len(),
-        ?outcomes,
+        source_count = outcome.total_count(),
+        succeeded_count = outcome.succeeded.len(),
+        failed_count = outcome.failed.len(),
+        failures = ?outcome.failed,
         "completed GTFS sync-sources command"
     );
+
+    if outcome.has_failures() {
+        bail!(
+            "GTFS sync-sources failed for {} of {} sources",
+            outcome.failed.len(),
+            outcome.total_count()
+        );
+    }
+
     Ok(())
 }
 
 async fn sync_tiling_command(args: SyncTilingArgs) -> Result<()> {
-    let outcomes = sync_tiling(&args.database_url, args.parallelism)
+    let outcome = sync_tiling(&args.database_url, args.parallelism)
         .await
         .context("failed to sync GTFS tiling")?;
 
     info!(
-        source_count = outcomes.len(),
-        ?outcomes,
+        source_count = outcome.total_count(),
+        succeeded_count = outcome.succeeded.len(),
+        failed_count = outcome.failed.len(),
+        failures = ?outcome.failed,
         "completed GTFS sync-tiling command"
     );
+
+    if outcome.has_failures() {
+        bail!(
+            "GTFS sync-tiling failed for {} of {} sources",
+            outcome.failed.len(),
+            outcome.total_count()
+        );
+    }
+
     Ok(())
 }
 

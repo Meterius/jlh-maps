@@ -40,7 +40,7 @@ dynamic routing files live under `services/`.
 
 | Service/job | Purpose | Inputs                                                                     | Output                                                                                       |
 | --- | --- |----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| `gtfs_ingest_seed_sources` | One-shot GTFS feed-source seed job. It upserts configured sources into `postgres_gtfs`. | `config/gtfs_feed_sources_seed.yaml` | Populates `gtfs_meta.feed_sources` in `postgres_gtfs`. |
+| `gtfs_ingest_seed_sources` | One-shot GTFS feed-source seed job. It upserts configured sources into `postgres_gtfs`. With `seed-sources --delete-existing`, it also removes database sources missing from the seed file. | `config/gtfs_feed_sources_seed.yaml` | Populates `gtfs_meta.feed_sources` in `postgres_gtfs`. |
 | `gtfs_ingest_sync_sources` | One-shot GTFS source sync job. It downloads changed feed sources, uploads the ZIP artifact to Garage, imports the feed into `postgres_gtfs`, and promotes the newest imported version. Sources run in parallel, bounded by the `sync-sources --parallelism` CLI option. | `gtfs_meta.feed_sources`; direct download URLs; `gtfs_artifact_store` | Populates `gtfs_meta.feed_versions` and `gtfs.*` schedule tables; stores immutable feed ZIPs under `s3://$GTFS_ARTIFACT_S3_BUCKET/feed-sources/...`. |
 | `gtfs_ingest_sync_tiling` | One-shot GTFS tiling sync job. It refreshes persisted stop geometries for any source whose active version is not the currently tiled version. Sources run in parallel, bounded by the `sync-tiling --parallelism` CLI option. | `gtfs_meta.feed_sources.active_version_id`; `gtfs.stops` | Populates `gtfs_tiling.source_tilings` and `gtfs_tiling.stop_points`. |
 | `gtfs_ingest_export_tiling` | One-shot GTFS PMTiles export job. It computes z14 MVT stop tiles from persisted tiling geometries and writes them to the static tile directory. | `gtfs_tiling.stop_points`; `${GTFS_PMTILES_DIR}` | Writes `${GTFS_PMTILES_DIR}/tiles.pmtiles`, served as `/gtfs/tiles.pmtiles`. |
@@ -59,11 +59,22 @@ Seed GTFS feed sources after starting or creating the base database service:
 just run-job local gtfs_ingest_seed_sources
 ```
 
+To use the seed as the authoritative database source list, override the seed job
+command with `--delete-existing`:
+
+```powershell
+just exec local -f compose.jobs.yaml run --rm gtfs_ingest_seed_sources seed-sources --seed-file /config/feed_sources_seed.yaml --delete-existing
+```
+
 Run the GTFS source sync after seeding sources:
 
 ```powershell
 just run-job local gtfs_ingest_sync_sources
 ```
+
+`sync-sources` isolates failures per source/version. A failed source does not
+stop other sources from syncing, but the command exits with failure after all
+queued sources have completed if any source failed.
 
 Regenerate GTFS tiling geometries after a source sync promotes a new active
 version:
@@ -71,6 +82,9 @@ version:
 ```powershell
 just run-job local gtfs_ingest_sync_tiling
 ```
+
+`sync-tiling` follows the same per-source isolation pattern: it attempts every
+source, reports failed sources, and exits with failure if any source failed.
 
 Export GTFS stop tiles to the static PMTiles directory:
 
