@@ -167,8 +167,10 @@ fn tiling_metadata(source_slug: Option<&str>) -> Result<String> {
                 "fields": {
                     "source_slug": "String",
                     "stop_id": "String",
+                    "parent_station_id": "String",
                     "stop_code": "String",
                     "stop_name": "String",
+                    "stop_desc": "String",
                     "location_type": "Number",
                     "wheelchair_boarding": "Number",
                     "platform_code": "String"

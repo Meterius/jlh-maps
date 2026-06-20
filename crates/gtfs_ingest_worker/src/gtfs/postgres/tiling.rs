@@ -5,7 +5,7 @@ use sqlx::{FromRow, PgPool, Postgres, Transaction};
 use tracing::info;
 
 const MAX_WEB_MERCATOR_LATITUDE: f64 = 85.051_128_78;
-pub const GTFS_TILING_ZOOM: i32 = 14;
+pub const GTFS_TILING_ZOOM: i32 = 13;
 pub const GTFS_TILING_EXPORT_CHUNK_ZOOM: i32 = 7;
 
 // Syncing
@@ -251,25 +251,30 @@ pub fn stream_export_tiles<'a>(
                     FROM (
                         SELECT
                             ST_AsMVTGeom(
-                                ST_Transform(stop.geom, 3857),
+                                ST_Transform(stop_point.geom, 3857),
                                 tile_bounds.bounds_3857,
                                 4096,
                                 64,
                                 TRUE
                             ) AS geom,
                             tiling.source_slug,
-                            stop.stop_id,
+                            stop_point.stop_id,
                             stop.stop_code,
                             stop.stop_name,
+                            stop.stop_desc,
+                            stop.parent_station as parent_station_id,
                             stop.location_type,
                             stop.wheelchair_boarding,
                             stop.platform_code
-                        FROM gtfs_tiling.stop_points stop
+                        FROM gtfs_tiling.stop_points stop_point
+                        JOIN gtfs.stops stop
+                          ON stop.stop_id = stop_point.stop_id
+                         AND stop.version_id = stop_point.version_id
                         JOIN selected_tilings tiling
-                          ON tiling.source_id = stop.source_id
-                         AND tiling.version_id = stop.version_id
-                        WHERE stop.geom && tile_bounds.bounds_4326
-                          AND ST_Intersects(stop.geom, tile_bounds.bounds_4326)
+                          ON tiling.source_id = stop_point.source_id
+                         AND tiling.version_id = stop_point.version_id
+                        WHERE stop_point.geom && tile_bounds.bounds_4326
+                          AND ST_Intersects(stop_point.geom, tile_bounds.bounds_4326)
                     ) stop_feature
                 ), ''::BYTEA) AS tile
             FROM tile_coords coord
@@ -395,24 +400,12 @@ async fn import_source_tiling_stop_points(
             source_id,
             version_id,
             stop_id,
-            stop_code,
-            stop_name,
-            stop_desc,
-            location_type,
-            wheelchair_boarding,
-            platform_code,
             geom
         )
         SELECT
             $1,
             $2,
             stop_id,
-            stop_code,
-            stop_name,
-            stop_desc,
-            location_type,
-            wheelchair_boarding,
-            platform_code,
             ST_SetSRID(ST_MakePoint(stop_lon, stop_lat), 4326)
         FROM gtfs.stops
         WHERE version_id = $2

@@ -202,12 +202,6 @@ CREATE TABLE gtfs_tiling.stop_points
     source_id             BIGINT NOT NULL,
     version_id            BIGINT NOT NULL,
     stop_id               TEXT   NOT NULL,
-    stop_code             TEXT,
-    stop_name             TEXT,
-    stop_desc             TEXT,
-    location_type         INTEGER,
-    wheelchair_boarding   INTEGER,
-    platform_code         TEXT,
     geom                  geometry(Point, 4326) NOT NULL,
 
     PRIMARY KEY (source_id, version_id, stop_id),
