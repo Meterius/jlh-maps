@@ -50,12 +50,16 @@ services:
 
     command:
       - sync-sources
+      - --parallelism
+      - "32"
 
   gtfs_ingest_sync_tiling:
     <<: *gtfs_ingest_worker
 
     command:
       - sync-tiling
+      - --parallelism
+      - "32"
 
   gtfs_ingest_export_tiling:
     <<: *gtfs_ingest_worker
@@ -67,6 +71,8 @@ services:
       - export-tiling
       - --output-file
       - /pmtiles/tiles.pmtiles
+      - --parallelism
+      - "32"
 
   postgres_osm_importer:
     image: iboates/osm2pgsql:latest
