@@ -7,26 +7,38 @@ x-gtfs-ingest-client-environment: &gtfs_ingest_client_environment
   GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY: ${GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY:?GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY is required}
   RUST_LOG: info
 
+x-gtfs-ingest-worker: &gtfs_ingest_worker
+  image: jlh_maps/gtfs_ingest_worker
+
+  build:
+    context: ../
+    dockerfile: infra/jobs/gtfs_ingest_worker/Dockerfile
+
+  init: true
+
+  environment:
+    <<: *gtfs_ingest_client_environment
+
+  depends_on:
+    postgres_gtfs:
+      condition: service_healthy
+    gtfs_artifact_store:
+      condition: service_healthy
+
+  networks:
+    - postgres_gtfs_private
+    - gtfs_artifact_private
+    - traefik_public
+
 services:
+  gtfs_ingest:
+    <<: *gtfs_ingest_worker
+
   gtfs_ingest_seed_sources:
-    build:
-      context: ../
-      dockerfile: infra/jobs/gtfs_ingest_worker/Dockerfile
-
-    init: true
-
-    environment:
-      <<: *gtfs_ingest_client_environment
+    <<: *gtfs_ingest_worker
 
     volumes:
       - ./config/gtfs_feed_sources_seed.yaml:/config/feed_sources_seed.yaml:ro
-
-    depends_on:
-      postgres_gtfs:
-        condition: service_healthy
-
-    networks:
-      - postgres_gtfs_private
 
     command:
       - seed-sources
@@ -34,68 +46,22 @@ services:
       - /config/feed_sources_seed.yaml
 
   gtfs_ingest_sync_sources:
-    build:
-      context: ../
-      dockerfile: infra/jobs/gtfs_ingest_worker/Dockerfile
-
-    init: true
-
-    environment:
-      <<: *gtfs_ingest_client_environment
-
-    depends_on:
-      postgres_gtfs:
-        condition: service_healthy
-      gtfs_artifact_store:
-        condition: service_healthy
-
-    networks:
-      - postgres_gtfs_private
-      - gtfs_artifact_private
-      - traefik_public
+    <<: *gtfs_ingest_worker
 
     command:
       - sync-sources
 
   gtfs_ingest_sync_tiling:
-    build:
-      context: ../
-      dockerfile: infra/jobs/gtfs_ingest_worker/Dockerfile
-
-    init: true
-
-    environment:
-      <<: *gtfs_ingest_client_environment
-
-    depends_on:
-      postgres_gtfs:
-        condition: service_healthy
-
-    networks:
-      - postgres_gtfs_private
+    <<: *gtfs_ingest_worker
 
     command:
       - sync-tiling
 
   gtfs_ingest_export_tiling:
-    build:
-      context: ../
-      dockerfile: infra/jobs/gtfs_ingest_worker/Dockerfile
-
-    init: true
-
-    environment:
-      <<: *gtfs_ingest_client_environment
+    <<: *gtfs_ingest_worker
 
     volumes:
       - ${GTFS_PMTILES_DIR:?GTFS_PMTILES_DIR is required}:/pmtiles
-
-    depends_on:
-      postgres_gtfs:
-        condition: service_healthy
-
-    networks:
-      - postgres_gtfs_private
 
     command:
       - export-tiling

@@ -40,6 +40,7 @@ dynamic routing files live under `services/`.
 
 | Service/job | Purpose | Inputs                                                                     | Output                                                                                       |
 | --- | --- |----------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| `gtfs_ingest` | Raw GTFS ingest CLI access. Use this service when running custom `gtfs_ingest` commands through Compose. | Command arguments supplied via `docker compose run` / `just exec` | Depends on the invoked command. |
 | `gtfs_ingest_seed_sources` | One-shot GTFS feed-source seed job. It upserts configured sources into `postgres_gtfs`. With `seed-sources --delete-existing`, it also removes database sources missing from the seed file. | `config/gtfs_feed_sources_seed.yaml` | Populates `gtfs_meta.feed_sources` in `postgres_gtfs`. |
 | `gtfs_ingest_sync_sources` | One-shot GTFS source sync job. It downloads changed feed sources, uploads the ZIP artifact to Garage, imports the feed into `postgres_gtfs`, and promotes the newest imported version. Sources run in parallel, bounded by the `sync-sources --parallelism` CLI option. | `gtfs_meta.feed_sources`; direct download URLs; `gtfs_artifact_store` | Populates `gtfs_meta.feed_versions` and `gtfs.*` schedule tables; stores immutable feed ZIPs under `s3://$GTFS_ARTIFACT_S3_BUCKET/feed-sources/...`. |
 | `gtfs_ingest_sync_tiling` | One-shot GTFS tiling sync job. It refreshes persisted stop geometries for any source whose active version is not the currently tiled version. Sources run in parallel, bounded by the `sync-tiling --parallelism` CLI option. | `gtfs_meta.feed_sources.active_version_id`; `gtfs.stops` | Populates `gtfs_tiling.source_tilings` and `gtfs_tiling.stop_points`. |
@@ -63,7 +64,7 @@ To use the seed as the authoritative database source list, override the seed job
 command with `--delete-existing`:
 
 ```powershell
-just exec local -f compose.jobs.yaml run --rm gtfs_ingest_seed_sources seed-sources --seed-file /config/feed_sources_seed.yaml --delete-existing
+just run-job-command local gtfs_ingest_seed_sources seed-sources --seed-file /config/feed_sources_seed.yaml --delete-existing
 ```
 
 Run the GTFS source sync after seeding sources:
@@ -98,6 +99,7 @@ through Compose while keeping the target's env files and overlay stack, use
 
 ```powershell
 just exec local -f compose.jobs.yaml run --rm gtfs_ingest_sync_sources sync-sources
+just run-job-command local gtfs_ingest sync-sources --parallelism 16
 ```
 
 `run-job` takes the same target names as `run`, so `local` includes
@@ -107,11 +109,13 @@ used to start the stack so job dependencies, env files, and overlay services
 match the active Compose shape.
 
 `run` and `run-job` both accept optional arguments for their underlying Docker
-Compose subcommand:
+Compose subcommand. `run-job-command` instead passes arguments after the service
+name, so they are received by the job container command:
 
 ```powershell
 just run prod-mono -d --build
 just run-job local gtfs_ingest_seed_sources --no-deps
+just run-job-command local gtfs_ingest sync-sources --parallelism 16
 ```
 
 For arbitrary Docker Compose commands with the target's env files and Compose

@@ -11,6 +11,7 @@ path = "src/bin/gtfs_ingest.rs"
 anyhow = "1.0.102"
 chrono = "0.4.42"
 clap = { version = "4.6.1", features = ["derive", "env"] }
+csv = "1.3.1"
 futures-util = "0.3.31"
 gtfs-structures = { version = "0.48.0", default-features = false }
 pmtiles = { version = "0.23.0", default-features = false, features = ["write"] }

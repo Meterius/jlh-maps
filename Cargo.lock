@@ -4359,6 +4359,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "csv",
  "futures-util",
  "gtfs-structures",
  "pmtiles",

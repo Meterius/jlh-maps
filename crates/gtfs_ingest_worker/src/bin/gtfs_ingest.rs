@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use gtfs_ingest_worker::gtfs::client::{ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig};
+use gtfs_ingest_worker::gtfs_seeders::{
+    MobilityDatabaseFeedFilters, TransitlandFeedFilters, discover_seed_file,
+};
 use gtfs_ingest_worker::model::SeedFile;
 use std::path::{Path, PathBuf};
 use tracing::info;
@@ -9,6 +12,13 @@ use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 const DEFAULT_SYNC_SOURCES_PARALLELISM: usize = 8;
 const DEFAULT_SYNC_TILING_PARALLELISM: usize = 8;
 const DEFAULT_EXPORT_TILING_PARALLELISM: usize = 16;
+const EUROPE_BBOX: &str = "-31.5,34.0,69.1,72.0";
+const EUROPE_COUNTRY_CODES: &[&str] = &[
+    "AD", "AL", "AT", "BA", "BE", "BG", "BY", "CH", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FO",
+    "FR", "GB", "GG", "GI", "GR", "HR", "HU", "IE", "IM", "IS", "IT", "JE", "LI", "LT", "LU", "LV",
+    "MC", "MD", "ME", "MK", "MT", "NL", "NO", "PL", "PT", "RO", "RS", "SE", "SI", "SK", "SM", "TR",
+    "UA", "VA", "XK",
+];
 
 #[derive(Debug, Parser)]
 #[command(name = "gtfs_ingest")]
@@ -20,10 +30,20 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Discover(DiscoverArgs),
     SeedSources(SeedSourcesArgs),
     SyncSources(SyncSourcesArgs),
     SyncTiling(SyncTilingArgs),
     ExportTiling(ExportTilingArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct DiscoverArgs {
+    #[arg(long)]
+    pub seed_file: PathBuf,
+
+    #[arg(long, env = "TRANSITLAND_API_KEY")]
+    pub transitland_api_key: Option<String>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -105,11 +125,67 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Discover(args) => discover(args).await,
         Command::SeedSources(args) => seed_sources(args).await,
         Command::SyncSources(args) => sync_sources(args).await,
         Command::SyncTiling(args) => sync_tiling_command(args).await,
         Command::ExportTiling(args) => export_tiling_command(args).await,
     }
+}
+
+async fn discover(args: DiscoverArgs) -> Result<()> {
+    info!(
+        seed_file = %args.seed_file.display(),
+        "Discovering GTFS feed sources"
+    );
+
+    let client = reqwest::Client::new();
+    let transitland_filters = args.transitland_api_key.map(transitland_discovery_filters);
+    let seed = discover_seed_file(
+        &client,
+        transitland_filters.as_ref(),
+        &mobility_database_discovery_filters(),
+    )
+    .await?;
+
+    if let Some(parent) = args.seed_file.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create GTFS seed output directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let temp_file = temp_output_path(&args.seed_file)?;
+    let file = std::fs::File::create(&temp_file).with_context(|| {
+        format!(
+            "failed to create temporary GTFS seed file {}",
+            temp_file.display()
+        )
+    })?;
+
+    if let Err(error) = serde_yaml::to_writer(file, &seed) {
+        let _ = std::fs::remove_file(&temp_file);
+        return Err(error).with_context(|| {
+            format!(
+                "failed to write discovered GTFS seed file {}",
+                temp_file.display()
+            )
+        });
+    }
+
+    replace_file(&temp_file, &args.seed_file)?;
+
+    info!(
+        seed_file = %args.seed_file.display(),
+        source_count = seed.sources.len(),
+        "Updated GTFS feed source seed file"
+    );
+
+    Ok(())
 }
 
 async fn seed_sources(args: SeedSourcesArgs) -> Result<()> {
@@ -269,6 +345,34 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .init();
+}
+
+fn transitland_discovery_filters(api_key: String) -> TransitlandFeedFilters {
+    TransitlandFeedFilters {
+        api_key,
+        bbox: Some(EUROPE_BBOX.to_owned()),
+        limit: 500,
+        max_pages: None,
+        fetch_error: Some(false),
+        license_redistribution_allowed: Some("exclude_no".to_owned()),
+        license_commercial_use_allowed: Some("exclude_no".to_owned()),
+        require_static_current_url: true,
+        require_no_authorization: true,
+    }
+}
+
+fn mobility_database_discovery_filters() -> MobilityDatabaseFeedFilters {
+    MobilityDatabaseFeedFilters {
+        catalog_url: "https://files.mobilitydatabase.org/feeds_v2.csv".to_owned(),
+        country_codes: EUROPE_COUNTRY_CODES
+            .iter()
+            .map(|country_code| country_code.to_string())
+            .collect(),
+        statuses: vec!["active".to_owned()],
+        require_official: true,
+        require_no_authentication: true,
+        require_download_url: true,
+    }
 }
 
 fn temp_output_path(output_file: &Path) -> Result<PathBuf> {

@@ -4,6 +4,9 @@ run target *up_args:
 run-job target job_name *run_args:
     @just _exec-{{target}} -f compose.jobs.yaml run --rm {{run_args}} {{job_name}}
 
+run-job-command target job_name +command_args:
+    @just _exec-{{target}} -f compose.jobs.yaml run --rm {{job_name}} {{command_args}}
+
 exec target +compose_args:
     @just _exec-{{target}} {{compose_args}}
 

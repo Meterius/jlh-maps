@@ -11,6 +11,7 @@ use anyhow::{Result, bail};
 use futures_util::StreamExt;
 use futures_util::stream;
 use std::sync::Arc;
+use tokio::sync::Semaphore;
 use tracing::{error, info};
 
 #[derive(Debug, Clone)]
