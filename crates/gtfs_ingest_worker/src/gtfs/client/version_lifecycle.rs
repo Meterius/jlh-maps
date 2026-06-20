@@ -270,7 +270,7 @@ async fn download_feed(
     client: &reqwest::Client,
     download_url: &str,
     active_download_cache: Option<&postgres::FeedVersionDownloadInfo>,
-) -> anyhow::Result<DownloadFeedOutcome> {
+) -> Result<DownloadFeedOutcome> {
     let mut request = client.get(download_url).header(
         USER_AGENT,
         concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")),

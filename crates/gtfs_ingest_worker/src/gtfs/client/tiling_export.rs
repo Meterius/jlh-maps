@@ -24,7 +24,7 @@ impl GtfsIngestClient {
         source_slug: Option<&str>,
         writer: W,
         parallelism: usize,
-    ) -> anyhow::Result<ExportTilingOutcome>
+    ) -> Result<ExportTilingOutcome>
     where
         W: Write + Seek,
     {
@@ -155,7 +155,7 @@ fn chunk_progress_index(tile_id: &postgres::TilingExportTileId) -> (usize, usize
     (chunk_index, total_chunks)
 }
 
-fn tiling_metadata(source_slug: Option<&str>) -> anyhow::Result<String> {
+fn tiling_metadata(source_slug: Option<&str>) -> Result<String> {
     Ok(json!({
         "name": "gtfs",
         "description": "GTFS schedule stop vector tiles",
@@ -179,12 +179,12 @@ fn tiling_metadata(source_slug: Option<&str>) -> anyhow::Result<String> {
     .to_string())
 }
 
-fn to_zoom_u8(zoom: i32) -> anyhow::Result<u8> {
+fn to_zoom_u8(zoom: i32) -> Result<u8> {
     zoom.try_into()
         .with_context(|| format!("invalid PMTiles zoom {}", zoom))
 }
 
-fn to_tile_u32(value: i32) -> anyhow::Result<u32> {
+fn to_tile_u32(value: i32) -> Result<u32> {
     value
         .try_into()
         .with_context(|| format!("invalid PMTiles tile coordinate {}", value))
