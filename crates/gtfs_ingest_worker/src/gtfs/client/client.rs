@@ -3,6 +3,7 @@ use crate::gtfs::artifact_store::{
 };
 use anyhow::{Context, Result};
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 
 /// Runtime dependencies for the GTFS ingestion client.
 #[derive(Debug, Clone)]
@@ -23,7 +24,9 @@ pub struct GtfsIngestClient {
 
 impl GtfsIngestClient {
     pub async fn connect(config: GtfsIngestConfig) -> Result<Self> {
-        let pool = PgPool::connect(&config.database_url)
+        let pool = PgPoolOptions::new()
+            .max_connections(32)
+            .connect(&config.database_url)
             .await
             .context("failed to connect to GTFS Postgres database")?;
 
@@ -38,7 +41,10 @@ impl GtfsIngestClient {
         Ok(Self {
             pool,
             artifact_store,
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder()
+                .cookie_store(true)
+                .build()
+                .context("failed to build GTFS HTTP client")?,
         })
     }
 }

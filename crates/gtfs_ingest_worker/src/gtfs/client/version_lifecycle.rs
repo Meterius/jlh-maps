@@ -4,7 +4,8 @@ use crate::gtfs::postgres::{self, PromoteVersionOutcome};
 use anyhow::{Context, Result, bail};
 use reqwest::StatusCode;
 use reqwest::header::{
-    ETAG, HeaderMap, HeaderName, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, USER_AGENT,
+    CONTENT_TYPE, ETAG, HeaderMap, HeaderName, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
+    USER_AGENT,
 };
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
@@ -339,6 +340,8 @@ async fn download_feed(
 
     let headers = response.headers().clone();
 
+    ensure_gtfs_feed_content_type(download_url, response.url().as_str(), &headers)?;
+
     let artifact_file =
         NamedTempFile::new().context("failed to create temporary GTFS feed artifact file")?;
 
@@ -396,6 +399,48 @@ async fn download_feed(
         http_etag: header_to_string(&headers, ETAG),
         http_last_modified: header_to_string(&headers, LAST_MODIFIED),
     }))
+}
+
+fn ensure_gtfs_feed_content_type(
+    download_url: &str,
+    final_url: &str,
+    headers: &HeaderMap,
+) -> Result<()> {
+    let Some(content_type) = headers.get(CONTENT_TYPE) else {
+        return Ok(());
+    };
+
+    let content_type = content_type.to_str().with_context(|| {
+        format!(
+            "GTFS feed {} resolved to {} with an invalid Content-Type header",
+            download_url, final_url
+        )
+    })?;
+
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or(content_type)
+        .trim()
+        .to_ascii_lowercase();
+
+    if matches!(
+        media_type.as_str(),
+        "application/zip"
+            | "application/x-zip"
+            | "application/x-zip-compressed"
+            | "application/octet-stream"
+            | "binary/octet-stream"
+    ) {
+        return Ok(());
+    }
+
+    bail!(
+        "GTFS feed {} resolved to {} with unsupported Content-Type {}; expected a ZIP response",
+        download_url,
+        final_url,
+        content_type
+    );
 }
 
 fn header_to_string(headers: &HeaderMap, header_name: HeaderName) -> Option<String> {

@@ -62,7 +62,7 @@ pub async fn discover_seed_file(
     Ok(merge_seed_sources(
         transitland_sources
             .into_iter()
-            .chain(mobility_database_sources.into_iter()),
+            .chain(mobility_database_sources),
     ))
 }
 

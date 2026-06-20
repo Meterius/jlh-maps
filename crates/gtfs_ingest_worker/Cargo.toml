@@ -15,7 +15,7 @@ csv = "1.3.1"
 futures-util = "0.3.31"
 gtfs-structures = { version = "0.48.0", default-features = false }
 pmtiles = { version = "0.23.0", default-features = false, features = ["write"] }
-reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "cookies"] }
 rgb = "0.8.52"
 rust-s3 = { version = "0.37.2", default-features = false, features = ["tokio-rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }

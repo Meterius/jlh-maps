@@ -12,13 +12,6 @@ use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 const DEFAULT_SYNC_SOURCES_PARALLELISM: usize = 8;
 const DEFAULT_SYNC_TILING_PARALLELISM: usize = 8;
 const DEFAULT_EXPORT_TILING_PARALLELISM: usize = 16;
-const EUROPE_BBOX: &str = "-31.5,34.0,69.1,72.0";
-const EUROPE_COUNTRY_CODES: &[&str] = &[
-    "AD", "AL", "AT", "BA", "BE", "BG", "BY", "CH", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FO",
-    "FR", "GB", "GG", "GI", "GR", "HR", "HU", "IE", "IM", "IS", "IT", "JE", "LI", "LT", "LU", "LV",
-    "MC", "MD", "ME", "MK", "MT", "NL", "NO", "PL", "PT", "RO", "RS", "SE", "SI", "SK", "SM", "TR",
-    "UA", "VA", "XK",
-];
 
 #[derive(Debug, Parser)]
 #[command(name = "gtfs_ingest")]
@@ -350,7 +343,7 @@ fn init_tracing() {
 fn transitland_discovery_filters(api_key: String) -> TransitlandFeedFilters {
     TransitlandFeedFilters {
         api_key,
-        bbox: Some(EUROPE_BBOX.to_owned()),
+        bbox: None,
         limit: 500,
         max_pages: None,
         fetch_error: Some(false),
@@ -364,10 +357,7 @@ fn transitland_discovery_filters(api_key: String) -> TransitlandFeedFilters {
 fn mobility_database_discovery_filters() -> MobilityDatabaseFeedFilters {
     MobilityDatabaseFeedFilters {
         catalog_url: "https://files.mobilitydatabase.org/feeds_v2.csv".to_owned(),
-        country_codes: EUROPE_COUNTRY_CODES
-            .iter()
-            .map(|country_code| country_code.to_string())
-            .collect(),
+        country_codes: Vec::new(),
         statuses: vec!["active".to_owned()],
         require_official: true,
         require_no_authentication: true,
