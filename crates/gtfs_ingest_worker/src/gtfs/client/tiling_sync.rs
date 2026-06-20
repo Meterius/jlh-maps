@@ -1,5 +1,7 @@
 use super::client::GtfsIngestClient;
-use super::progress::{SyncCommandOutcome, SyncFailure, SyncLogCounters, partition_sync_results};
+use super::utils::sync::{
+    SyncCommandOutcome, SyncFailure, SyncLogCounters, partition_sync_results,
+};
 use crate::gtfs::postgres::{self, SyncTilingSourceOutcome};
 use anyhow::Result;
 use futures_util::StreamExt;

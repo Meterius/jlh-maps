@@ -1,5 +1,5 @@
 use super::client::GtfsIngestClient;
-use super::utils;
+use crate::gtfs::client::utils::files::{replace_file, temp_output_path};
 use crate::gtfs::postgres;
 use crate::gtfs::postgres::{GTFS_TILING_EXPORT_CHUNK_ZOOM, GTFS_TILING_ZOOM};
 use anyhow::{Context, Result, bail};
@@ -41,7 +41,7 @@ impl GtfsIngestClient {
             })?;
         }
 
-        let temp_file = utils::temp_output_path(output_file)?;
+        let temp_file = temp_output_path(output_file)?;
         let file = File::create(&temp_file).with_context(|| {
             format!(
                 "failed to create temporary GTFS PMTiles file {}",
@@ -110,7 +110,7 @@ impl GtfsIngestClient {
             }
         }
 
-        utils::replace_file(&temp_file, output_file)?;
+        replace_file(&temp_file, output_file)?;
 
         info!(
             source_slug = %source_slug.unwrap_or("<all>"),
