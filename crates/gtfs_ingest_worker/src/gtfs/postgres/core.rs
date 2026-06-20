@@ -6,6 +6,8 @@ use crate::gtfs::postgres::locking::{lock_feed_source, lock_feed_version};
 use crate::model::SeedFile;
 use anyhow::{Context, Result, bail};
 use sqlx::{PgPool, Postgres, Transaction};
+use std::io::{Read, Seek};
+use zip::ZipArchive;
 
 // Queries
 
@@ -251,11 +253,14 @@ pub async fn update_version_http_download_info(
 /// Imports the feed version archive file into the database, removing any entries for the feed version.
 /// - Performs a no-op if the version is not in `active` or `imported` state
 /// - Errors if the version is not in `downloaded` or `import_failed` state
-pub async fn import_feed_version_from_zip(
+pub async fn import_feed_version_from_zip<R>(
     pool: &PgPool,
     version_id: i64,
-    zip_body: Vec<u8>,
-) -> Result<()> {
+    zip_archive: ZipArchive<R>,
+) -> Result<()>
+where
+    R: Read + Seek,
+{
     let mut tx = pool
         .begin()
         .await
@@ -283,7 +288,7 @@ pub async fn import_feed_version_from_zip(
         ),
     }
 
-    importer::import_feed_version(&mut tx, version_id, zip_body).await?;
+    importer::import_feed_version(&mut tx, version_id, zip_archive).await?;
 
     let _ = sqlx::query(
         r#"

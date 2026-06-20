@@ -1,80 +1,96 @@
+use crate::gtfs::parser;
 use crate::utils::postgres_binary_copy::{BinaryCopyInWriter, BinaryCopyNull};
 use anyhow::{Context, Result, bail};
 use gtfs_structures::{
-    Agency, Availability, Calendar, CalendarDate, DirectionType, Exception, FeedInfo, GtfsReader,
-    LocationType, PickupDropOffType, RawStopTime, RawTrip, Route, RouteType, Shape, Stop,
-    TimepointType,
+    Agency, Availability, Calendar, CalendarDate, DirectionType, Exception, FeedInfo, LocationType,
+    PickupDropOffType, RawStopTime, RawTrip, Route, RouteType, Shape, Stop, TimepointType,
 };
 use sqlx::{PgConnection, Postgres, Transaction};
-use std::io::Cursor;
+use std::collections::HashMap;
+use std::ffi::OsStr;
+use std::io::{Read, Seek};
 use std::ops::DerefMut;
+use std::path::Path;
 use tracing::info;
+use zip::ZipArchive;
 
 /// Parses a GTFS ZIP and replaces rows for the given version inside the caller's transaction.
-pub async fn import_feed_version(
+pub async fn import_feed_version<R>(
     tx: &mut Transaction<'_, Postgres>,
     version_id: i64,
-    zip_body: Vec<u8>,
-) -> Result<()> {
-    let gtfs = GtfsReader::default()
-        .trim_fields(false)
-        .raw()
-        .read_from_reader(Cursor::new(zip_body))
-        .with_context(|| format!("failed to parse GTFS artifact for version {}", version_id))?;
-
-    let parsed = ParsedGtfsFiles::from_raw(gtfs)?;
+    zip_archive: ZipArchive<R>,
+) -> Result<()>
+where
+    R: Read + Seek,
+{
+    let mut gtfs_zip = GtfsZip::new(zip_archive).context("failed to inspect GTFS ZIP")?;
 
     delete_existing_gtfs_rows(tx, version_id).await?;
-    copy_gtfs_to_tables(tx, &parsed, version_id).await?;
+    copy_gtfs_to_tables(tx, &mut gtfs_zip, version_id).await?;
 
     Ok(())
 }
 
 // Parsing
 
-struct ParsedGtfsFiles {
-    agencies: Vec<Agency>,
-    stops: Vec<Stop>,
-    routes: Vec<Route>,
-    trips: Vec<RawTrip>,
-    stop_times: Vec<RawStopTime>,
-    shapes: Vec<Shape>,
-    calendar: Vec<Calendar>,
-    calendar_dates: Vec<CalendarDate>,
-    feed_info: Vec<FeedInfo>,
+#[derive(Debug, Clone)]
+struct GtfsZipMember {
+    index: usize,
 }
 
-impl ParsedGtfsFiles {
-    fn from_raw(gtfs: gtfs_structures::RawGtfs) -> Result<Self> {
-        fn mandatory_file<T>(
-            file_name: &str,
-            result: Result<Vec<T>, gtfs_structures::Error>,
-        ) -> Result<Vec<T>> {
-            result.with_context(|| format!("failed to read required GTFS file {}", file_name))
-        }
+struct GtfsZip<R>
+where
+    R: Read + Seek,
+{
+    archive: ZipArchive<R>,
+    members: HashMap<&'static str, GtfsZipMember>,
+}
 
-        fn optional_file<T>(
-            file_name: &str,
-            result: Option<Result<Vec<T>, gtfs_structures::Error>>,
-        ) -> Result<Vec<T>> {
-            match result {
-                Some(result) => result
-                    .with_context(|| format!("failed to read optional GTFS file {}", file_name)),
-                None => Ok(Vec::new()),
+impl<R> GtfsZip<R>
+where
+    R: Read + Seek,
+{
+    fn new(mut archive: ZipArchive<R>) -> Result<Self> {
+        let mut members = HashMap::new();
+
+        for index in 0..archive.len() {
+            let file = archive
+                .by_index(index)
+                .with_context(|| format!("failed to read GTFS ZIP member metadata at {index}"))?;
+            let Some(file_name) = Path::new(file.name()).file_name() else {
+                continue;
+            };
+
+            for spec in IMPORT_SPECS {
+                if file_name == OsStr::new(spec.file_name) {
+                    members.insert(spec.file_name, GtfsZipMember { index });
+                    break;
+                }
             }
         }
 
-        Ok(Self {
-            agencies: mandatory_file("agency.txt", gtfs.agencies)?,
-            stops: mandatory_file("stops.txt", gtfs.stops)?,
-            routes: mandatory_file("routes.txt", gtfs.routes)?,
-            trips: mandatory_file("trips.txt", gtfs.trips)?,
-            stop_times: mandatory_file("stop_times.txt", gtfs.stop_times)?,
-            shapes: optional_file("shapes.txt", gtfs.shapes)?,
-            calendar: optional_file("calendar.txt", gtfs.calendar)?,
-            calendar_dates: optional_file("calendar_dates.txt", gtfs.calendar_dates)?,
-            feed_info: optional_file("feed_info.txt", gtfs.feed_info)?,
-        })
+        for spec in IMPORT_SPECS.iter().filter(|spec| spec.required) {
+            if !members.contains_key(spec.file_name) {
+                bail!("GTFS artifact is missing required file {}", spec.file_name);
+            }
+        }
+
+        Ok(Self { archive, members })
+    }
+
+    fn contains(&self, spec: &ImportSpec) -> bool {
+        self.members.contains_key(spec.file_name)
+    }
+
+    fn open_member(&mut self, spec: &ImportSpec) -> Result<zip::read::ZipFile<'_, R>> {
+        let member = self
+            .members
+            .get(spec.file_name)
+            .with_context(|| format!("GTFS artifact is missing file {}", spec.file_name))?;
+
+        self.archive
+            .by_index(member.index)
+            .with_context(|| format!("failed to open GTFS file {}", spec.file_name))
     }
 }
 
@@ -83,6 +99,8 @@ impl ParsedGtfsFiles {
 struct ImportSpec {
     kind: ImportKind,
     name: &'static str,
+    file_name: &'static str,
+    required: bool,
     target_table: &'static str,
     columns: &'static [&'static str],
 }
@@ -100,24 +118,45 @@ enum ImportKind {
     FeedInfo,
 }
 
-async fn copy_gtfs_to_tables(
+async fn copy_gtfs_to_tables<R>(
     tx: &mut Transaction<'_, Postgres>,
-    parsed: &ParsedGtfsFiles,
+    gtfs_zip: &mut GtfsZip<R>,
     version_id: i64,
-) -> Result<()> {
+) -> Result<()>
+where
+    R: Read + Seek,
+{
     for spec in IMPORT_SPECS {
-        copy_records_to_table(tx, spec, parsed, version_id).await?;
+        copy_records_to_table(tx, spec, gtfs_zip, version_id).await?;
     }
 
     Ok(())
 }
 
-async fn copy_records_to_table(
+async fn copy_records_to_table<R>(
     tx: &mut Transaction<'_, Postgres>,
     spec: &ImportSpec,
-    parsed: &ParsedGtfsFiles,
+    gtfs_zip: &mut GtfsZip<R>,
     version_id: i64,
-) -> Result<()> {
+) -> Result<()>
+where
+    R: Read + Seek,
+{
+    if !gtfs_zip.contains(spec) {
+        if spec.required {
+            bail!("GTFS artifact is missing required file {}", spec.file_name);
+        }
+
+        info!(
+            version_id,
+            target_table = spec.target_table,
+            file_name = spec.file_name,
+            rows = 0_u64,
+            "skipped missing optional GTFS file"
+        );
+        return Ok(());
+    }
+
     let copy_sql = format!(
         "COPY {} ({}) FROM STDIN WITH (FORMAT binary)",
         spec.target_table,
@@ -132,7 +171,7 @@ async fn copy_records_to_table(
     let mut writer = BinaryCopyInWriter::new(copy, spec.columns.len())
         .with_context(|| format!("failed to create binary COPY writer for {}", spec.name))?;
 
-    if let Err(error) = write_records(&mut writer, spec, parsed, version_id).await {
+    if let Err(error) = write_records(&mut writer, spec, gtfs_zip, version_id).await {
         let abort_message = error.to_string();
         let _ = writer.abort(abort_message).await;
         return Err(error).with_context(|| {
@@ -168,25 +207,42 @@ async fn copy_records_to_table(
     Ok(())
 }
 
-async fn write_records<C>(
+async fn write_records<C, R>(
     writer: &mut BinaryCopyInWriter<C>,
     spec: &ImportSpec,
-    parsed: &ParsedGtfsFiles,
+    gtfs_zip: &mut GtfsZip<R>,
     version_id: i64,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
+    R: Read + Seek,
 {
+    let reader = gtfs_zip.open_member(spec)?;
+
     match spec.kind {
-        ImportKind::Agency => write_agency_records(writer, parsed, version_id).await,
-        ImportKind::Stops => write_stops_records(writer, parsed, version_id).await,
-        ImportKind::Routes => write_routes_records(writer, parsed, version_id).await,
-        ImportKind::Trips => write_trips_records(writer, parsed, version_id).await,
-        ImportKind::StopTimes => write_stop_times_records(writer, parsed, version_id).await,
-        ImportKind::Shapes => write_shapes_records(writer, parsed, version_id).await,
-        ImportKind::Calendar => write_calendar_records(writer, parsed, version_id).await,
-        ImportKind::CalendarDates => write_calendar_dates_records(writer, parsed, version_id).await,
-        ImportKind::FeedInfo => write_feed_info_records(writer, parsed, version_id).await,
+        ImportKind::Agency => {
+            write_agency_records(writer, reader, spec.file_name, version_id).await
+        }
+        ImportKind::Stops => write_stops_records(writer, reader, spec.file_name, version_id).await,
+        ImportKind::Routes => {
+            write_routes_records(writer, reader, spec.file_name, version_id).await
+        }
+        ImportKind::Trips => write_trips_records(writer, reader, spec.file_name, version_id).await,
+        ImportKind::StopTimes => {
+            write_stop_times_records(writer, reader, spec.file_name, version_id).await
+        }
+        ImportKind::Shapes => {
+            write_shapes_records(writer, reader, spec.file_name, version_id).await
+        }
+        ImportKind::Calendar => {
+            write_calendar_records(writer, reader, spec.file_name, version_id).await
+        }
+        ImportKind::CalendarDates => {
+            write_calendar_dates_records(writer, reader, spec.file_name, version_id).await
+        }
+        ImportKind::FeedInfo => {
+            write_feed_info_records(writer, reader, spec.file_name, version_id).await
+        }
     }
 }
 
@@ -211,54 +267,72 @@ const IMPORT_SPECS: &[ImportSpec] = &[
     ImportSpec {
         kind: ImportKind::Agency,
         name: "agency",
+        file_name: "agency.txt",
+        required: true,
         target_table: "gtfs.agency",
         columns: AGENCY_COLUMNS,
     },
     ImportSpec {
         kind: ImportKind::Stops,
         name: "stops",
+        file_name: "stops.txt",
+        required: true,
         target_table: "gtfs.stops",
         columns: STOPS_COLUMNS,
     },
     ImportSpec {
         kind: ImportKind::Routes,
         name: "routes",
+        file_name: "routes.txt",
+        required: true,
         target_table: "gtfs.routes",
         columns: ROUTES_COLUMNS,
     },
     ImportSpec {
         kind: ImportKind::Trips,
         name: "trips",
+        file_name: "trips.txt",
+        required: true,
         target_table: "gtfs.trips",
         columns: TRIPS_COLUMNS,
     },
     ImportSpec {
         kind: ImportKind::StopTimes,
         name: "stop_times",
+        file_name: "stop_times.txt",
+        required: true,
         target_table: "gtfs.stop_times",
         columns: STOP_TIMES_COLUMNS,
     },
     ImportSpec {
         kind: ImportKind::Shapes,
         name: "shapes",
+        file_name: "shapes.txt",
+        required: false,
         target_table: "gtfs.shapes",
         columns: SHAPES_COLUMNS,
     },
     ImportSpec {
         kind: ImportKind::Calendar,
         name: "calendar",
+        file_name: "calendar.txt",
+        required: false,
         target_table: "gtfs.calendar",
         columns: CALENDAR_COLUMNS,
     },
     ImportSpec {
         kind: ImportKind::CalendarDates,
         name: "calendar_dates",
+        file_name: "calendar_dates.txt",
+        required: false,
         target_table: "gtfs.calendar_dates",
         columns: CALENDAR_DATES_COLUMNS,
     },
     ImportSpec {
         kind: ImportKind::FeedInfo,
         name: "feed_info",
+        file_name: "feed_info.txt",
+        required: false,
         target_table: "gtfs.feed_info",
         columns: FEED_INFO_COLUMNS,
     },
@@ -369,15 +443,19 @@ const FEED_INFO_COLUMNS: &[&str] = &[
 
 async fn write_agency_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
 {
-    writer
-        .write_rows(files.agencies.iter().map(|agency| {
-            (
+    let start_row_count = writer.row_count();
+
+    for agency in parser::parse_csv::<_, Agency>(reader, file_name)? {
+        let agency = agency?;
+        writer
+            .write_row((
                 version_id,
                 agency.id.as_deref(),
                 &agency.name,
@@ -385,22 +463,28 @@ where
                 &agency.timezone,
                 agency.lang.as_deref(),
                 agency.phone.as_deref(),
-            )
-        }))
-        .await
+            ))
+            .await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
 }
 
 async fn write_stops_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
 {
-    writer
-        .write_rows(files.stops.iter().map(|stop| {
-            (
+    let start_row_count = writer.row_count();
+
+    for stop in parser::parse_csv::<_, Stop>(reader, file_name)? {
+        let stop = stop?;
+        writer
+            .write_row((
                 version_id,
                 &stop.id,
                 stop.code.as_deref(),
@@ -415,22 +499,28 @@ where
                 availability_code(stop.wheelchair_boarding),
                 stop.platform_code.as_deref(),
                 BinaryCopyNull,
-            )
-        }))
-        .await
+            ))
+            .await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
 }
 
 async fn write_routes_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
 {
-    writer
-        .write_rows(files.routes.iter().map(|route| {
-            (
+    let start_row_count = writer.row_count();
+
+    for route in parser::parse_csv::<_, Route>(reader, file_name)? {
+        let route = route?;
+        writer
+            .write_row((
                 version_id,
                 &route.id,
                 route.agency_id.as_deref(),
@@ -441,22 +531,28 @@ where
                 route.url.as_deref(),
                 route.color.map(format_color),
                 route.text_color.map(format_color),
-            )
-        }))
-        .await
+            ))
+            .await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
 }
 
 async fn write_trips_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
 {
-    writer
-        .write_rows(files.trips.iter().map(|trip| {
-            (
+    let start_row_count = writer.row_count();
+
+    for trip in parser::parse_csv::<_, RawTrip>(reader, file_name)? {
+        let trip = trip?;
+        writer
+            .write_row((
                 version_id,
                 &trip.route_id,
                 &trip.service_id,
@@ -465,14 +561,17 @@ where
                 trip.direction_id.map(direction_type_code),
                 trip.block_id.as_deref(),
                 trip.shape_id.as_deref(),
-            )
-        }))
-        .await
+            ))
+            .await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
 }
 
 async fn write_stop_times_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
@@ -480,7 +579,8 @@ where
 {
     let start_row_count = writer.row_count();
 
-    for stop_time in &files.stop_times {
+    for stop_time in parser::parse_csv::<_, RawStopTime>(reader, file_name)? {
+        let stop_time = stop_time?;
         writer
             .write_row((
                 version_id,
@@ -503,7 +603,8 @@ where
 
 async fn write_shapes_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
@@ -511,7 +612,8 @@ where
 {
     let start_row_count = writer.row_count();
 
-    for shape in &files.shapes {
+    for shape in parser::parse_csv::<_, Shape>(reader, file_name)? {
+        let shape = shape?;
         writer
             .write_row((
                 version_id,
@@ -531,15 +633,19 @@ where
 
 async fn write_calendar_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
 {
-    writer
-        .write_rows(files.calendar.iter().map(|calendar| {
-            (
+    let start_row_count = writer.row_count();
+
+    for calendar in parser::parse_csv::<_, Calendar>(reader, file_name)? {
+        let calendar = calendar?;
+        writer
+            .write_row((
                 version_id,
                 &calendar.id,
                 calendar.monday,
@@ -551,42 +657,54 @@ where
                 calendar.sunday,
                 format_gtfs_date(calendar.start_date),
                 format_gtfs_date(calendar.end_date),
-            )
-        }))
-        .await
+            ))
+            .await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
 }
 
 async fn write_calendar_dates_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
 {
-    writer
-        .write_rows(files.calendar_dates.iter().map(|calendar_date| {
-            (
+    let start_row_count = writer.row_count();
+
+    for calendar_date in parser::parse_csv::<_, CalendarDate>(reader, file_name)? {
+        let calendar_date = calendar_date?;
+        writer
+            .write_row((
                 version_id,
                 &calendar_date.service_id,
                 format_gtfs_date(calendar_date.date),
                 exception_code(calendar_date.exception_type),
-            )
-        }))
-        .await
+            ))
+            .await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
 }
 
 async fn write_feed_info_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
-    files: &ParsedGtfsFiles,
+    reader: impl Read,
+    file_name: &str,
     version_id: i64,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
 {
-    writer
-        .write_rows(files.feed_info.iter().map(|feed_info| {
-            (
+    let start_row_count = writer.row_count();
+
+    for feed_info in parser::parse_csv::<_, FeedInfo>(reader, file_name)? {
+        let feed_info = feed_info?;
+        writer
+            .write_row((
                 version_id,
                 &feed_info.name,
                 &feed_info.url,
@@ -597,9 +715,11 @@ where
                 feed_info.version.as_deref(),
                 feed_info.contact_email.as_deref(),
                 feed_info.contact_url.as_deref(),
-            )
-        }))
-        .await
+            ))
+            .await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
 }
 
 // Value Encodings

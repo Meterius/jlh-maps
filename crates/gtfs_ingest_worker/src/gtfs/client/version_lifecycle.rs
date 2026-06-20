@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
 use tracing::info;
+use zip::ZipArchive;
 
 #[derive(Debug, Clone)]
 pub enum PrepareLatestFeedVersionOutcome {
@@ -200,20 +201,44 @@ impl GtfsIngestClient {
             "downloading GTFS artifact for import"
         );
 
-        let zip_body = match self
-            .artifact_store
-            .get_feed_artifact(&version.file_path)
-            .await
-        {
-            Ok(zip_body) => zip_body,
-            Err(error) => {
-                let _ =
-                    postgres::mark_import_failed(&self.pool, version_id, &error.to_string()).await;
-                return Err(error);
-            }
-        };
+        let import_result = async {
+            let artifact_file =
+                NamedTempFile::new().context("failed to create temporary GTFS artifact file")?;
 
-        match postgres::import_feed_version_from_zip(&self.pool, version_id, zip_body).await {
+            // stream artifact into temporary file
+            {
+                let mut artifact_writer =
+                    tokio::fs::File::from_std(artifact_file.reopen().with_context(|| {
+                        format!(
+                            "failed to reopen temporary GTFS artifact {} for writing",
+                            artifact_file.path().display()
+                        )
+                    })?);
+
+                self.artifact_store
+                    .get_feed_artifact_stream(&version.file_path, &mut artifact_writer)
+                    .await?;
+            }
+
+            let zip_file = artifact_file.reopen().with_context(|| {
+                format!(
+                    "failed to reopen temporary GTFS artifact {} for import",
+                    artifact_file.path().display()
+                )
+            })?;
+
+            let zip_archive = ZipArchive::new(zip_file).with_context(|| {
+                format!(
+                    "failed to open GTFS artifact {} as ZIP",
+                    artifact_file.path().display()
+                )
+            })?;
+
+            postgres::import_feed_version_from_zip(&self.pool, version_id, zip_archive).await
+        }
+        .await;
+
+        match import_result {
             Ok(()) => {
                 let version = postgres::fetch_version_import_info(&self.pool, version_id).await?;
                 if matches!(version.status.as_str(), "imported") {

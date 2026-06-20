@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
 use s3::region::Region;
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 /// S3-like connection settings for the GTFS artifact object store.
 #[derive(Debug, Clone)]
@@ -64,21 +64,29 @@ impl ArtifactStore {
         Ok(())
     }
 
-    pub async fn get_feed_artifact(&self, key: &str) -> Result<Vec<u8>> {
-        let response = self
+    pub async fn get_feed_artifact_stream<W>(&self, key: &str, writer: &mut W) -> Result<()>
+    where
+        W: AsyncWrite + Send + Unpin,
+    {
+        let status_code = self
             .bucket
-            .get_object(key)
+            .get_object_to_writer(key, writer)
             .await
-            .with_context(|| format!("failed to download GTFS artifact from s3://{}", key))?;
+            .with_context(|| format!("failed to stream GTFS artifact from s3://{}", key))?;
 
-        if !(200..300).contains(&response.status_code()) {
+        if !(200..300).contains(&status_code) {
             bail!(
                 "S3 download for GTFS artifact {} returned status {}",
                 key,
-                response.status_code()
+                status_code
             );
         }
 
-        Ok(response.to_vec())
+        writer
+            .flush()
+            .await
+            .with_context(|| format!("failed to flush GTFS artifact stream from s3://{}", key))?;
+
+        Ok(())
     }
 }
