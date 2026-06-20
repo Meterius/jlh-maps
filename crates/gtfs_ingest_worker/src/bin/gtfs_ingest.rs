@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use gtfs_ingest_worker::gtfs::client::{ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig};
 use gtfs_ingest_worker::model::SeedFile;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::info;
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
@@ -204,16 +204,44 @@ async fn sync_tiling_command(args: SyncTilingArgs) -> Result<()> {
 
 async fn export_tiling_command(args: ExportTilingArgs) -> Result<()> {
     let client = connect_client(args.client).await?;
-    let outcome = client
-        .export_tiling(
-            args.source_slug.as_deref(),
-            &args.output_file,
-            args.parallelism,
-        )
-        .await
-        .context("failed to export GTFS tiling")?;
 
-    info!(?outcome, "completed GTFS export-tiling command");
+    if let Some(parent) = args.output_file.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create GTFS PMTiles output directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let temp_file = temp_output_path(&args.output_file)?;
+    let file = std::fs::File::create(&temp_file).with_context(|| {
+        format!(
+            "failed to create temporary GTFS PMTiles file {}",
+            temp_file.display()
+        )
+    })?;
+
+    let outcome = match client
+        .export_tiling(args.source_slug.as_deref(), file, args.parallelism)
+        .await
+    {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            let _ = std::fs::remove_file(&temp_file);
+            return Err(error).context("failed to export GTFS tiling");
+        }
+    };
+
+    replace_file(&temp_file, &args.output_file)?;
+
+    info!(
+        ?outcome,
+        output_file = %args.output_file.display(),
+        "completed GTFS export-tiling command"
+    );
     Ok(())
 }
 
@@ -241,4 +269,44 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .init();
+}
+
+fn temp_output_path(output_file: &Path) -> Result<PathBuf> {
+    let file_name = output_file
+        .file_name()
+        .with_context(|| {
+            format!(
+                "failed to get file name from output file path {}",
+                output_file.display()
+            )
+        })?
+        .to_string_lossy();
+
+    Ok(output_file.with_file_name(format!(".{file_name}.tmp")))
+}
+
+fn replace_file(temp_file: &Path, output_file: &Path) -> Result<()> {
+    match std::fs::rename(temp_file, output_file) {
+        Ok(()) => Ok(()),
+        Err(error) if output_file.exists() => {
+            std::fs::remove_file(output_file).with_context(|| {
+                format!("failed to remove previous file {}", output_file.display())
+            })?;
+            std::fs::rename(temp_file, output_file).with_context(|| {
+                format!(
+                    "failed to move file from {} to {} after removing previous output: {}",
+                    temp_file.display(),
+                    output_file.display(),
+                    error
+                )
+            })
+        }
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "failed to move file from {} to {}",
+                temp_file.display(),
+                output_file.display()
+            )
+        }),
+    }
 }

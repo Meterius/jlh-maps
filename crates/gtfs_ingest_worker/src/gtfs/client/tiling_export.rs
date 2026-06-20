@@ -1,5 +1,4 @@
 use super::client::GtfsIngestClient;
-use crate::gtfs::client::utils::files::{replace_file, temp_output_path};
 use crate::gtfs::postgres;
 use crate::gtfs::postgres::{GTFS_TILING_EXPORT_CHUNK_ZOOM, GTFS_TILING_ZOOM};
 use anyhow::{Context, Result, bail};
@@ -8,8 +7,7 @@ use futures_util::{StreamExt, TryStreamExt};
 use pmtiles::{PmTilesWriter, TileCoord, TileType};
 use serde_json::json;
 use sqlx::PgPool;
-use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::io::{Seek, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::info;
@@ -18,36 +16,19 @@ use tracing::info;
 pub struct ExportTilingOutcome {
     pub source_slug: Option<String>,
     pub tile_count: i64,
-    pub output_file: PathBuf,
 }
 
 impl GtfsIngestClient {
-    pub async fn export_tiling(
+    pub async fn export_tiling<W>(
         &self,
         source_slug: Option<&str>,
-        output_file: &Path,
+        writer: W,
         parallelism: usize,
-    ) -> anyhow::Result<ExportTilingOutcome> {
+    ) -> anyhow::Result<ExportTilingOutcome>
+    where
+        W: Write + Seek,
+    {
         let parallelism = parallelism.max(1);
-
-        if let Some(parent) = output_file.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "failed to create GTFS PMTiles output directory {}",
-                    parent.display()
-                )
-            })?;
-        }
-
-        let temp_file = temp_output_path(output_file)?;
-        let file = File::create(&temp_file).with_context(|| {
-            format!(
-                "failed to create temporary GTFS PMTiles file {}",
-                temp_file.display()
-            )
-        })?;
 
         let metadata = tiling_metadata(source_slug)?;
 
@@ -58,12 +39,11 @@ impl GtfsIngestClient {
             .center(0.0, 0.0)
             .bounds(-180.0, -85.051_128_78, 180.0, 85.051_128_78)
             .metadata(&metadata)
-            .create(file)
+            .create(writer)
             .context("failed to initialize GTFS PMTiles writer")?;
 
         info!(
             source_slug = %source_slug.unwrap_or("<all>"),
-            output_file = %output_file.display(),
             parallelism,
             chunk_zoom = GTFS_TILING_EXPORT_CHUNK_ZOOM,
             export_zoom = GTFS_TILING_ZOOM,
@@ -100,7 +80,6 @@ impl GtfsIngestClient {
             .context("failed to finalize GTFS PMTiles archive")?;
 
         if tile_count == 0 {
-            let _ = std::fs::remove_file(&temp_file);
             match source_slug {
                 Some(source_slug) => bail!(
                     "GTFS tiling for source {} has no tiles to export",
@@ -110,11 +89,8 @@ impl GtfsIngestClient {
             }
         }
 
-        replace_file(&temp_file, output_file)?;
-
         info!(
             source_slug = %source_slug.unwrap_or("<all>"),
-            output_file = %output_file.display(),
             tile_count,
             "finished GTFS PMTiles export"
         );
@@ -122,7 +98,6 @@ impl GtfsIngestClient {
         Ok(ExportTilingOutcome {
             source_slug: source_slug.map(str::to_owned),
             tile_count,
-            output_file: output_file.to_owned(),
         })
     }
 }
