@@ -1,9 +1,6 @@
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
-use gtfs_ingest_worker::gtfs::{
-    ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig, export_tiling, sync_tiling,
-    upsert_feed_sources_seed,
-};
+use gtfs_ingest_worker::gtfs::client::{ArtifactStoreConfig, GtfsIngestClient, GtfsIngestConfig};
 use gtfs_ingest_worker::model::SeedFile;
 use std::path::PathBuf;
 use tracing::info;
@@ -31,8 +28,8 @@ enum Command {
 
 #[derive(Debug, Args, Clone)]
 pub struct SeedSourcesArgs {
-    #[arg(long, env = "POSTGRES_GTFS_URL")]
-    pub database_url: String,
+    #[command(flatten)]
+    pub client: ClientArgs,
 
     #[arg(long)]
     pub seed_file: PathBuf,
@@ -52,8 +49,8 @@ pub struct SyncSourcesArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct SyncTilingArgs {
-    #[arg(long, env = "POSTGRES_GTFS_URL")]
-    pub database_url: String,
+    #[command(flatten)]
+    pub client: ClientArgs,
 
     #[arg(long, default_value_t = DEFAULT_SYNC_TILING_PARALLELISM)]
     pub parallelism: usize,
@@ -61,8 +58,8 @@ pub struct SyncTilingArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct ExportTilingArgs {
-    #[arg(long, env = "POSTGRES_GTFS_URL")]
-    pub database_url: String,
+    #[command(flatten)]
+    pub client: ClientArgs,
 
     #[arg(long)]
     pub source_slug: Option<String>,
@@ -116,24 +113,32 @@ async fn main() -> Result<()> {
 }
 
 async fn seed_sources(args: SeedSourcesArgs) -> Result<()> {
+    let SeedSourcesArgs {
+        client,
+        seed_file,
+        delete_existing,
+    } = args;
+
     info!(
-        seed_file = %args.seed_file.display(),
+        seed_file = %seed_file.display(),
         "Seeding GTFS feed sources from seed file {}",
-        args.seed_file.display()
+        seed_file.display()
     );
 
     let seed: SeedFile = serde_yaml::from_reader(
-        std::fs::File::open(&args.seed_file)
-            .with_context(|| format!("failed to open seed file {}", args.seed_file.display()))?,
+        std::fs::File::open(&seed_file)
+            .with_context(|| format!("failed to open seed file {}", seed_file.display()))?,
     )
-    .with_context(|| format!("failed to parse seed file {}", args.seed_file.display()))?;
+    .with_context(|| format!("failed to parse seed file {}", seed_file.display()))?;
 
-    upsert_feed_sources_seed(&args.database_url, &seed, args.delete_existing)
+    let client = connect_client(client).await?;
+    client
+        .upsert_feed_sources_seed(&seed, delete_existing)
         .await
         .with_context(|| {
             format!(
                 "failed to upsert GTFS sources from seed file {}",
-                args.seed_file.display()
+                seed_file.display()
             )
         })?;
 
@@ -172,7 +177,9 @@ async fn sync_sources(args: SyncSourcesArgs) -> Result<()> {
 }
 
 async fn sync_tiling_command(args: SyncTilingArgs) -> Result<()> {
-    let outcome = sync_tiling(&args.database_url, args.parallelism)
+    let client = connect_client(args.client).await?;
+    let outcome = client
+        .sync_tiling(args.parallelism)
         .await
         .context("failed to sync GTFS tiling")?;
 
@@ -196,14 +203,15 @@ async fn sync_tiling_command(args: SyncTilingArgs) -> Result<()> {
 }
 
 async fn export_tiling_command(args: ExportTilingArgs) -> Result<()> {
-    let outcome = export_tiling(
-        &args.database_url,
-        args.source_slug.as_deref(),
-        &args.output_file,
-        args.parallelism,
-    )
-    .await
-    .context("failed to export GTFS tiling")?;
+    let client = connect_client(args.client).await?;
+    let outcome = client
+        .export_tiling(
+            args.source_slug.as_deref(),
+            &args.output_file,
+            args.parallelism,
+        )
+        .await
+        .context("failed to export GTFS tiling")?;
 
     info!(?outcome, "completed GTFS export-tiling command");
     Ok(())

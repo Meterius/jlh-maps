@@ -1,3 +1,12 @@
+x-gtfs-ingest-client-environment: &gtfs_ingest_client_environment
+  POSTGRES_GTFS_URL: postgres://${POSTGRES_GTFS_USER}:${POSTGRES_GTFS_PASSWORD}@postgres_gtfs:5432/${POSTGRES_GTFS_DB}
+  GTFS_ARTIFACT_S3_ENDPOINT: http://gtfs_artifact_store:3900
+  GTFS_ARTIFACT_S3_REGION: garage
+  GTFS_ARTIFACT_S3_BUCKET: ${GTFS_ARTIFACT_S3_BUCKET:?GTFS_ARTIFACT_S3_BUCKET is required}
+  GTFS_ARTIFACT_S3_ACCESS_KEY_ID: ${GTFS_ARTIFACT_S3_ACCESS_KEY_ID:?GTFS_ARTIFACT_S3_ACCESS_KEY_ID is required}
+  GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY: ${GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY:?GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY is required}
+  RUST_LOG: info
+
 services:
   gtfs_ingest_seed_sources:
     build:
@@ -7,8 +16,7 @@ services:
     init: true
 
     environment:
-      POSTGRES_GTFS_URL: postgres://${POSTGRES_GTFS_USER}:${POSTGRES_GTFS_PASSWORD}@postgres_gtfs:5432/${POSTGRES_GTFS_DB}
-      RUST_LOG: info
+      <<: *gtfs_ingest_client_environment
 
     volumes:
       - ./config/gtfs_feed_sources_seed.yaml:/config/feed_sources_seed.yaml:ro
@@ -33,13 +41,7 @@ services:
     init: true
 
     environment:
-      POSTGRES_GTFS_URL: postgres://${POSTGRES_GTFS_USER}:${POSTGRES_GTFS_PASSWORD}@postgres_gtfs:5432/${POSTGRES_GTFS_DB}
-      GTFS_ARTIFACT_S3_ENDPOINT: http://gtfs_artifact_store:3900
-      GTFS_ARTIFACT_S3_REGION: garage
-      GTFS_ARTIFACT_S3_BUCKET: ${GTFS_ARTIFACT_S3_BUCKET:?GTFS_ARTIFACT_S3_BUCKET is required}
-      GTFS_ARTIFACT_S3_ACCESS_KEY_ID: ${GTFS_ARTIFACT_S3_ACCESS_KEY_ID:?GTFS_ARTIFACT_S3_ACCESS_KEY_ID is required}
-      GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY: ${GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY:?GTFS_ARTIFACT_S3_SECRET_ACCESS_KEY is required}
-      RUST_LOG: info
+      <<: *gtfs_ingest_client_environment
 
     depends_on:
       postgres_gtfs:
@@ -63,8 +65,7 @@ services:
     init: true
 
     environment:
-      POSTGRES_GTFS_URL: postgres://${POSTGRES_GTFS_USER}:${POSTGRES_GTFS_PASSWORD}@postgres_gtfs:5432/${POSTGRES_GTFS_DB}
-      RUST_LOG: info
+      <<: *gtfs_ingest_client_environment
 
     depends_on:
       postgres_gtfs:
@@ -84,8 +85,7 @@ services:
     init: true
 
     environment:
-      POSTGRES_GTFS_URL: postgres://${POSTGRES_GTFS_USER}:${POSTGRES_GTFS_PASSWORD}@postgres_gtfs:5432/${POSTGRES_GTFS_DB}
-      RUST_LOG: info
+      <<: *gtfs_ingest_client_environment
 
     volumes:
       - ${GTFS_PMTILES_DIR:?GTFS_PMTILES_DIR is required}:/pmtiles

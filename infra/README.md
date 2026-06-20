@@ -195,12 +195,15 @@ GTFS_PMTILES_DIR=...
 ```
 
 `GTFS_ARTIFACT_S3_ENDPOINT` and `GTFS_ARTIFACT_S3_REGION` are intentionally
-hard-coded in the GTFS sync job environment as
+hard-coded in the GTFS job environment as
 `http://gtfs_artifact_store:3900` and `garage`, because those are internal
 Compose service details rather than deployment secrets.
-GTFS job parallelism is controlled by the command-line `--parallelism` option.
-The compiled defaults are `sync-sources --parallelism 4`,
-`sync-tiling --parallelism 2`, and `export-tiling --parallelism 2`.
+All GTFS commands construct `GtfsIngestClient`, so the GTFS job definitions
+share the Postgres and artifact-store client environment even when a command
+only uses the database today. GTFS job parallelism is controlled by the
+command-line `--parallelism` option. The compiled defaults are
+`sync-sources --parallelism 8`, `sync-tiling --parallelism 8`, and
+`export-tiling --parallelism 16`.
 
 Variables used by `compose.local.yaml`:
 
@@ -353,7 +356,7 @@ format.
 
 GTFS ingestion uses `postgres_gtfs` for metadata and imported schedule rows,
 and `gtfs_artifact_store` for immutable feed ZIP artifacts. The worker treats
-`gtfs::client` in `crates/gtfs_ingest_worker/src/gtfs/client.rs` as the public
+`gtfs::client` in `crates/gtfs_ingest_worker/src/gtfs/client/` as the public
 API. The artifact store adapter and the Postgres `model`, `core`, and
 `importer` modules are crate-private modules under `src/gtfs/`, so callers
 cannot upload an artifact, mutate version state, or promote a feed by skipping
