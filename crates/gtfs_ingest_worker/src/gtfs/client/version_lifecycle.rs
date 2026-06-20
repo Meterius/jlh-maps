@@ -7,6 +7,8 @@ use reqwest::header::{
     ETAG, HeaderMap, HeaderName, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, USER_AGENT,
 };
 use sha2::{Digest, Sha256};
+use tempfile::NamedTempFile;
+use tokio::io::AsyncWriteExt;
 use tracing::info;
 
 #[derive(Debug, Clone)]
@@ -29,7 +31,9 @@ pub enum PromoteFeedVersionOutcome {
 }
 
 struct DownloadedFeed {
-    body: Vec<u8>,
+    artifact_file: NamedTempFile,
+    content_sha256: String,
+    file_bytes: i64,
     http_etag: Option<String>,
     http_last_modified: Option<String>,
 }
@@ -85,12 +89,13 @@ impl GtfsIngestClient {
             DownloadFeedOutcome::Downloaded(downloaded_feed) => downloaded_feed,
         };
 
-        let feed_bytes = downloaded_feed.body;
-        let content_sha256 = sha256_hex(&feed_bytes);
-        let file_bytes: i64 = feed_bytes
-            .len()
-            .try_into()
-            .context("GTFS feed artifact is too large to record byte length")?;
+        let DownloadedFeed {
+            artifact_file,
+            content_sha256,
+            file_bytes,
+            http_etag,
+            http_last_modified,
+        } = downloaded_feed;
 
         if let Some(active_download_cache) = active_version_info.as_ref()
             && active_download_cache.content_sha256 == content_sha256
@@ -98,8 +103,8 @@ impl GtfsIngestClient {
             postgres::update_version_http_download_info(
                 &self.pool,
                 active_download_cache.id,
-                downloaded_feed.http_etag.as_deref(),
-                downloaded_feed.http_last_modified.as_deref(),
+                http_etag.as_deref(),
+                http_last_modified.as_deref(),
             )
             .await?;
 
@@ -123,8 +128,16 @@ impl GtfsIngestClient {
             "uploading GTFS feed artifact"
         );
 
+        let mut artifact_reader =
+            tokio::fs::File::from_std(artifact_file.reopen().with_context(|| {
+                format!(
+                    "failed to reopen temporary GTFS feed artifact {}",
+                    artifact_file.path().display()
+                )
+            })?);
+
         self.artifact_store
-            .put_feed_artifact(&file_path, &feed_bytes)
+            .put_feed_artifact_stream(&file_path, &mut artifact_reader)
             .await?;
 
         let version = postgres::create_downloaded_version(
@@ -135,8 +148,8 @@ impl GtfsIngestClient {
                 content_sha256: &content_sha256,
                 file_bytes,
                 file_path: &file_path,
-                http_etag: downloaded_feed.http_etag.as_deref(),
-                http_last_modified: downloaded_feed.http_last_modified.as_deref(),
+                http_etag: http_etag.as_deref(),
+                http_last_modified: http_last_modified.as_deref(),
             },
         )
         .await?;
@@ -295,19 +308,66 @@ async fn download_feed(
         return Ok(DownloadFeedOutcome::NotModified);
     }
 
-    let response = response
+    let mut response = response
         .error_for_status()
         .with_context(|| format!("GTFS feed request failed for {}", download_url))?;
 
     let headers = response.headers().clone();
 
-    let body = response
-        .bytes()
-        .await
-        .with_context(|| format!("failed to read GTFS feed {}", download_url))?;
+    let artifact_file =
+        NamedTempFile::new().context("failed to create temporary GTFS feed artifact file")?;
+
+    // stream response body into temporary file while hashing and counting file bytes
+    let (content_sha256, file_bytes) = {
+        let mut hasher = Sha256::new();
+        let mut file_bytes = 0_u64;
+
+        let mut artifact_writer =
+            tokio::fs::File::from_std(artifact_file.reopen().with_context(|| {
+                format!(
+                    "failed to reopen temporary GTFS feed artifact {} for writing",
+                    artifact_file.path().display()
+                )
+            })?);
+
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .with_context(|| format!("failed to read GTFS feed {}", download_url))?
+        {
+            hasher.update(&chunk);
+
+            file_bytes = file_bytes
+                .checked_add(chunk.len() as u64)
+                .context("GTFS feed artifact byte length overflowed")?;
+
+            artifact_writer.write_all(&chunk).await.with_context(|| {
+                format!(
+                    "failed to write GTFS feed chunk to {}",
+                    artifact_file.path().display()
+                )
+            })?;
+        }
+
+        artifact_writer.flush().await.with_context(|| {
+            format!(
+                "failed to flush temporary GTFS feed artifact {}",
+                artifact_file.path().display()
+            )
+        })?;
+
+        (
+            format!("{:x}", hasher.finalize()),
+            file_bytes
+                .try_into()
+                .context("GTFS feed artifact is too large to record byte length")?,
+        )
+    };
 
     Ok(DownloadFeedOutcome::Downloaded(DownloadedFeed {
-        body: body.to_vec(),
+        artifact_file,
+        content_sha256,
+        file_bytes,
         http_etag: header_to_string(&headers, ETAG),
         http_last_modified: header_to_string(&headers, LAST_MODIFIED),
     }))
@@ -318,12 +378,6 @@ fn header_to_string(headers: &HeaderMap, header_name: HeaderName) -> Option<Stri
         .get(header_name)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned)
-}
-
-fn sha256_hex(body: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(body);
-    format!("{:x}", hasher.finalize())
 }
 
 fn feed_artifact_path(source_slug: &str, content_sha256: &str) -> String {

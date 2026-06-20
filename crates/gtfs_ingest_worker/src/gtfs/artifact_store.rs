@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
 use s3::region::Region;
+use tokio::io::AsyncRead;
 
 /// S3-like connection settings for the GTFS artifact object store.
 #[derive(Debug, Clone)]
@@ -42,16 +43,19 @@ impl ArtifactStore {
         Ok(Self { bucket })
     }
 
-    pub async fn put_feed_artifact(&self, key: &str, body: &[u8]) -> Result<()> {
+    pub async fn put_feed_artifact_stream<R>(&self, key: &str, reader: &mut R) -> Result<()>
+    where
+        R: AsyncRead + Unpin,
+    {
         let response = self
             .bucket
-            .put_object_with_content_type(key, body, "application/zip")
+            .put_object_stream_with_content_type(reader, key, "application/zip")
             .await
-            .with_context(|| format!("failed to upload GTFS artifact to s3://{}", key))?;
+            .with_context(|| format!("failed to stream GTFS artifact to s3://{}", key))?;
 
         if !(200..300).contains(&response.status_code()) {
             bail!(
-                "S3 upload for GTFS artifact {} returned status {}",
+                "S3 stream upload for GTFS artifact {} returned status {}",
                 key,
                 response.status_code()
             );
