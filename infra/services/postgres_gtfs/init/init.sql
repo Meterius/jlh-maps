@@ -88,7 +88,6 @@ CREATE TABLE gtfs.stops
     parent_station      TEXT,
     wheelchair_boarding INTEGER,
     platform_code       TEXT,
-    geom                geometry(Point, 4326),
     PRIMARY KEY (version_id, stop_id)
 );
 
@@ -143,7 +142,6 @@ CREATE TABLE gtfs.shapes
     shape_pt_lon        DOUBLE PRECISION,
     shape_pt_sequence   INTEGER NOT NULL,
     shape_dist_traveled DOUBLE PRECISION,
-    geom                geometry(Point, 4326),
     PRIMARY KEY (version_id, shape_id, shape_pt_sequence)
 );
 

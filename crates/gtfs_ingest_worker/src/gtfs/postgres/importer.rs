@@ -1,5 +1,5 @@
 use crate::gtfs::parser;
-use crate::utils::postgres_binary_copy::{BinaryCopyInWriter, BinaryCopyNull};
+use crate::utils::postgres_binary_copy::BinaryCopyInWriter;
 use anyhow::{Context, Result, bail};
 use gtfs_structures::{
     Agency, Availability, Calendar, CalendarDate, DirectionType, Exception, FeedInfo, LocationType,
@@ -362,7 +362,6 @@ const STOPS_COLUMNS: &[&str] = &[
     "parent_station",
     "wheelchair_boarding",
     "platform_code",
-    "geom",
 ];
 
 const ROUTES_COLUMNS: &[&str] = &[
@@ -409,7 +408,6 @@ const SHAPES_COLUMNS: &[&str] = &[
     "shape_pt_lon",
     "shape_pt_sequence",
     "shape_dist_traveled",
-    "geom",
 ];
 
 const CALENDAR_COLUMNS: &[&str] = &[
@@ -498,7 +496,6 @@ where
                 stop.parent_station.as_deref(),
                 availability_code(stop.wheelchair_boarding),
                 stop.platform_code.as_deref(),
-                BinaryCopyNull,
             ))
             .await?;
     }
@@ -623,7 +620,6 @@ where
                 i32::try_from(shape.sequence)
                     .context("GTFS shape_pt_sequence exceeds Postgres INTEGER range")?,
                 shape.dist_traveled.map(f64::from),
-                BinaryCopyNull,
             ))
             .await?;
     }
