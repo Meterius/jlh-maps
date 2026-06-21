@@ -102,6 +102,7 @@ function createScenarioMapViewStore(): MapViewStore {
     projection: { type: 'mercator' },
     bevyCanvasEnabled: false,
     frameStatisticsEnabled: false,
+    featureInspectorEnabled: false,
     advancedRoadsEnabled: false,
   }
 }

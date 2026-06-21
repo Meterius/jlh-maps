@@ -18,6 +18,7 @@ export type MapViewStore = {
   projection?: ProjectionSpecification
   bevyCanvasEnabled: boolean
   frameStatisticsEnabled: boolean
+  featureInspectorEnabled: boolean
   advancedRoadsEnabled: boolean
 }
 
@@ -120,6 +121,7 @@ function createDefaultMapViewStore(): MapViewStore {
     projection: { type: 'mercator' },
     bevyCanvasEnabled: false,
     frameStatisticsEnabled: false,
+    featureInspectorEnabled: false,
     advancedRoadsEnabled: false,
   }
 }

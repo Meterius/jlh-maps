@@ -17,6 +17,11 @@
         @map:contextmenu="onMapContextMenu"
       />
 
+      <MapFeatureInspector
+        v-if="mapViewStore.featureInspectorEnabled && mapInstance.map"
+        :map="mapInstance.map"
+      />
+
       <div class="pointer-events-none absolute right-2 top-2 z-10 flex flex-col gap-2">
         <UButton
           color="neutral"
@@ -227,6 +232,7 @@ import {
 import { useMaplibreIntegration } from '@/bevy/maplibre-integration'
 import { mountBevy, useBevy, type UseBevyReturn } from '@/bevy'
 import { BevyLayer } from '../maplibre-layers/bevy-layer.ts'
+import MapFeatureInspector from '@/views/map-view/MapFeatureInspector.vue'
 import MapSlideover, { type MapSlideoverTab } from '@/views/map-view/MapSlideover.vue'
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
 import type { ContextMenuItem } from '@nuxt/ui'

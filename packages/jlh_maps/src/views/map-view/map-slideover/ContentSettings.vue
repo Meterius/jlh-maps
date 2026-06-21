@@ -20,6 +20,10 @@
             <input v-model="mapViewStore.frameStatisticsEnabled" type="checkbox" />
             <span>Frame statistics</span>
           </label>
+          <label class="debug-toggle">
+            <input v-model="mapViewStore.featureInspectorEnabled" type="checkbox" />
+            <span>Feature inspector</span>
+          </label>
         </div>
       </div>
     </div>
