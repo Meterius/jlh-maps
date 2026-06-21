@@ -246,37 +246,7 @@ pub fn stream_export_tiles<'a>(
                 coord.z,
                 coord.x,
                 coord.y,
-                COALESCE((
-                    SELECT ST_AsMVT(stop_feature, 'stops', 4096, 'geom')
-                    FROM (
-                        SELECT
-                            ST_AsMVTGeom(
-                                ST_Transform(stop_point.geom, 3857),
-                                tile_bounds.bounds_3857,
-                                4096,
-                                64,
-                                TRUE
-                            ) AS geom,
-                            tiling.source_slug,
-                            stop_point.stop_id,
-                            stop.stop_code,
-                            stop.stop_name,
-                            stop.stop_desc,
-                            stop.parent_station as parent_station_id,
-                            stop.location_type,
-                            stop.wheelchair_boarding,
-                            stop.platform_code
-                        FROM gtfs_tiling.stop_points stop_point
-                        JOIN gtfs.stops stop
-                          ON stop.stop_id = stop_point.stop_id
-                         AND stop.version_id = stop_point.version_id
-                        JOIN selected_tilings tiling
-                          ON tiling.source_id = stop_point.source_id
-                         AND tiling.version_id = stop_point.version_id
-                        WHERE stop_point.geom && tile_bounds.bounds_4326
-                          AND ST_Intersects(stop_point.geom, tile_bounds.bounds_4326)
-                    ) stop_feature
-                ), ''::BYTEA) AS tile
+                COALESCE(tile_data.tile, ''::BYTEA) AS tile
             FROM tile_coords coord
             CROSS JOIN LATERAL (
                 SELECT
@@ -286,6 +256,76 @@ pub fn stream_export_tiles<'a>(
                     SELECT ST_TileEnvelope(coord.z, coord.x, coord.y) AS bounds_3857
                 ) bounds
             ) tile_bounds
+            CROSS JOIN LATERAL (
+                WITH tile_stop_features AS (
+                    SELECT
+                        ST_AsMVTGeom(
+                            ST_Transform(stop_point.geom, 3857),
+                            tile_bounds.bounds_3857,
+                            4096,
+                            64,
+                            TRUE
+                        ) AS geom,
+                        stop_point.version_id,
+                        tiling.source_slug,
+                        stop_point.stop_id,
+                        stop.stop_code,
+                        stop.stop_name,
+                        stop.stop_desc,
+                        stop.parent_station as parent_station_id,
+                        stop.location_type,
+                        stop.wheelchair_boarding,
+                        stop.platform_code
+                    FROM gtfs_tiling.stop_points stop_point
+                    JOIN gtfs.stops stop
+                      ON stop.stop_id = stop_point.stop_id
+                     AND stop.version_id = stop_point.version_id
+                    JOIN selected_tilings tiling
+                      ON tiling.source_id = stop_point.source_id
+                     AND tiling.version_id = stop_point.version_id
+                    WHERE stop_point.geom && tile_bounds.bounds_4326
+                      AND ST_Intersects(stop_point.geom, tile_bounds.bounds_4326)
+                ),
+                route_summaries AS (
+                    SELECT
+                        stop_route_agg_ref.version_id,
+                        stop_route_agg_ref.stop_id,
+                        string_agg(DISTINCT route.route_type::TEXT, ',' ORDER BY route.route_type::TEXT)
+                            FILTER (WHERE route.route_type IS NOT NULL) AS route_types,
+                        cardinality(stop_route_agg_ref.route_ids)::INTEGER AS route_count
+                    FROM tile_stop_features feature
+                    JOIN gtfs.stop_route_agg_refs stop_route_agg_ref
+                      ON stop_route_agg_ref.version_id = feature.version_id
+                     AND stop_route_agg_ref.stop_id = feature.stop_id
+                    LEFT JOIN LATERAL unnest(stop_route_agg_ref.route_ids) route_ref(route_id)
+                      ON TRUE
+                    LEFT JOIN gtfs.routes route
+                      ON route.version_id = stop_route_agg_ref.version_id
+                     AND route.route_id = route_ref.route_id
+                    GROUP BY stop_route_agg_ref.version_id, stop_route_agg_ref.stop_id, stop_route_agg_ref.route_ids
+                )
+                SELECT ST_AsMVT(stop_feature, 'stops', 4096, 'geom') AS tile
+                FROM (
+                    SELECT
+                        feature.geom,
+                        feature.source_slug,
+                        feature.stop_id,
+                        feature.stop_code,
+                        feature.stop_name,
+                        feature.stop_desc,
+                        feature.parent_station_id,
+                        feature.location_type,
+                        feature.wheelchair_boarding,
+                        feature.platform_code,
+                        COALESCE(route_summary.route_types, '') AS route_types,
+                        COALESCE(route_summary.route_count, 0) AS route_count
+                    FROM tile_stop_features feature
+                    LEFT JOIN route_summaries route_summary
+                      ON route_summary.version_id = feature.version_id
+                     AND route_summary.stop_id = feature.stop_id
+                    WHERE feature.geom IS NOT NULL
+                ) stop_feature
+            ) tile_data
         )
         SELECT z, x, y, tile
         FROM mvt_tiles

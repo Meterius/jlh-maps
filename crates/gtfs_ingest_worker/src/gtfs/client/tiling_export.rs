@@ -171,6 +171,8 @@ fn tiling_metadata(source_slug: Option<&str>) -> Result<String> {
                     "stop_code": "String",
                     "stop_name": "String",
                     "stop_desc": "String",
+                    "route_types": "String",
+                    "route_count": "Number",
                     "location_type": "Number",
                     "wheelchair_boarding": "Number",
                     "platform_code": "String"

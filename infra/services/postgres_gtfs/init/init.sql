@@ -10,36 +10,36 @@ CREATE TABLE gtfs_meta.feed_sources
 (
     id                  BIGSERIAL PRIMARY KEY,
 
-    slug                TEXT NOT NULL UNIQUE,
-    name                TEXT NOT NULL,
+    slug                TEXT        NOT NULL UNIQUE,
+    name                TEXT        NOT NULL,
 
     source_url          TEXT,
-    direct_download_url TEXT NOT NULL,
+    direct_download_url TEXT        NOT NULL,
 
     license_url         TEXT,
     attribution         TEXT,
 
     active_version_id   BIGINT,
-    
-    created_at TIMESTAMPTZ NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL
+
+    created_at          TIMESTAMPTZ NOT NULL,
+    updated_at          TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE gtfs_meta.feed_versions
 (
-    id             BIGSERIAL PRIMARY KEY,
-    source_id      BIGINT      NOT NULL REFERENCES gtfs_meta.feed_sources (id) ON DELETE CASCADE,
+    id                 BIGSERIAL PRIMARY KEY,
+    source_id          BIGINT      NOT NULL REFERENCES gtfs_meta.feed_sources (id) ON DELETE CASCADE,
 
-    download_url   TEXT        NOT NULL,
+    download_url       TEXT        NOT NULL,
 
-    content_sha256 CHAR(64)    NOT NULL,
-    file_bytes     BIGINT      NOT NULL,
-    file_path      TEXT        NOT NULL,
+    content_sha256     CHAR(64)    NOT NULL,
+    file_bytes         BIGINT      NOT NULL,
+    file_path          TEXT        NOT NULL,
 
     http_etag          TEXT,
     http_last_modified TEXT,
 
-    status         TEXT        NOT NULL CHECK (
+    status             TEXT        NOT NULL CHECK (
         status IN (
                    'downloaded',
                    'import_failed',
@@ -48,11 +48,11 @@ CREATE TABLE gtfs_meta.feed_versions
             )
         ),
 
-    error_message  TEXT,
+    error_message      TEXT,
 
-    fetched_at     TIMESTAMPTZ NOT NULL,
-    imported_at    TIMESTAMPTZ,
-    promoted_at    TIMESTAMPTZ
+    fetched_at         TIMESTAMPTZ NOT NULL,
+    imported_at        TIMESTAMPTZ,
+    promoted_at        TIMESTAMPTZ
 );
 
 ALTER TABLE gtfs_meta.feed_sources
@@ -90,6 +90,43 @@ CREATE TABLE gtfs.stops
     platform_code       TEXT,
     PRIMARY KEY (version_id, stop_id)
 );
+
+CREATE INDEX gtfs_stops_version_parent_station_idx ON gtfs.stops (version_id, parent_station)
+    WHERE parent_station IS NOT NULL;
+
+CREATE TABLE gtfs.stop_route_refs
+(
+    version_id BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    stop_id    TEXT   NOT NULL,
+    route_id   TEXT   NOT NULL,
+    PRIMARY KEY (version_id, stop_id, route_id)
+);
+
+CREATE VIEW gtfs.stop_route_agg_refs AS
+SELECT
+    stop.version_id,
+    stop.stop_id,
+    ARRAY(
+        SELECT DISTINCT route_ref.route_id
+        FROM (
+            SELECT own_ref.route_id
+            FROM gtfs.stop_route_refs own_ref
+            WHERE own_ref.version_id = stop.version_id
+              AND own_ref.stop_id = stop.stop_id
+
+            UNION
+
+            SELECT child_ref.route_id
+            FROM gtfs.stops child_stop
+            JOIN gtfs.stop_route_refs child_ref
+              ON child_ref.version_id = child_stop.version_id
+             AND child_ref.stop_id = child_stop.stop_id
+            WHERE child_stop.version_id = stop.version_id
+              AND child_stop.parent_station = stop.stop_id
+        ) route_ref
+        ORDER BY route_ref.route_id
+    ) AS route_ids
+FROM gtfs.stops stop;
 
 CREATE TABLE gtfs.routes
 (
@@ -133,6 +170,8 @@ CREATE TABLE gtfs.stop_times
     timepoint           INTEGER,
     PRIMARY KEY (version_id, trip_id, stop_sequence)
 );
+
+CREATE INDEX gtfs_stop_times_version_stop_idx ON gtfs.stop_times (version_id, stop_id);
 
 CREATE TABLE gtfs.shapes
 (
@@ -197,10 +236,10 @@ CREATE TABLE gtfs_tiling.source_tilings
 
 CREATE TABLE gtfs_tiling.stop_points
 (
-    source_id             BIGINT NOT NULL,
-    version_id            BIGINT NOT NULL,
-    stop_id               TEXT   NOT NULL,
-    geom                  geometry(Point, 4326) NOT NULL,
+    source_id  BIGINT                NOT NULL,
+    version_id BIGINT                NOT NULL,
+    stop_id    TEXT                  NOT NULL,
+    geom       geometry(Point, 4326) NOT NULL,
 
     PRIMARY KEY (source_id, version_id, stop_id),
     FOREIGN KEY (source_id, version_id)

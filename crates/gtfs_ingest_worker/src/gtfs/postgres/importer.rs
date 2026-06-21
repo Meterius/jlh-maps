@@ -25,8 +25,10 @@ where
 {
     let mut gtfs_zip = GtfsZip::new(zip_archive).context("failed to inspect GTFS ZIP")?;
 
+    delete_existing_derived_gtfs_rows(tx, version_id).await?;
     delete_existing_gtfs_rows(tx, version_id).await?;
     copy_gtfs_to_tables(tx, &mut gtfs_zip, version_id).await?;
+    update_derived_gtfs_tables(tx, version_id).await?;
 
     Ok(())
 }
@@ -257,6 +259,59 @@ async fn delete_existing_gtfs_rows(
             .await
             .with_context(|| format!("failed to clear previous rows from {}", table_name))?;
     }
+
+    Ok(())
+}
+
+async fn delete_existing_derived_gtfs_rows(
+    tx: &mut Transaction<'_, Postgres>,
+    version_id: i64,
+) -> Result<()> {
+    sqlx::query("DELETE FROM gtfs.stop_route_refs WHERE version_id = $1")
+        .bind(version_id)
+        .execute(&mut **tx)
+        .await
+        .context("failed to clear previous rows from gtfs.stop_route_refs")?;
+
+    Ok(())
+}
+
+async fn update_derived_gtfs_tables(
+    tx: &mut Transaction<'_, Postgres>,
+    version_id: i64,
+) -> Result<()> {
+    let rows = sqlx::query(
+        r#"
+        INSERT INTO gtfs.stop_route_refs (
+            version_id,
+            stop_id,
+            route_id
+        )
+        SELECT DISTINCT
+            stop_time.version_id,
+            stop_time.stop_id,
+            trip.route_id
+        FROM gtfs.stop_times stop_time
+        JOIN gtfs.trips trip
+          ON trip.version_id = stop_time.version_id
+         AND trip.trip_id = stop_time.trip_id
+        WHERE stop_time.version_id = $1
+          AND stop_time.stop_id IS NOT NULL
+          AND trip.route_id IS NOT NULL
+        "#,
+    )
+    .bind(version_id)
+    .execute(&mut **tx)
+    .await
+    .context("failed to update derived GTFS stop-trip references")?
+    .rows_affected();
+
+    info!(
+        version_id,
+        target_table = "gtfs.stop_route_refs",
+        rows,
+        "updated derived GTFS table"
+    );
 
     Ok(())
 }
