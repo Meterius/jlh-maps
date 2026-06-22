@@ -23,12 +23,15 @@ const useSelectedMarkerImageProvider = createSharedComposable(() =>
   }),
 )
 
-const makeSelectedFeatureCollection = (features: MapGeoJSONFeature[]): FeatureCollection => ({
+const makeSelectedFeatureCollection = (features: SelectedMarkerFeature[]): FeatureCollection => ({
   type: 'FeatureCollection',
-  features: features.map((feature) => ({
+  features: features.map(({ feature, label }) => ({
     type: 'Feature',
     id: feature.id,
-    properties: feature.properties,
+    properties: {
+      ...feature.properties,
+      [SELECTED_MARKER_LABEL_PROPERTY]: label,
+    },
     geometry: feature.geometry,
   })),
 })
@@ -39,11 +42,13 @@ const makeSelectedMarkerLayer = (): MarkerLayerSpecification => ({
   source: SELECTED_MARKER_SOURCE_ID,
   markerOptions: {
     ...DEFAULT_PIN_MARKER_ICON_OPTIONS,
+    height: DEFAULT_PIN_MARKER_ICON_OPTIONS.height * 1.2,
+    headPadding: DEFAULT_PIN_MARKER_ICON_OPTIONS.headPadding * 1.4,
     color: '#dc2626',
     iconColor: '#dc2626',
   },
   marker: {
-    scale: 1.42,
+    scale: 0.75,
     textSize: 16,
     headIconName: ['literal', SELECTED_MARKER_ICON_NAME] as ExpressionSpecification,
   },
@@ -64,9 +69,14 @@ const makeSelectedMarkerLayer = (): MarkerLayerSpecification => ({
   },
 })
 
+export type SelectedMarkerFeature = {
+  feature: MapGeoJSONFeature
+  label: string
+}
+
 export const useSelectedMarkerLayer = (
   map: MapLibreMap,
-  features: WatchSource<MapGeoJSONFeature[]>,
+  features: WatchSource<SelectedMarkerFeature[]>,
   options?: UseLayerOptions,
 ) => {
   useGeoJsonSource(map, SELECTED_MARKER_SOURCE_ID, () =>

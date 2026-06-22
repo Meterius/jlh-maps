@@ -63,7 +63,7 @@ export const DEFAULT_BOX_MARKER_ICON_OPTIONS = {
   outlineColor: 'rgb(15 23 42 / 0.22)',
   iconColor: '#2563eb',
   headIconRatio: 1,
-  headPadding: 6,
+  headPadding: 4,
 } satisfies MarkerOptions
 
 const parsedMarkerIconSvgCache = new Map<string, ParsedMarkerIconSvg>()

@@ -1,5 +1,6 @@
 import type {
   ExpressionSpecification,
+  GeoJSONFeature,
   Map as MapLibreMap,
   SymbolLayerSpecification,
 } from 'maplibre-gl'
@@ -155,7 +156,13 @@ export function useGtfsLayer(
   )
 
   return {
-    markerLayerIds: [rootStopMarkerLayerSpecification.id],
+    markerLayers: [
+      {
+        layerId: rootStopMarkerLayerSpecification.id,
+        getLabelFromFeature: (feature: GeoJSONFeature) =>
+          feature.properties?.[GtfsStopField.StopName],
+      },
+    ],
     layerIds: [rootStopMarkerLayerSpecification.id, GtfsLayerId.HintSymbols],
   }
 }
@@ -206,7 +213,7 @@ function makeGtfsRootStopMarkerLayer(): MarkerLayerSpecification {
       ] as ExpressionSpecification,
     },
     paint: {
-      'text-color': 'rgb(17 24 39)',
+      'text-color': GTFS_ROOT_STOP_MARKER_COLOR,
       'text-halo-color': 'rgb(255 255 255)',
       'text-halo-width': 1.25,
       'icon-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0.85, 15, 1],
@@ -286,7 +293,7 @@ function makeGtfsHasSpecificRouteTypeExpression(): ExpressionSpecification {
   ]
 }
 
-function makeMatchExpression<K>(
+function makeMatchExpression(
   value: ExpressionSpecification,
   cases: Record<string, number | string | ExpressionSpecification>,
   fallback: ExpressionSpecification | number | string,

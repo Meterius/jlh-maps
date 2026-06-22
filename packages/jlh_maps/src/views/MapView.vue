@@ -203,6 +203,7 @@ import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { onLongPress, syncRef } from '@vueuse/core'
 import type {
   LayerSpecification,
+  MapGeoJSONFeature,
   MapLibreMap,
   MapMouseEvent,
   SymbolLayerSpecification,
@@ -853,17 +854,27 @@ const useLayerFeatureSelection = (
   map: MapLibreMap,
   layerId: string,
   hoveredPropertyName: string,
+  getLabelFromFeature: (feature: MapGeoJSONFeature) => string | null | undefined,
 ) => {
   // disable hover as mouse events cause feature queries which are very expensive while terrain
   // is active
   useHoverFeatureState(map, layerId, hoveredPropertyName, () => !terrainEnabled.value)
-  useLayerFeatureIdExclusionFilter(map, layerId, () => selected.value.map((item) => item.featureId))
+
+  useLayerFeatureIdExclusionFilter(map, layerId, () =>
+    selected.value
+      .filter(
+        (item) =>
+          item.feature.source === map.getLayer(layerId)?.source &&
+          item.feature.sourceLayer === map.getLayer(layerId)?.sourceLayer,
+      )
+      .map((item) => item.featureId),
+  )
 
   onMapLayerFeatureEvent(map, 'click', layerId, ({ feature, originalEvent }) => {
     // prevent default to avoid selection causing 'background' click to cause deselection
     originalEvent.preventDefault()
 
-    selectFeature(feature)
+    selectFeature(feature, getLabelFromFeature(feature) ?? '')
   })
 }
 
@@ -911,7 +922,12 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         )
         poiOverlayLayerIds.push(poiLayer.layerId)
 
-        useLayerFeatureSelection(map, poiLayer.layerId, HOVERED_PROPERTY_NAME)
+        useLayerFeatureSelection(
+          map,
+          poiLayer.layerId,
+          HOVERED_PROPERTY_NAME,
+          (feature) => feature.properties.name,
+        )
 
         map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
       })
@@ -930,8 +946,8 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       },
     )
 
-    gtfsLayer.markerLayerIds.forEach((layerId) => {
-      useLayerFeatureSelection(map, layerId, HOVERED_PROPERTY_NAME)
+    gtfsLayer.markerLayers.forEach(({ layerId, getLabelFromFeature }) => {
+      useLayerFeatureSelection(map, layerId, HOVERED_PROPERTY_NAME, getLabelFromFeature)
     })
 
     poiOverlayLayerIds.push(...gtfsLayer.layerIds)
@@ -1147,7 +1163,9 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
     // Selection
 
-    useSelectedMarkerLayer(map, () => selected.value.map((item) => item.feature))
+    useSelectedMarkerLayer(map, () =>
+      selected.value.map((item) => ({ feature: item.feature, label: item.label })),
+    )
 
     // Background Click
 

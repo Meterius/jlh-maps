@@ -7,6 +7,7 @@ import { extractOsmIdFromOmtFeatureId, type OsmId } from '@/utils/osm.ts'
 
 export type SelectionItem = {
   feature: MapGeoJSONFeature
+  label: string
   featureId: MapFeatureId
   osmId?: OsmId
 }
@@ -16,13 +17,14 @@ const [provideMapSelection, useMapSelection] = createInjectionState(() => {
 
   return {
     selected: computed(() => Object.values(selectedMap.value)),
-    selectFeature: (feature: MapGeoJSONFeature) => {
+    selectFeature: (feature: MapGeoJSONFeature, label: string) => {
       selectedMap.value =
         feature.id !== undefined
           ? {
               [feature.id]: {
                 feature,
                 featureId: feature.id,
+                label,
                 osmId:
                   typeof feature.id === 'number'
                     ? (extractOsmIdFromOmtFeatureId(feature.id) ?? undefined)
