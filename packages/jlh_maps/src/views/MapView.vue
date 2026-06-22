@@ -201,7 +201,12 @@ export { MapViewBaseStyleType } from '@/views/map-view/map-view-types.ts'
 import { MglMap } from '@indoorequal/vue-maplibre-gl'
 import { computed, ref, shallowRef, watch, watchEffect } from 'vue'
 import { onLongPress, syncRef } from '@vueuse/core'
-import type { LayerSpecification, MapMouseEvent, SymbolLayerSpecification } from 'maplibre-gl'
+import type {
+  LayerSpecification,
+  MapLibreMap,
+  MapMouseEvent,
+  SymbolLayerSpecification,
+} from 'maplibre-gl'
 import {
   TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL,
   TILESERVER_RASTER_SEN2_TILE_URL_PATTERN,
@@ -841,6 +846,27 @@ const setDirectionStop = (idx: number) => {
 
 // Base Styles
 
+const HOVERED_PROPERTY_NAME = 'isHovered'
+
+// makes features of the layer selectable / hoverable
+const useLayerFeatureSelection = (
+  map: MapLibreMap,
+  layerId: string,
+  hoveredPropertyName: string,
+) => {
+  // disable hover as mouse events cause feature queries which are very expensive while terrain
+  // is active
+  useHoverFeatureState(map, layerId, hoveredPropertyName, () => !terrainEnabled.value)
+  useLayerFeatureIdExclusionFilter(map, layerId, () => selected.value.map((item) => item.featureId))
+
+  onMapLayerFeatureEvent(map, 'click', layerId, ({ feature, originalEvent }) => {
+    // prevent default to avoid selection causing 'background' click to cause deselection
+    originalEvent.preventDefault()
+
+    selectFeature(feature)
+  })
+}
+
 const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
   source: TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL.toString(),
   options: { diff: false },
@@ -877,7 +903,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
           map,
           baseLayer,
           {
-            hoverFeatureStateProperty: 'isHovered',
+            hoverFeatureStateProperty: HOVERED_PROPERTY_NAME,
           },
           {
             visible: cinematicOverlayLayerVisible,
@@ -885,30 +911,29 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         )
         poiOverlayLayerIds.push(poiLayer.layerId)
 
-        // disable hover as mouse events cause feature queries which are very expensive while terrain
-        // is active
-        useHoverFeatureState(map, poiLayer.layerId, 'isHovered', () => !terrainEnabled.value)
-        useLayerFeatureIdExclusionFilter(map, poiLayer.layerId, () =>
-          selected.value.map((item) => item.featureId),
-        )
-
-        onMapLayerFeatureEvent(map, 'click', poiLayer.layerId, ({ feature, originalEvent }) => {
-          // prevent default to avoid selection causing 'background' click to cause deselection
-          originalEvent.preventDefault()
-
-          selectFeature(feature)
-        })
+        useLayerFeatureSelection(map, poiLayer.layerId, HOVERED_PROPERTY_NAME)
 
         map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
       })
 
     // GTFS
 
-    const gtfsLayer = useGtfsLayer(map, {
-      beforeId: map.getLayer('Other labels') ? 'Other labels' : undefined,
-      visible: () =>
-        currentBaseStyleLayerSettings.value.gtfsEnabled && cinematicOverlayLayerVisible(),
+    const gtfsLayer = useGtfsLayer(
+      map,
+      {
+        hoverFeatureStateProperty: HOVERED_PROPERTY_NAME,
+      },
+      {
+        beforeId: poiOverlayLayerIds[poiOverlayLayerIds.length - 1],
+        visible: () =>
+          currentBaseStyleLayerSettings.value.gtfsEnabled && cinematicOverlayLayerVisible(),
+      },
+    )
+
+    gtfsLayer.markerLayerIds.forEach((layerId) => {
+      useLayerFeatureSelection(map, layerId, HOVERED_PROPERTY_NAME)
     })
+
     poiOverlayLayerIds.push(...gtfsLayer.layerIds)
 
     //

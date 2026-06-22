@@ -2,7 +2,6 @@ import { useMap } from '@indoorequal/vue-maplibre-gl'
 import {
   type AddLayerObject,
   type CanvasSourceSpecification,
-  type FilterSpecification,
   type GeoJSONSource,
   type MapGeoJSONFeature,
   type MapEventType,
@@ -14,6 +13,11 @@ import {
   type StyleImageInterface,
   type StyleImageMetadata,
 } from 'maplibre-gl'
+import {
+  convertFilter,
+  type ExpressionFilterSpecification,
+  type FilterSpecification,
+} from '@maplibre/maplibre-gl-style-spec'
 import {
   effectScope,
   type MaybeRefOrGetter,
@@ -196,19 +200,30 @@ export function useLayerFeatureIdExclusionFilter(
   layerId: string,
   excludedFeatureIds: WatchSource<MapFeatureId[]>,
 ) {
-  const originalFilter = map.getFilter(layerId)
+  const originalFilter = map.getFilter(layerId) as FilterSpecification | null | undefined
+  // provided filter may have a legacy expression, migrating here since composing filters will use
+  // the expression filter specification
+  const originalFilterExpression = originalFilter ? convertFilter(originalFilter) : null
 
-  const makeFilter = (featureIds: MapFeatureId[]): FilterSpecification | null => {
+  const makeFilter = (featureIds: MapFeatureId[]): ExpressionFilterSpecification | null => {
     const uniqueFeatureIds = [...new Set(featureIds)]
 
     if (uniqueFeatureIds.length === 0) {
-      return originalFilter ?? null
+      return originalFilterExpression
     }
 
-    const exclusionFilter = ['!in', '$id', ...uniqueFeatureIds] as FilterSpecification
+    const exclusionFilter = [
+      '==',
+      [
+        'in',
+        ['to-string', ['coalesce', 'id', '']],
+        ['literal', uniqueFeatureIds.map((featureId) => String(featureId))],
+      ],
+      false,
+    ] as ExpressionFilterSpecification
 
-    return originalFilter
-      ? (['all', originalFilter, exclusionFilter] as unknown as FilterSpecification)
+    return originalFilterExpression
+      ? ['all', originalFilterExpression, exclusionFilter]
       : exclusionFilter
   }
 
@@ -224,7 +239,7 @@ export function useLayerFeatureIdExclusionFilter(
 
   onScopeDisposeLifo(() => {
     if (map.getLayer(layerId)) {
-      map.setFilter(layerId, originalFilter ?? null)
+      map.setFilter(layerId, originalFilterExpression)
     }
   })
 }

@@ -1,6 +1,5 @@
 import type {
   ExpressionSpecification,
-  FilterSpecification,
   Map as MapLibreMap,
   SymbolLayerSpecification,
 } from 'maplibre-gl'
@@ -12,6 +11,7 @@ import {
   useLucideIconImageSourceProvider,
 } from '@/maplibre-layers/common/lucide-icon-image-source-provider.ts'
 import {
+  type MarkerLayerMarker,
   type MarkerLayerSpecification,
   useMarkerImageSourceProvider,
   useMarkerLayer,
@@ -109,14 +109,18 @@ enum GtfsStopField {
   StopName = 'stop_name',
 }
 
-export enum GtfsLayerId {
+enum GtfsLayerId {
   RootStopMarkers = 'gtfs-root-stop-markers',
   HintSymbols = 'gtfs-hint-symbols',
 }
 
 export const GTFS_LAYER_IDS = Object.values(GtfsLayerId)
 
-export function useGtfsLayer(map: MapLibreMap, options: UseLayerOptions = {}) {
+export function useGtfsLayer(
+  map: MapLibreMap,
+  additionalMarkerLayerMarkerFields?: Partial<Pick<MarkerLayerMarker, 'hoverFeatureStateProperty'>>,
+  options: UseLayerOptions = {},
+) {
   useSource(map, GTFS_SOURCE_ID, {
     type: 'vector',
     url: `pmtiles://${TILESERVER_GTFS_PMTILES_URL.toString()}`,
@@ -136,10 +140,23 @@ export function useGtfsLayer(map: MapLibreMap, options: UseLayerOptions = {}) {
     GTFS_ROOT_STOP_MARKER_ICON_NAMES,
   )
 
-  useMarkerLayer(map, makeGtfsRootStopMarkerLayer(), markerImageSourceProvider, options)
+  const rootStopMarkerLayerSpecification = makeGtfsRootStopMarkerLayer()
+  useMarkerLayer(
+    map,
+    {
+      ...rootStopMarkerLayerSpecification,
+      marker: {
+        ...rootStopMarkerLayerSpecification.marker,
+        ...additionalMarkerLayerMarkerFields,
+      },
+    },
+    markerImageSourceProvider,
+    options,
+  )
 
   return {
-    layerIds: [...GTFS_LAYER_IDS],
+    markerLayerIds: [rootStopMarkerLayerSpecification.id],
+    layerIds: [rootStopMarkerLayerSpecification.id, GtfsLayerId.HintSymbols],
   }
 }
 
@@ -225,17 +242,17 @@ function makeGtfsHintSymbolLayer(
   }
 }
 
-function makeRootStopFilter(): FilterSpecification {
+function makeRootStopFilter(): ExpressionSpecification {
   return [
     'all',
-    ['!', makeHasStringFieldExpression(GtfsStopField.ParentStationId)],
+    makeNotHasStringFieldExpression(GtfsStopField.ParentStationId),
     [
       'any',
       ['==', makeLocationTypeExpression(), GtfsStopLocationType.StopOrPlatform],
       ['==', makeLocationTypeExpression(), GtfsStopLocationType.Station],
     ],
     makeGtfsHasSpecificRouteTypeExpression(),
-  ] as FilterSpecification
+  ]
 }
 
 function makeGtfsIconNameExpression(): ExpressionSpecification {
@@ -291,4 +308,8 @@ function makeLocationTypeExpression(): ExpressionSpecification {
 
 function makeHasStringFieldExpression(fieldName: GtfsStopField): ExpressionSpecification {
   return ['!=', ['coalesce', ['get', fieldName], ''], ''] as ExpressionSpecification
+}
+
+function makeNotHasStringFieldExpression(fieldName: GtfsStopField): ExpressionSpecification {
+  return ['==', ['coalesce', ['get', fieldName], ''], ''] as ExpressionSpecification
 }
