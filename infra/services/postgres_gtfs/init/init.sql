@@ -238,10 +238,12 @@ CREATE TABLE gtfs_tiling.stop_points
 (
     source_id  BIGINT                NOT NULL,
     version_id BIGINT                NOT NULL,
+    feature_id BIGINT                NOT NULL,
     stop_id    TEXT                  NOT NULL,
     geom       geometry(Point, 4326) NOT NULL,
 
     PRIMARY KEY (source_id, version_id, stop_id),
+    UNIQUE (source_id, version_id, feature_id),
     FOREIGN KEY (source_id, version_id)
         REFERENCES gtfs_tiling.source_tilings (source_id, version_id)
         ON DELETE CASCADE

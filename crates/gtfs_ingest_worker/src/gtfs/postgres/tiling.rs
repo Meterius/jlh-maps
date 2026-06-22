@@ -66,7 +66,11 @@ pub async fn sync_tiling_for_source(
     delete_source_tiling(&mut tx, source.source_id).await?;
     insert_source_tiling(&mut tx, source.source_id, active_version_id).await?;
 
+    // Every tiling feature table populated below shares this sequence so feature_id
+    // stays unique within the source tiling.
+    create_tiling_feature_id_sequence(&mut tx).await?;
     import_source_tiling_data(&mut tx, source.source_id, active_version_id).await?;
+    drop_tiling_feature_id_sequence(&mut tx).await?;
 
     tx.commit()
         .await
@@ -266,6 +270,7 @@ pub fn stream_export_tiles<'a>(
                             64,
                             TRUE
                         ) AS geom,
+                        stop_point.feature_id,
                         stop_point.version_id,
                         tiling.source_slug,
                         stop_point.stop_id,
@@ -304,10 +309,11 @@ pub fn stream_export_tiles<'a>(
                      AND route.route_id = route_ref.route_id
                     GROUP BY stop_route_agg_ref.version_id, stop_route_agg_ref.stop_id, stop_route_agg_ref.route_ids
                 )
-                SELECT ST_AsMVT(stop_feature, 'stops', 4096, 'geom') AS tile
+                SELECT ST_AsMVT(stop_feature, 'stops', 4096, 'geom', 'feature_id') AS tile
                 FROM (
                     SELECT
                         feature.geom,
+                        feature.feature_id,
                         feature.source_slug,
                         feature.stop_id,
                         feature.stop_code,
@@ -418,6 +424,24 @@ async fn insert_source_tiling(
     Ok(())
 }
 
+async fn create_tiling_feature_id_sequence(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
+    sqlx::query("CREATE TEMP SEQUENCE gtfs_tiling_feature_id_seq AS BIGINT")
+        .execute(&mut **tx)
+        .await
+        .context("failed to create GTFS tiling feature id sequence")?;
+
+    Ok(())
+}
+
+async fn drop_tiling_feature_id_sequence(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
+    sqlx::query("DROP SEQUENCE gtfs_tiling_feature_id_seq")
+        .execute(&mut **tx)
+        .await
+        .context("failed to drop GTFS tiling feature id sequence")?;
+
+    Ok(())
+}
+
 // Importing
 
 async fn import_source_tiling_data(
@@ -439,12 +463,14 @@ async fn import_source_tiling_stop_points(
         INSERT INTO gtfs_tiling.stop_points (
             source_id,
             version_id,
+            feature_id,
             stop_id,
             geom
         )
         SELECT
             $1,
             $2,
+            nextval('gtfs_tiling_feature_id_seq')::BIGINT,
             stop_id,
             ST_SetSRID(ST_MakePoint(stop_lon, stop_lat), 4326)
         FROM gtfs.stops
