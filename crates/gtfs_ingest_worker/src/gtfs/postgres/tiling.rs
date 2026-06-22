@@ -315,6 +315,7 @@ pub fn stream_export_tiles<'a>(
                         feature.geom,
                         feature.feature_id,
                         feature.source_slug,
+                        feature.version_id,
                         feature.stop_id,
                         feature.stop_code,
                         feature.stop_name,

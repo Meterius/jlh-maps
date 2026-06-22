@@ -166,6 +166,7 @@ fn tiling_metadata(source_slug: Option<&str>) -> Result<String> {
                 "description": "GTFS stop and station points",
                 "fields": {
                     "source_slug": "String",
+                    "version_id": "Number",
                     "stop_id": "String",
                     "parent_station_id": "String",
                     "stop_code": "String",
