@@ -43,7 +43,7 @@ const DEFAULT_ICON_PRESENTATION =
 
 export const DEFAULT_PIN_MARKER_ICON_OPTIONS = {
   shape: MarkerShape.Pin,
-  width:  48,
+  width: 48,
   height: 56,
   color: '#2563eb',
   backgroundColor: '#ffffff',

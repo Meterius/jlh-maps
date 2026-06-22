@@ -19,8 +19,6 @@ export type MapViewStore = {
   bevyCanvasEnabled: boolean
   frameStatisticsEnabled: boolean
   featureInspectorEnabled: boolean
-  advancedRoadsEnabled: boolean
-  gtfsEnabled: boolean
 }
 
 export type MapCelestialLightingSettings = {
@@ -53,6 +51,8 @@ export type MapViewBaseStyleLayerSettings = {
   treesEnabled: boolean
   cinematicEnabled: boolean
   terrainEnabled: boolean
+  advancedRoadsEnabled: boolean
+  gtfsEnabled: boolean
   featureVisibilityDistance: number
 }
 
@@ -123,8 +123,6 @@ function createDefaultMapViewStore(): MapViewStore {
     bevyCanvasEnabled: false,
     frameStatisticsEnabled: false,
     featureInspectorEnabled: false,
-    advancedRoadsEnabled: false,
-    gtfsEnabled: false,
   }
 }
 
@@ -146,6 +144,8 @@ function createDefaultMapViewBaseStyleLayerSettings(): MapViewBaseStyleLayerSett
     treesEnabled: true,
     cinematicEnabled: false,
     terrainEnabled: false,
+    advancedRoadsEnabled: false,
+    gtfsEnabled: false,
     featureVisibilityDistance: 10,
   }
 }

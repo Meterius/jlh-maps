@@ -3,62 +3,17 @@
     <UCard :ui="{ body: '!p-2 grid w-72 max-w-[calc(100vw-1rem)] gap-2' }">
       <div v-if="currentBaseStyleLayerSettings.bevyEnabled" class="grid grid-cols-2 gap-1">
         <UButton
-          label="Shadows"
+          v-for="(button, index) in bevyToggleButtons"
+          :key="index"
+          :label="button.label"
           color="neutral"
           active-color="primary"
           variant="outline-solid"
-          :active="currentBaseStyleLayerSettings.shadowsEnabled"
+          :active="button.active"
           size="md"
           class="cursor-pointer"
-          icon="lucide:sunset"
-          @click="
-            currentBaseStyleLayerSettings.shadowsEnabled =
-              !currentBaseStyleLayerSettings.shadowsEnabled
-          "
-        />
-
-        <UButton
-          label="3D Buildings"
-          color="neutral"
-          active-color="primary"
-          variant="outline-solid"
-          :active="currentBaseStyleLayerSettings.buildingsEnabled"
-          size="md"
-          class="cursor-pointer"
-          icon="lucide:building"
-          @click="
-            currentBaseStyleLayerSettings.buildingsEnabled =
-              !currentBaseStyleLayerSettings.buildingsEnabled
-          "
-        />
-
-        <UButton
-          label="Trees"
-          color="neutral"
-          active-color="primary"
-          variant="outline-solid"
-          :active="currentBaseStyleLayerSettings.treesEnabled"
-          size="md"
-          class="cursor-pointer"
-          icon="lucide:tree-pine"
-          @click="
-            currentBaseStyleLayerSettings.treesEnabled = !currentBaseStyleLayerSettings.treesEnabled
-          "
-        />
-
-        <UButton
-          label="Cinematic"
-          color="neutral"
-          active-color="primary"
-          variant="outline-solid"
-          :active="currentBaseStyleLayerSettings.cinematicEnabled"
-          size="md"
-          class="cursor-pointer"
-          icon="lucide:film"
-          @click="
-            currentBaseStyleLayerSettings.cinematicEnabled =
-              !currentBaseStyleLayerSettings.cinematicEnabled
-          "
+          :icon="button.icon"
+          @click="button.click"
         />
 
         <label class="col-span-2 grid gap-2 px-1 pt-2">
@@ -82,56 +37,17 @@
       <div class="grid min-w-0 gap-1">
         <div class="grid grid-cols-2 gap-1">
           <UButton
-            label="Fancy"
+            v-for="(button, index) in genericToggleButtons"
+            :key="index"
+            :label="button.label"
             color="neutral"
             active-color="primary"
             variant="outline-solid"
-            :active="currentBaseStyleLayerSettings.bevyEnabled"
+            :active="button.active"
             size="md"
             class="cursor-pointer"
-            icon="lucide:star"
-            @click="
-              currentBaseStyleLayerSettings.bevyEnabled = !currentBaseStyleLayerSettings.bevyEnabled
-            "
-          />
-
-          <UButton
-            label="Terrain"
-            color="neutral"
-            active-color="primary"
-            variant="outline-solid"
-            :active="currentBaseStyleLayerSettings.terrainEnabled"
-            size="md"
-            class="cursor-pointer"
-            icon="lucide:mountain"
-            @click="
-              currentBaseStyleLayerSettings.terrainEnabled =
-                !currentBaseStyleLayerSettings.terrainEnabled
-            "
-          />
-
-          <UButton
-            label="Advanced Roads"
-            color="neutral"
-            active-color="primary"
-            variant="outline-solid"
-            :active="mapViewStore.advancedRoadsEnabled"
-            size="md"
-            class="cursor-pointer"
-            icon="lucide:route"
-            @click="mapViewStore.advancedRoadsEnabled = !mapViewStore.advancedRoadsEnabled"
-          />
-
-          <UButton
-            label="GTFS"
-            color="neutral"
-            active-color="primary"
-            variant="outline-solid"
-            :active="mapViewStore.gtfsEnabled"
-            size="md"
-            class="cursor-pointer"
-            icon="lucide:train-front"
-            @click="mapViewStore.gtfsEnabled = !mapViewStore.gtfsEnabled"
+            :icon="button.icon"
+            @click="button.click"
           />
         </div>
 
@@ -248,4 +164,81 @@ const darkThemeEnabled = useDark()
 const toggleDarkTheme = () => {
   darkThemeEnabled.value = !darkThemeEnabled.value
 }
+
+type ToggleButtonProps = {
+  label: string
+  icon: string
+  active: boolean
+  click: () => void
+}
+
+const genericToggleButtons = computed<ToggleButtonProps[]>(() => [
+  {
+    label: 'Fancy',
+    icon: 'lucide:star',
+    active: currentBaseStyleLayerSettings.value.bevyEnabled,
+    click: () =>
+      (currentBaseStyleLayerSettings.value.bevyEnabled =
+        !currentBaseStyleLayerSettings.value.bevyEnabled),
+  },
+  {
+    label: 'Terrain',
+    icon: 'lucide:mountain',
+    active: currentBaseStyleLayerSettings.value.terrainEnabled,
+    click: () =>
+      (currentBaseStyleLayerSettings.value.terrainEnabled =
+        !currentBaseStyleLayerSettings.value.terrainEnabled),
+  },
+  {
+    label: 'Advanced Roads',
+    icon: 'lucide:route',
+    active: currentBaseStyleLayerSettings.value.advancedRoadsEnabled,
+    click: () =>
+      (currentBaseStyleLayerSettings.value.advancedRoadsEnabled =
+        !currentBaseStyleLayerSettings.value.advancedRoadsEnabled),
+  },
+  {
+    label: 'GTFS',
+    icon: 'lucide:train-front',
+    active: currentBaseStyleLayerSettings.value.gtfsEnabled,
+    click: () =>
+      (currentBaseStyleLayerSettings.value.gtfsEnabled =
+        !currentBaseStyleLayerSettings.value.gtfsEnabled),
+  },
+  {
+    label: 'Cinematic',
+    icon: 'lucide:film',
+    active: currentBaseStyleLayerSettings.value.cinematicEnabled,
+    click: () =>
+      (currentBaseStyleLayerSettings.value.cinematicEnabled =
+        !currentBaseStyleLayerSettings.value.cinematicEnabled),
+  },
+])
+
+const bevyToggleButtons = computed<ToggleButtonProps[]>(() => [
+  {
+    label: 'Shadows',
+    icon: 'lucide:sunset',
+    active: currentBaseStyleLayerSettings.value.shadowsEnabled,
+    click: () =>
+      (currentBaseStyleLayerSettings.value.shadowsEnabled =
+        !currentBaseStyleLayerSettings.value.shadowsEnabled),
+  },
+  {
+    label: '3D Buildings',
+    icon: 'lucide:building',
+    active: currentBaseStyleLayerSettings.value.buildingsEnabled,
+    click: () =>
+      (currentBaseStyleLayerSettings.value.buildingsEnabled =
+        !currentBaseStyleLayerSettings.value.buildingsEnabled),
+  },
+  {
+    label: 'Trees',
+    icon: 'lucide:tree-pine',
+    active: currentBaseStyleLayerSettings.value.treesEnabled,
+    click: () =>
+      (currentBaseStyleLayerSettings.value.treesEnabled =
+        !currentBaseStyleLayerSettings.value.treesEnabled),
+  },
+])
 </script>

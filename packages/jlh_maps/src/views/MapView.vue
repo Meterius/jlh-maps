@@ -846,6 +846,7 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
   options: { diff: false },
   instantiate: (map) => {
     const poiOverlayLayerIds: string[] = []
+
     const cinematicOverlayLayerVisible = () =>
       !currentBaseStyleLayerSettings.value.cinematicEnabled ||
       pitch.value <= CINEMATIC_OVERLAY_VISIBLE_MAX_PITCH_DEGREES
@@ -900,6 +901,17 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
 
         map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
       })
+
+    // GTFS
+
+    const gtfsLayer = useGtfsLayer(map, {
+      beforeId: map.getLayer('Other labels') ? 'Other labels' : undefined,
+      visible: () =>
+        currentBaseStyleLayerSettings.value.gtfsEnabled && cinematicOverlayLayerVisible(),
+    })
+    poiOverlayLayerIds.push(...gtfsLayer.layerIds)
+
+    //
 
     BEVY_OVERLAY_LAYER_IDS.forEach((layerId) => {
       useLayerVisibility(map, layerId, cinematicOverlayLayerVisible)
@@ -993,16 +1005,8 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       beforeId: map.getLayer(ADVANCED_ROADS_BEFORE_LAYER_ID)
         ? ADVANCED_ROADS_BEFORE_LAYER_ID
         : undefined,
-      visible: () => mapViewStore.value.advancedRoadsEnabled,
+      visible: () => currentBaseStyleLayerSettings.value.advancedRoadsEnabled,
     })
-
-    // GTFS
-
-    const gtfsLayer = useGtfsLayer(map, {
-      beforeId: map.getLayer('Other labels') ? 'Other labels' : undefined,
-      visible: () => mapViewStore.value.gtfsEnabled && cinematicOverlayLayerVisible(),
-    })
-    poiOverlayLayerIds.push(...gtfsLayer.layerIds)
 
     // Bevy
 

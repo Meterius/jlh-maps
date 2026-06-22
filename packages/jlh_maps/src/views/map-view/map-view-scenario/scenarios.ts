@@ -103,8 +103,6 @@ function createScenarioMapViewStore(): MapViewStore {
     bevyCanvasEnabled: false,
     frameStatisticsEnabled: false,
     featureInspectorEnabled: false,
-    advancedRoadsEnabled: false,
-    gtfsEnabled: false,
   }
 }
 
@@ -117,6 +115,8 @@ function createScenarioBaseStyleLayerSettingsStore(): MapViewBaseStyleLayerSetti
       treesEnabled: true,
       cinematicEnabled: true,
       terrainEnabled: false,
+      advancedRoadsEnabled: false,
+      gtfsEnabled: false,
       featureVisibilityDistance: 12,
     },
     [MapViewBaseStyleType.Satellite]: {
@@ -126,6 +126,8 @@ function createScenarioBaseStyleLayerSettingsStore(): MapViewBaseStyleLayerSetti
       treesEnabled: true,
       cinematicEnabled: false,
       terrainEnabled: false,
+      advancedRoadsEnabled: false,
+      gtfsEnabled: false,
       featureVisibilityDistance: 10,
     },
   }

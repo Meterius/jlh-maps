@@ -166,7 +166,7 @@ function makeGtfsRootStopMarkerLayer(): MarkerLayerSpecification {
       iconColor: GTFS_ROOT_STOP_MARKER_COLOR,
     },
     marker: {
-      scale: ['interpolate', ['linear'], ['zoom'], 15, baseScale, 20, ["*", baseScale, 3]],
+      scale: ['interpolate', ['linear'], ['zoom'], 15, baseScale, 20, ['*', baseScale, 3]],
       textSize: ['interpolate', ['linear'], ['zoom'], 15, 10.5, 16, 12, 18, 13],
       headIconName: makeMatchExpression(
         ['coalesce', ['get', GtfsStopField.RouteTypes], ''],
@@ -265,8 +265,8 @@ function makeGtfsHasSpecificRouteTypeExpression(): ExpressionSpecification {
   return [
     'in',
     ['coalesce', ['get', GtfsStopField.RouteTypes], ''],
-    ['literal', Object.values(GtfsRouteType)]
-  ];
+    ['literal', Object.values(GtfsRouteType)],
+  ]
 }
 
 function makeMatchExpression<K>(
@@ -277,9 +277,9 @@ function makeMatchExpression<K>(
   return [
     'match',
     value,
-    ...Object.entries(cases).flatMap(v => v),
+    ...Object.entries(cases).flatMap((v) => v),
     fallback,
-  ] as unknown as ExpressionSpecification;
+  ] as unknown as ExpressionSpecification
 }
 
 function makeLocationTypeExpression(): ExpressionSpecification {
