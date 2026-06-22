@@ -115,8 +115,6 @@ enum GtfsLayerId {
   HintSymbols = 'gtfs-hint-symbols',
 }
 
-export const GTFS_LAYER_IDS = Object.values(GtfsLayerId)
-
 export function useGtfsLayer(
   map: MapLibreMap,
   additionalMarkerLayerMarkerFields?: Partial<Pick<MarkerLayerMarker, 'hoverFeatureStateProperty'>>,
@@ -205,6 +203,7 @@ function makeGtfsRootStopMarkerLayer(): MarkerLayerSpecification {
       'text-allow-overlap': false,
       'text-ignore-placement': false,
       'text-field': ['get', GtfsStopField.StopName],
+      'text-font': ['Open Sans Semibold', 'Noto Sans Bold'],
       'symbol-sort-key': [
         'case',
         ['==', makeLocationTypeExpression(), GtfsStopLocationType.Station],

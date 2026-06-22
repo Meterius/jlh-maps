@@ -1,4 +1,8 @@
-import type { ExpressionSpecification, Map as MapLibreMap, SymbolLayerSpecification } from 'maplibre-gl'
+import type {
+  ExpressionSpecification,
+  Map as MapLibreMap,
+  SymbolLayerSpecification,
+} from 'maplibre-gl'
 import { createKeyedSharedComposable } from '@/composables/helper.ts'
 import {
   getMapHashKey,
@@ -7,10 +11,14 @@ import {
   type UseImageOptions,
   useLayer,
   type UseLayerOptions,
-  useOnDemandImageProvider
+  useOnDemandImageProvider,
 } from '@/composables/maplibre'
 import { svgToImage } from '@/utils/svg-to-image.ts'
-import { makeMarkerIcon, type MarkerOptions, MarkerShape } from '@/maplibre-layers/common/marker-icon.ts'
+import {
+  makeMarkerIcon,
+  type MarkerOptions,
+  MarkerShape,
+} from '@/maplibre-layers/common/marker-icon.ts'
 
 // Icon Image Handling
 
@@ -144,7 +152,6 @@ const getMarkerIconAnchor = (markerOptions: MarkerOptions): SymbolLayerLayout['i
 
 const getMarkerTextOffset = (
   markerOptions: MarkerOptions,
-  marker: MarkerLayerMarker,
 ): SymbolLayerLayout['text-offset'] => {
   if (markerOptions.shape === MarkerShape.Pin) return [0, 0.4]
   else return [0, 0.2]
@@ -171,7 +178,6 @@ const makeSymbolLayerForMarkerLayer = (
       'text-anchor': 'top',
       'text-offset': getMarkerTextOffset(
         markerLayerSpecification.markerOptions,
-        markerLayerSpecification.marker,
       ),
       'text-size': markerLayerSpecification.marker.textSize,
       'text-optional': false,
@@ -214,6 +220,7 @@ type MarkerLayerLayout = Omit<
   | 'icon-image'
   | 'text-size'
 >
+
 export type MarkerLayerMarker = {
   scale: MarkerLayerNumberValue
   textSize: MarkerLayerNumberValue

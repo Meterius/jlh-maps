@@ -283,6 +283,7 @@ const { mapInstance, loaded, zoom, pitch, terrainEnabled } = useMapExtended(mapK
 
 const BEVY_LAYER_ID = 'bevy-texture'
 const CINEMATIC_OVERLAY_VISIBLE_MAX_PITCH_DEGREES = 25
+
 const BEVY_OVERLAY_LAYER_IDS = [
   // 'Water labels',
   'House number labels',
@@ -308,6 +309,8 @@ const BEVY_OVERLAY_LAYER_IDS = [
   'Capital city labels',
   'Country labels',
 ]
+
+const OMT_GTFS_EXCLUDED_LAYER_IDS = ['Ferry', 'Bus stop', 'Bus station', 'Train']
 
 // Persisted View
 
@@ -910,6 +913,8 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       )
       .filter((layer) => layer['source-layer'] === 'poi')
       .forEach((baseLayer) => {
+        const isGtfsExcluded = OMT_GTFS_EXCLUDED_LAYER_IDS.includes(baseLayer.id)
+
         const poiLayer = usePoiLayer(
           map,
           baseLayer,
@@ -917,7 +922,9 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
             hoverFeatureStateProperty: HOVERED_PROPERTY_NAME,
           },
           {
-            visible: cinematicOverlayLayerVisible,
+            visible: () =>
+              cinematicOverlayLayerVisible() &&
+              (!isGtfsExcluded || !currentBaseStyleLayerSettings.value.gtfsEnabled),
           },
         )
         poiOverlayLayerIds.push(poiLayer.layerId)
