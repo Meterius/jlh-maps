@@ -262,6 +262,7 @@ import {
   ADVANCED_ROADS_SOURCE_ID,
   useAdvancedRoadsLayers,
 } from '@/maplibre-layers/advanced-roads-layer.ts'
+import { useGtfsLayer } from '@/maplibre-layers/gtfs-layer.ts'
 import MapLayersControlPopover from '@/views/map-view/map-control-popovers/MapLayersControlPopover.vue'
 import MapLodControlPopover from '@/views/map-view/map-control-popovers/MapLodControlPopover.vue'
 import MapSunControlPopover from '@/views/map-view/map-control-popovers/MapSunControlPopover.vue'
@@ -994,6 +995,14 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         : undefined,
       visible: () => mapViewStore.value.advancedRoadsEnabled,
     })
+
+    // GTFS
+
+    const gtfsLayer = useGtfsLayer(map, {
+      beforeId: map.getLayer('Other labels') ? 'Other labels' : undefined,
+      visible: () => mapViewStore.value.gtfsEnabled && cinematicOverlayLayerVisible(),
+    })
+    poiOverlayLayerIds.push(...gtfsLayer.layerIds)
 
     // Bevy
 

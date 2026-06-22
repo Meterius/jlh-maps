@@ -104,6 +104,7 @@ function createScenarioMapViewStore(): MapViewStore {
     frameStatisticsEnabled: false,
     featureInspectorEnabled: false,
     advancedRoadsEnabled: false,
+    gtfsEnabled: false,
   }
 }
 

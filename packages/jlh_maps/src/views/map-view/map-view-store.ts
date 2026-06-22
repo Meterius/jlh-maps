@@ -20,6 +20,7 @@ export type MapViewStore = {
   frameStatisticsEnabled: boolean
   featureInspectorEnabled: boolean
   advancedRoadsEnabled: boolean
+  gtfsEnabled: boolean
 }
 
 export type MapCelestialLightingSettings = {
@@ -123,6 +124,7 @@ function createDefaultMapViewStore(): MapViewStore {
     frameStatisticsEnabled: false,
     featureInspectorEnabled: false,
     advancedRoadsEnabled: false,
+    gtfsEnabled: false,
   }
 }
 

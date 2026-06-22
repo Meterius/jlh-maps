@@ -12,6 +12,7 @@ export const API_URL = makeAppUrl(import.meta.env.VITE_API_URL)
 export const VALHALLA_URL = makeAppUrl(import.meta.env.VITE_VALHALLA_URL)
 
 export const TILESERVER_ROADS_PMTILES_URL = new URL('roads/tiles.pmtiles', STATIC_TILESERVER_URL)
+export const TILESERVER_GTFS_PMTILES_URL = new URL('gtfs/tiles.pmtiles', STATIC_TILESERVER_URL)
 
 export const TILESERVER_OMT_DEFAULT_STYLE_TILEJSON_URL = import.meta.env
   .VITE_TILESERVER_OMT_STYLE_URL

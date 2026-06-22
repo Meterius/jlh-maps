@@ -121,6 +121,18 @@
             icon="lucide:route"
             @click="mapViewStore.advancedRoadsEnabled = !mapViewStore.advancedRoadsEnabled"
           />
+
+          <UButton
+            label="GTFS"
+            color="neutral"
+            active-color="primary"
+            variant="outline-solid"
+            :active="mapViewStore.gtfsEnabled"
+            size="md"
+            class="cursor-pointer"
+            icon="lucide:train-front"
+            @click="mapViewStore.gtfsEnabled = !mapViewStore.gtfsEnabled"
+          />
         </div>
 
         <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-1">
