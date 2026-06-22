@@ -1,24 +1,16 @@
-import type {
-  ExpressionSpecification,
-  Map as MapLibreMap,
-  SymbolLayerSpecification,
-} from 'maplibre-gl'
+import type { ExpressionSpecification, Map as MapLibreMap, SymbolLayerSpecification } from 'maplibre-gl'
 import { createKeyedSharedComposable } from '@/composables/helper.ts'
 import {
   getMapHashKey,
   type MapLibreMapImageData,
   useImage,
+  type UseImageOptions,
   useLayer,
   type UseLayerOptions,
-  useOnDemandImageProvider,
-  type UseImageOptions,
+  useOnDemandImageProvider
 } from '@/composables/maplibre'
 import { svgToImage } from '@/utils/svg-to-image.ts'
-import {
-  makeMarkerIcon,
-  MarkerShape,
-  type MarkerOptions,
-} from '@/maplibre-layers/common/marker-icon.ts'
+import { makeMarkerIcon, type MarkerOptions, MarkerShape } from '@/maplibre-layers/common/marker-icon.ts'
 
 // Icon Image Handling
 
@@ -148,22 +140,14 @@ const getDefaultMarkerImagePixelRatio = () => {
 }
 
 const getMarkerIconAnchor = (markerOptions: MarkerOptions): SymbolLayerLayout['icon-anchor'] =>
-  markerOptions.shape === MarkerShape.Pin ? 'bottom' : 'center'
-
-const getMarkerIconOffset = (): SymbolLayerLayout['icon-offset'] => [0, 0]
-
-const getMarkerTextAnchor = (): SymbolLayerLayout['text-anchor'] => 'top'
+  markerOptions.shape === MarkerShape.Pin ? 'bottom' : 'bottom'
 
 const getMarkerTextOffset = (
   markerOptions: MarkerOptions,
   marker: MarkerLayerMarker,
 ): SymbolLayerLayout['text-offset'] => {
   if (markerOptions.shape === MarkerShape.Pin) return [0, 0.4]
-  if (typeof marker.scale !== 'number' || typeof marker.textSize !== 'number') {
-    return [0, markerOptions.height / markerOptions.width + 0.1]
-  }
-
-  return [0, (markerOptions.height * marker.scale) / (marker.textSize * 2) + 0.25]
+  else return [0, 0.2]
 }
 
 const makeSymbolLayerForMarkerLayer = (
@@ -183,8 +167,8 @@ const makeSymbolLayerForMarkerLayer = (
       ),
       'icon-size': markerLayerSpecification.marker.scale,
       'icon-anchor': getMarkerIconAnchor(markerLayerSpecification.markerOptions),
-      'icon-offset': getMarkerIconOffset(),
-      'text-anchor': getMarkerTextAnchor(),
+      'icon-offset': [0, 0],
+      'text-anchor': 'top',
       'text-offset': getMarkerTextOffset(
         markerLayerSpecification.markerOptions,
         markerLayerSpecification.marker,
