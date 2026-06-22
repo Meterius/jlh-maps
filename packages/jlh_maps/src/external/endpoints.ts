@@ -26,6 +26,37 @@ export interface OsmData {
   attrs: Record<string, string | number>
 }
 
+export interface GtfsAggregatedStop {
+  version_id: number
+  stop_id: string
+  stop_code: string | null
+  stop_name: string | null
+  stop_desc: string | null
+  stop_lat: number | null
+  stop_lon: number | null
+  zone_id: string | null
+  stop_url: string | null
+  location_type: number | null
+  parent_station: string | null
+  wheelchair_boarding: number | null
+  platform_code: string | null
+  route_ids: string[]
+  children: GtfsAggregatedStop[]
+}
+
+export interface GtfsRoute {
+  version_id: number
+  route_id: string
+  agency_id: string | null
+  route_short_name: string | null
+  route_long_name: string | null
+  route_desc: string | null
+  route_type: number | null
+  route_url: string | null
+  route_color: string | null
+  route_text_color: string | null
+}
+
 export async function getOsmData(osm_id: OsmId): Promise<OsmData | null> {
   const type = {
     [OsmType.Node]: 'node',
@@ -43,5 +74,40 @@ export async function getOsmData(osm_id: OsmId): Promise<OsmData | null> {
 
   throw new Error(
     `Failed to fetch OSM data for ${osm_id.type}/${osm_id.key}: ${res.status} ${res.statusText}`,
+  )
+}
+
+export async function getGtfsAggregatedStop(
+  versionId: number,
+  stopId: string,
+): Promise<GtfsAggregatedStop | null> {
+  const res = await fetch(
+    new URL(`gtfs/version/${versionId}/aggregated-stop/${encodeURIComponent(stopId)}`, API_URL),
+  )
+
+  if (res.ok) {
+    return res.json()
+  } else if (res.status === 404) {
+    return null
+  }
+
+  throw new Error(
+    `Failed to fetch GTFS stop ${versionId}/${stopId}: ${res.status} ${res.statusText}`,
+  )
+}
+
+export async function getGtfsRoute(versionId: number, routeId: string): Promise<GtfsRoute | null> {
+  const res = await fetch(
+    new URL(`gtfs/version/${versionId}/route/${encodeURIComponent(routeId)}`, API_URL),
+  )
+
+  if (res.ok) {
+    return res.json()
+  } else if (res.status === 404) {
+    return null
+  }
+
+  throw new Error(
+    `Failed to fetch GTFS route ${versionId}/${routeId}: ${res.status} ${res.statusText}`,
   )
 }

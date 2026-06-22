@@ -21,3 +21,4 @@ serde = { version = "1.0.228", features = ["derive"] }
 log = "0.4.29"
 anyhow = "1.0.102"
 strum = { version = "0.28.0", features = ["derive"] }
+gtfs_ingest_worker = { path = "../gtfs_ingest_worker" }

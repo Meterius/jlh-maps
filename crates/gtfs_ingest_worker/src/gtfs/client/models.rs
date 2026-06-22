@@ -1,7 +1,8 @@
 use crate::gtfs::postgres::{FeedAggregatedStop, FeedRoute, FeedVersionImportInfo};
+use serde::Serialize;
 
 /// Client-facing view of a GTFS feed version lifecycle row.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FeedVersion {
     pub id: i64,
     pub source_id: i64,
@@ -26,7 +27,7 @@ impl From<FeedVersionImportInfo> for FeedVersion {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AggregatedStop {
     pub version_id: i64,
     pub stop_id: String,
@@ -81,7 +82,7 @@ impl AggregatedStop {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Route {
     pub version_id: i64,
     pub route_id: String,

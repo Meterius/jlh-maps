@@ -7,6 +7,7 @@ WORKDIR /app
 
 RUN rustup override set nightly
 
+COPY ./crates/gtfs_ingest_worker ./crates/gtfs_ingest_worker
 COPY ./crates/jlh_maps_core_service ./crates/jlh_maps_core_service
 
 WORKDIR /app/crates/jlh_maps_core_service
