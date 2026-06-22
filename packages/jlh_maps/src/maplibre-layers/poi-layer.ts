@@ -12,7 +12,7 @@ import {
 import { getUsableCssColor } from '@/utils/css-color.ts'
 import { makeStringPropertyMatchExpression, scaleStyleNumber } from '@/utils/maplibre.ts'
 import {
-  DEFAULT_MARKER_ICON_OPTIONS,
+  DEFAULT_PIN_MARKER_ICON_OPTIONS,
   type MarkerOptions,
 } from '@/maplibre-layers/common/marker-icon.ts'
 import type { UseLayerOptions } from '@/composables/maplibre'
@@ -24,7 +24,7 @@ import {
 } from '@/maplibre-layers/marker-layer.ts'
 
 const POI_MARKER_LAYER_SUFFIX = '-poi-marker'
-const POI_MARKER_SCALE = 1.25
+const POI_MARKER_SCALE = 0.75
 const POI_FONT_SCALE = 1.25
 
 const OMT_POI_ICON_NAME_MATCH_ENTRIES = Object.entries(OMT_POI_SUBCLASS_METADATA).map(
@@ -53,9 +53,10 @@ const getOriginalLayerIconColor = (baseLayer: SymbolLayerSpecification) => {
 }
 
 const makeLayerMarkerOptions = (baseLayer: SymbolLayerSpecification): MarkerOptions => {
-  const color = getOriginalLayerIconColor(baseLayer) ?? DEFAULT_MARKER_ICON_OPTIONS.color
+  const color = getOriginalLayerIconColor(baseLayer) ?? DEFAULT_PIN_MARKER_ICON_OPTIONS.color
 
   return {
+    ...DEFAULT_PIN_MARKER_ICON_OPTIONS,
     color,
     iconColor: color,
   }

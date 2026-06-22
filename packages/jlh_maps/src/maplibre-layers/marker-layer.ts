@@ -15,15 +15,15 @@ import {
 } from '@/composables/maplibre'
 import { svgToImage } from '@/utils/svg-to-image.ts'
 import {
-  DEFAULT_MARKER_ICON_OPTIONS,
   makeMarkerIcon,
+  MarkerShape,
   type MarkerOptions,
 } from '@/maplibre-layers/common/marker-icon.ts'
 
 // Icon Image Handling
 
 const makeEmptyPoiMarkerImage = (
-  markerIconOptions: Required<MarkerOptions>,
+  markerIconOptions: MarkerOptions,
   pixelRatio: number,
 ): MapLibreMapImageData => {
   const width = Math.round(markerIconOptions.width * pixelRatio)
@@ -38,7 +38,7 @@ const makeEmptyPoiMarkerImage = (
 
 type UseSharedMarkerImageProviderParams = {
   map: MapLibreMap
-  markerOptions: Required<MarkerOptions>
+  markerOptions: MarkerOptions
   pixelRatio: number
 }
 
@@ -49,6 +49,8 @@ export type UseSharedMarkerImageProviderReturn = ReturnType<
 >
 
 const DEFAULT_MARKER_TEXT_COLOR = '#1f2937'
+const MIN_MARKER_IMAGE_PIXEL_RATIO = 2
+const MAX_MARKER_IMAGE_PIXEL_RATIO = 4
 let nextSharedMarkerImageProviderId = 1
 
 export function useMarkerImageSourceProvider(
@@ -132,6 +134,38 @@ export function useMarkerImageSourceProvider(
 
 // Layer Construction
 
+type SymbolLayerLayout = NonNullable<SymbolLayerSpecification['layout']>
+type MarkerLayerNumberValue = number | ExpressionSpecification
+
+const getDefaultMarkerImagePixelRatio = () => {
+  const devicePixelRatio =
+    typeof window === 'undefined' ? MIN_MARKER_IMAGE_PIXEL_RATIO : window.devicePixelRatio
+
+  return Math.min(
+    MAX_MARKER_IMAGE_PIXEL_RATIO,
+    Math.max(MIN_MARKER_IMAGE_PIXEL_RATIO, Math.ceil(devicePixelRatio)),
+  )
+}
+
+const getMarkerIconAnchor = (markerOptions: MarkerOptions): SymbolLayerLayout['icon-anchor'] =>
+  markerOptions.shape === MarkerShape.Pin ? 'bottom' : 'center'
+
+const getMarkerIconOffset = (): SymbolLayerLayout['icon-offset'] => [0, 0]
+
+const getMarkerTextAnchor = (): SymbolLayerLayout['text-anchor'] => 'top'
+
+const getMarkerTextOffset = (
+  markerOptions: MarkerOptions,
+  marker: MarkerLayerMarker,
+): SymbolLayerLayout['text-offset'] => {
+  if (markerOptions.shape === MarkerShape.Pin) return [0, 0.4]
+  if (typeof marker.scale !== 'number' || typeof marker.textSize !== 'number') {
+    return [0, markerOptions.height / markerOptions.width + 0.1]
+  }
+
+  return [0, (markerOptions.height * marker.scale) / (marker.textSize * 2) + 0.25]
+}
+
 const makeSymbolLayerForMarkerLayer = (
   markerLayerSpecification: MarkerLayerSpecification,
   sharedMarkerImageProvider: UseSharedMarkerImageProviderReturn,
@@ -148,10 +182,13 @@ const makeSymbolLayerForMarkerLayer = (
         markerLayerSpecification.marker.headIconName,
       ),
       'icon-size': markerLayerSpecification.marker.scale,
-      'icon-anchor': 'bottom',
-      'icon-offset': [0, 0],
-      'text-anchor': 'top',
-      'text-offset': [0, 0.4],
+      'icon-anchor': getMarkerIconAnchor(markerLayerSpecification.markerOptions),
+      'icon-offset': getMarkerIconOffset(),
+      'text-anchor': getMarkerTextAnchor(),
+      'text-offset': getMarkerTextOffset(
+        markerLayerSpecification.markerOptions,
+        markerLayerSpecification.marker,
+      ),
       'text-size': markerLayerSpecification.marker.textSize,
       'text-optional': false,
       'icon-optional': false,
@@ -187,14 +224,17 @@ type MarkerLayerLayout = Omit<
   | 'icon-optional'
   | 'text-offset'
   | 'text-anchor'
+  | 'icon-anchor'
+  | 'icon-offset'
   | 'icon-size'
   | 'icon-image'
   | 'text-size'
 >
 export type MarkerLayerMarker = {
-  scale: number
-  textSize: number
+  scale: MarkerLayerNumberValue
+  textSize: MarkerLayerNumberValue
   headIconName: ExpressionSpecification
+  imagePixelRatio?: number
   hoverFeatureStateProperty?: string
   hoverTextColor?: ExpressionSpecification
 }
@@ -214,23 +254,16 @@ export const useMarkerLayer = (
   markerImageSourceProvider: UseMarkerImageSourceProviderReturn,
   options?: UseLayerOptions,
 ) => {
-  const markerLayerSpecificationWithDefaults = {
-    ...markerLayerSpecification,
-    markerOptions: {
-      ...DEFAULT_MARKER_ICON_OPTIONS,
-      ...markerLayerSpecification.markerOptions,
-    },
-  }
-
   const sharedMarkerImageProvider = markerImageSourceProvider.useSharedMarkerImageProvider({
     map,
-    markerOptions: markerLayerSpecificationWithDefaults.markerOptions,
-    pixelRatio: 2.0,
+    markerOptions: markerLayerSpecification.markerOptions,
+    pixelRatio:
+      markerLayerSpecification.marker.imagePixelRatio ?? getDefaultMarkerImagePixelRatio(),
   })
 
   useLayer(
     map,
-    makeSymbolLayerForMarkerLayer(markerLayerSpecificationWithDefaults, sharedMarkerImageProvider),
+    makeSymbolLayerForMarkerLayer(markerLayerSpecification, sharedMarkerImageProvider),
     options,
   )
 }

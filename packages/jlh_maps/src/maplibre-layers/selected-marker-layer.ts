@@ -3,6 +3,7 @@ import { toValue, type WatchSource } from 'vue'
 import { createSharedComposable } from '@vueuse/core'
 import type { FeatureCollection } from 'geojson'
 import { useGeoJsonSource, type UseLayerOptions } from '@/composables/maplibre'
+import { DEFAULT_PIN_MARKER_ICON_OPTIONS } from '@/maplibre-layers/common/marker-icon.ts'
 import {
   type MarkerLayerSpecification,
   useMarkerImageSourceProvider,
@@ -37,6 +38,7 @@ const makeSelectedMarkerLayer = (): MarkerLayerSpecification => ({
   type: 'symbol',
   source: SELECTED_MARKER_SOURCE_ID,
   markerOptions: {
+    ...DEFAULT_PIN_MARKER_ICON_OPTIONS,
     color: '#dc2626',
     iconColor: '#dc2626',
   },

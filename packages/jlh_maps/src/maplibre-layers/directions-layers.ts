@@ -15,6 +15,7 @@ import {
   useMarkerLayer,
 } from '@/maplibre-layers/marker-layer.ts'
 import { SORT_KEY_DIRECTION_STOP_MARKER } from '@/maplibre-layers/constants.ts'
+import { DEFAULT_PIN_MARKER_ICON_OPTIONS } from '@/maplibre-layers/common/marker-icon.ts'
 
 const DIRECTION_TRIP_PRIMARY_SOURCE_ID = 'direction-trip-primary'
 const DIRECTION_TRIP_PRIMARY_LAYER_ID = 'direction-trip-primary'
@@ -38,6 +39,7 @@ const makeDirectionStopMarkerLayer = (): MarkerLayerSpecification => ({
   type: 'symbol',
   source: DIRECTION_STOPS_SOURCE_ID,
   markerOptions: {
+    ...DEFAULT_PIN_MARKER_ICON_OPTIONS,
     color: DIRECTION_STOP_ICON_COLOR,
     iconColor: DIRECTION_STOP_ICON_COLOR,
   },
