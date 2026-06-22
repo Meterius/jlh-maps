@@ -24,8 +24,6 @@ import {
 } from '@/maplibre-layers/marker-layer.ts'
 
 const POI_MARKER_LAYER_SUFFIX = '-poi-marker'
-const POI_MARKER_SCALE = 0.75
-const POI_FONT_SCALE = 1.25
 
 const OMT_POI_ICON_NAME_MATCH_ENTRIES = Object.entries(OMT_POI_SUBCLASS_METADATA).map(
   ([subclass, metadata]) => [subclass, metadata.iconName] as [string, string],
@@ -37,6 +35,30 @@ const OMT_POI_ICON_NAMES = [
     ...OMT_POI_ICON_NAME_MATCH_ENTRIES.map(([, iconName]) => iconName),
   ]),
 ]
+
+export enum PoiLayerVariant {
+  Normal,
+  Environmental,
+}
+
+const POI_VARIANT_PROPS = {
+  [PoiLayerVariant.Normal]: {
+    iconAnchorOverride: undefined,
+    markerScale: 0.75,
+    font: {
+      scale: 1.25,
+    },
+    'icon-pitch-alignment': undefined,
+    useCircularMarker: false,
+  },
+  [PoiLayerVariant.Environmental]: {
+    iconAnchorOverride: 'center',
+    markerScale: 0.4,
+    font: null,
+    'icon-pitch-alignment': 'map',
+    useCircularMarker: true,
+  },
+} as const
 
 export const usePoiMarkerImageProvider = createSharedComposable(() =>
   useMarkerImageSourceProvider(
@@ -52,11 +74,20 @@ const getOriginalLayerIconColor = (baseLayer: SymbolLayerSpecification) => {
   return getUsableCssColor(paint['icon-color']) ?? getUsableCssColor(paint['text-color'])
 }
 
-const makeLayerMarkerOptions = (baseLayer: SymbolLayerSpecification): MarkerOptions => {
+const makeLayerMarkerOptions = (
+  baseLayer: SymbolLayerSpecification,
+  props: { useCircularMarker: boolean },
+): MarkerOptions => {
   const color = getOriginalLayerIconColor(baseLayer) ?? DEFAULT_PIN_MARKER_ICON_OPTIONS.color
 
   return {
     ...DEFAULT_PIN_MARKER_ICON_OPTIONS,
+    height: props.useCircularMarker
+      ? DEFAULT_PIN_MARKER_ICON_OPTIONS.width
+      : DEFAULT_PIN_MARKER_ICON_OPTIONS.height,
+    headPadding: props.useCircularMarker
+      ? DEFAULT_PIN_MARKER_ICON_OPTIONS.headPadding * 0.5
+      : DEFAULT_PIN_MARKER_ICON_OPTIONS.headPadding,
     color,
     iconColor: color,
   }
@@ -75,27 +106,35 @@ const makePoiIconNameExpression = () =>
 
 const makePoiMarkerLayer = (
   baseLayer: SymbolLayerSpecification,
+  variant: PoiLayerVariant,
   additionalMarkerLayerMarkerFields: Partial<Pick<MarkerLayerMarker, 'hoverFeatureStateProperty'>>,
 ): MarkerLayerSpecification => {
   const layout = baseLayer.layout ?? {}
   const paint = baseLayer.paint ?? {}
 
+  const props = POI_VARIANT_PROPS[variant]
+
   return {
     ...baseLayer,
     id: `${baseLayer.id}${POI_MARKER_LAYER_SUFFIX}`,
-    markerOptions: makeLayerMarkerOptions(baseLayer),
+    markerOptions: makeLayerMarkerOptions(baseLayer, props),
     marker: {
-      scale: POI_MARKER_SCALE,
-      textSize: scaleStyleNumber(layout['text-size'], POI_FONT_SCALE, 16) as number,
+      scale: props.markerScale,
+      textSize: props.font
+        ? (scaleStyleNumber(layout['text-size'], props.font.scale, 16) as number)
+        : 1,
       headIconName: makePoiIconNameExpression(),
+      iconAnchorOverride: props.iconAnchorOverride,
       ...additionalMarkerLayerMarkerFields,
     },
     layout: {
       ...layout,
       'icon-allow-overlap': layout['icon-allow-overlap'] ?? false,
       'icon-ignore-placement': layout['icon-ignore-placement'] ?? false,
-      'text-field': layout['text-field'],
+      'text-field': props.font ? layout['text-field'] : '',
       'symbol-sort-key': layout['symbol-sort-key'] ?? ['to-number', ['get', 'rank']],
+      'icon-pitch-alignment':
+        props['icon-pitch-alignment'] ?? layout['icon-pitch-alignment'] ?? 'auto',
     },
     paint: {
       ...paint,
@@ -106,18 +145,22 @@ const makePoiMarkerLayer = (
   }
 }
 
+export type PoiLayerOptions = {
+  additionalMarkerLayerMarkerFields?: Partial<Pick<MarkerLayerMarker, 'hoverFeatureStateProperty'>>
+} & Pick<UseLayerOptions, 'visible'>
+
 export const usePoiLayer = (
   map: MapLibreMap,
   baseLayer: SymbolLayerSpecification,
-  additionalMarkerLayerMarkerFields?: Partial<Pick<MarkerLayerMarker, 'hoverFeatureStateProperty'>>,
-  options: Pick<UseLayerOptions, 'visible'> = {},
+  variant: PoiLayerVariant,
+  options: PoiLayerOptions = {},
 ) => {
   const layerId = `${baseLayer.id}${POI_MARKER_LAYER_SUFFIX}`
   const poiMarkerImageProvider = usePoiMarkerImageProvider()
 
   useMarkerLayer(
     map,
-    makePoiMarkerLayer(baseLayer, additionalMarkerLayerMarkerFields ?? {}),
+    makePoiMarkerLayer(baseLayer, variant, options.additionalMarkerLayerMarkerFields ?? {}),
     poiMarkerImageProvider,
     {
       ...options,

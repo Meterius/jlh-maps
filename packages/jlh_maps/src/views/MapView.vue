@@ -242,7 +242,7 @@ import MapSlideover, { type MapSlideoverTab } from '@/views/map-view/MapSlideove
 import { GeoLocationType, type GeoLocation } from '@/components/types.ts'
 import type { ContextMenuItem } from '@nuxt/ui'
 import { useDirectionsLayers } from '@/maplibre-layers/directions-layers.ts'
-import { usePoiLayer } from '@/maplibre-layers/poi-layer.ts'
+import { PoiLayerVariant, usePoiLayer } from '@/maplibre-layers/poi-layer.ts'
 import { useRainfallRasterLayer } from '@/maplibre-layers/rainfall-raster-layer.ts'
 import { useRainfallRasterProvider } from '@/composables/rainfall-raster-provider.ts'
 import { useSelectedMarkerLayer } from '@/maplibre-layers/selected-marker-layer.ts'
@@ -315,6 +315,8 @@ const BEVY_OVERLAY_LAYER_IDS = [
 ]
 
 const OMT_GTFS_EXCLUDED_LAYER_IDS = ['Ferry', 'Bus stop', 'Bus station', 'Train']
+
+const OMT_ENVIRONMENTAL_LAYER_IDS = ['Waste', 'Outdoor']
 
 // Persisted View
 
@@ -922,10 +924,13 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         const poiLayer = usePoiLayer(
           map,
           baseLayer,
+          OMT_ENVIRONMENTAL_LAYER_IDS.includes(baseLayer.id)
+            ? PoiLayerVariant.Environmental
+            : PoiLayerVariant.Normal,
           {
-            hoverFeatureStateProperty: HOVERED_PROPERTY_NAME,
-          },
-          {
+            additionalMarkerLayerMarkerFields: {
+              hoverFeatureStateProperty: HOVERED_PROPERTY_NAME,
+            },
             visible: () =>
               cinematicOverlayLayerVisible() &&
               (!isGtfsExcluded || !currentBaseStyleLayerSettings.value.gtfsEnabled),

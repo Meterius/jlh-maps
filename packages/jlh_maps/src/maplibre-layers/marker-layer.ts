@@ -150,9 +150,7 @@ const getDefaultMarkerImagePixelRatio = () => {
 const getMarkerIconAnchor = (markerOptions: MarkerOptions): SymbolLayerLayout['icon-anchor'] =>
   markerOptions.shape === MarkerShape.Pin ? 'bottom' : 'bottom'
 
-const getMarkerTextOffset = (
-  markerOptions: MarkerOptions,
-): SymbolLayerLayout['text-offset'] => {
+const getMarkerTextOffset = (markerOptions: MarkerOptions): SymbolLayerLayout['text-offset'] => {
   if (markerOptions.shape === MarkerShape.Pin) return [0, 0.4]
   else return [0, 0.2]
 }
@@ -173,12 +171,12 @@ const makeSymbolLayerForMarkerLayer = (
         markerLayerSpecification.marker.headIconName,
       ),
       'icon-size': markerLayerSpecification.marker.scale,
-      'icon-anchor': getMarkerIconAnchor(markerLayerSpecification.markerOptions),
+      'icon-anchor':
+        markerLayerSpecification.marker.iconAnchorOverride ??
+        getMarkerIconAnchor(markerLayerSpecification.markerOptions),
       'icon-offset': [0, 0],
       'text-anchor': 'top',
-      'text-offset': getMarkerTextOffset(
-        markerLayerSpecification.markerOptions,
-      ),
+      'text-offset': getMarkerTextOffset(markerLayerSpecification.markerOptions),
       'text-size': markerLayerSpecification.marker.textSize,
       'text-optional': false,
       'icon-optional': false,
@@ -228,6 +226,7 @@ export type MarkerLayerMarker = {
   imagePixelRatio?: number
   hoverFeatureStateProperty?: string
   hoverTextColor?: ExpressionSpecification
+  iconAnchorOverride?: SymbolLayerLayout['icon-anchor']
 }
 
 export type MarkerLayerSpecification = Omit<SymbolLayerSpecification, 'layout' | 'paint'> & {

@@ -160,16 +160,19 @@ export function useGtfsLayer(
     stopMarkerLayer: {
       layerId: rootStopMarkerLayerSpecification.id,
       getInfoFromFeature: (feature: GeoJSONFeature) => {
-        const versionId = feature.properties?.[GtfsStopField.VersionId];
-        const stopId = feature.properties?.[GtfsStopField.StopId];
-        const stopName = feature.properties?.[GtfsStopField.StopName];
+        const versionId = feature.properties?.[GtfsStopField.VersionId]
+        const stopId = feature.properties?.[GtfsStopField.StopId]
+        const stopName = feature.properties?.[GtfsStopField.StopName]
 
         return {
           label: typeof stopName === 'string' ? stopName : '',
-          stopRef: typeof versionId === 'number' && typeof stopId === 'string' ? {
-            versionId,
-            stopId,
-          } : undefined,
+          stopRef:
+            typeof versionId === 'number' && typeof stopId === 'string'
+              ? {
+                  versionId,
+                  stopId,
+                }
+              : undefined,
         }
       },
     },
