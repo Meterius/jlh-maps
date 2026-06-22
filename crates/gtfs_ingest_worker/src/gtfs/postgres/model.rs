@@ -28,3 +28,38 @@ pub struct FeedVersionDownloadInfo {
     pub http_etag: Option<String>,
     pub http_last_modified: Option<String>,
 }
+
+/// GTFS stop row with derived route ids, used by the read-only GTFS client.
+#[derive(Debug, Clone, FromRow)]
+pub struct FeedAggregatedStop {
+    pub version_id: i64,
+    pub stop_id: String,
+    pub stop_code: Option<String>,
+    pub stop_name: Option<String>,
+    pub stop_desc: Option<String>,
+    pub stop_lat: Option<f64>,
+    pub stop_lon: Option<f64>,
+    pub zone_id: Option<String>,
+    pub stop_url: Option<String>,
+    pub location_type: Option<i32>,
+    pub parent_station: Option<String>,
+    pub wheelchair_boarding: Option<i32>,
+    pub platform_code: Option<String>,
+    pub route_ids: Vec<String>,
+    pub depth: i32,
+}
+
+/// GTFS route row used by the read-only GTFS client.
+#[derive(Debug, Clone, FromRow)]
+pub struct FeedRoute {
+    pub version_id: i64,
+    pub route_id: String,
+    pub agency_id: Option<String>,
+    pub route_short_name: Option<String>,
+    pub route_long_name: Option<String>,
+    pub route_desc: Option<String>,
+    pub route_type: Option<i32>,
+    pub route_url: Option<String>,
+    pub route_color: Option<String>,
+    pub route_text_color: Option<String>,
+}

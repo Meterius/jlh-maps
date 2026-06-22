@@ -8,8 +8,8 @@ mod utils;
 mod version_lifecycle;
 
 pub use crate::gtfs::artifact_store::ArtifactStoreConfig;
-pub use client::{GtfsIngestClient, GtfsIngestConfig};
-pub use models::FeedVersion;
+pub use client::{GtfsClient, GtfsConfig, GtfsIngestClient, GtfsIngestConfig};
+pub use models::{AggregatedStop, FeedVersion, Route};
 pub use source_sync::{SyncSourceOutcome, SyncSourcesOutcome};
 pub use tiling_export::ExportTilingOutcome;
 pub use tiling_sync::{SyncTilingOutcome, SyncTilingSourceResult};

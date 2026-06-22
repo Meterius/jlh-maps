@@ -1,6 +1,9 @@
 use super::{
     importer,
-    model::{FeedSourceDownloadInfo, FeedVersionDownloadInfo, FeedVersionImportInfo},
+    model::{
+        FeedAggregatedStop, FeedRoute, FeedSourceDownloadInfo, FeedVersionDownloadInfo,
+        FeedVersionImportInfo,
+    },
 };
 use crate::gtfs::postgres::locking::{lock_feed_source, lock_feed_version};
 use crate::model::SeedFile;
@@ -87,6 +90,123 @@ where
     .fetch_one(executor)
     .await
     .with_context(|| format!("failed to fetch GTFS version {}", version_id))
+}
+
+pub async fn fetch_aggregated_stop(
+    pool: &PgPool,
+    version_id: i64,
+    stop_id: &str,
+) -> Result<Vec<FeedAggregatedStop>> {
+    sqlx::query_as::<_, FeedAggregatedStop>(
+        r#"
+        WITH RECURSIVE stop_tree AS (
+            SELECT
+                stop.version_id,
+                stop.stop_id,
+                stop.stop_code,
+                stop.stop_name,
+                stop.stop_desc,
+                stop.stop_lat,
+                stop.stop_lon,
+                stop.zone_id,
+                stop.stop_url,
+                stop.location_type,
+                stop.parent_station,
+                stop.wheelchair_boarding,
+                stop.platform_code,
+                0::INTEGER AS depth,
+                ARRAY[stop.stop_id] AS path
+            FROM gtfs.stops stop
+            WHERE stop.version_id = $1
+              AND stop.stop_id = $2
+
+            UNION ALL
+
+            SELECT
+                child.version_id,
+                child.stop_id,
+                child.stop_code,
+                child.stop_name,
+                child.stop_desc,
+                child.stop_lat,
+                child.stop_lon,
+                child.zone_id,
+                child.stop_url,
+                child.location_type,
+                child.parent_station,
+                child.wheelchair_boarding,
+                child.platform_code,
+                parent.depth + 1 AS depth,
+                parent.path || child.stop_id AS path
+            FROM gtfs.stops child
+            JOIN stop_tree parent
+              ON parent.version_id = child.version_id
+             AND parent.stop_id = child.parent_station
+            WHERE NOT child.stop_id = ANY(parent.path)
+        )
+        SELECT
+            stop_tree.version_id,
+            stop_tree.stop_id,
+            stop_tree.stop_code,
+            stop_tree.stop_name,
+            stop_tree.stop_desc,
+            stop_tree.stop_lat,
+            stop_tree.stop_lon,
+            stop_tree.zone_id,
+            stop_tree.stop_url,
+            stop_tree.location_type,
+            stop_tree.parent_station,
+            stop_tree.wheelchair_boarding,
+            stop_tree.platform_code,
+            COALESCE(route_refs.route_ids, ARRAY[]::TEXT[]) AS route_ids,
+            stop_tree.depth
+        FROM stop_tree
+        LEFT JOIN gtfs.stop_route_agg_refs route_refs
+          ON route_refs.version_id = stop_tree.version_id
+         AND route_refs.stop_id = stop_tree.stop_id
+        ORDER BY stop_tree.depth, stop_tree.stop_id
+        "#,
+    )
+    .bind(version_id)
+    .bind(stop_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "failed to fetch aggregated GTFS stop {}/{}",
+            version_id, stop_id
+        )
+    })
+}
+
+pub async fn fetch_route(
+    pool: &PgPool,
+    version_id: i64,
+    route_id: &str,
+) -> Result<Option<FeedRoute>> {
+    sqlx::query_as::<_, FeedRoute>(
+        r#"
+        SELECT
+            version_id,
+            route_id,
+            agency_id,
+            route_short_name,
+            route_long_name,
+            route_desc,
+            route_type,
+            route_url,
+            route_color,
+            route_text_color
+        FROM gtfs.routes
+        WHERE version_id = $1
+          AND route_id = $2
+        "#,
+    )
+    .bind(version_id)
+    .bind(route_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("failed to fetch GTFS route {}/{}", version_id, route_id))
 }
 
 /// Like `fetch_version_import_info`, but locks via `FOR UPDATE`.

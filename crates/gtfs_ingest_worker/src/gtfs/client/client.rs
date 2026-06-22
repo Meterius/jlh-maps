@@ -1,6 +1,8 @@
 use crate::gtfs::artifact_store::{
     ArtifactStore, ArtifactStoreConfig as InternalArtifactStoreConfig, ArtifactStoreConfig,
 };
+use crate::gtfs::client::models::{AggregatedStop, Route};
+use crate::gtfs::postgres;
 use anyhow::{Context, Result};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -46,5 +48,44 @@ impl GtfsIngestClient {
                 .build()
                 .context("failed to build GTFS HTTP client")?,
         })
+    }
+}
+
+/// Runtime dependencies for the GTFS client.
+#[derive(Debug, Clone)]
+pub struct GtfsConfig {
+    /// Postgres connection string for GTFS metadata and schedule rows.
+    pub database_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GtfsClient {
+    pub(super) pool: PgPool,
+}
+
+impl GtfsClient {
+    pub async fn connect(config: GtfsConfig) -> Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(32)
+            .connect(&config.database_url)
+            .await
+            .context("failed to connect to GTFS Postgres database")?;
+
+        Ok(Self { pool })
+    }
+
+    pub async fn fetch_aggregated_stop(
+        &self,
+        version_id: i64,
+        stop_id: &str,
+    ) -> Result<Option<AggregatedStop>> {
+        let rows = postgres::fetch_aggregated_stop(&self.pool, version_id, stop_id).await?;
+        Ok(AggregatedStop::from_postgres_rows(rows))
+    }
+
+    pub async fn fetch_route(&self, version_id: i64, route_id: &str) -> Result<Option<Route>> {
+        postgres::fetch_route(&self.pool, version_id, route_id)
+            .await
+            .map(|route| route.map(Route::from))
     }
 }
