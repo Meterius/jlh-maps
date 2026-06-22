@@ -19,7 +19,7 @@
     <template #content>
       <div
         ref="drawerContent"
-        :class="['relative flex min-h-0 w-full flex-col', drawerPanelClass]"
+        :class="['relative flex min-h-0 w-full flex-col select-text', drawerPanelClass]"
         :style="drawerPanelStyle"
       >
         <div class="relative z-20">
@@ -85,8 +85,7 @@
           <ContentDetails
             v-show="props.active === 'details'"
             class="h-full"
-            :osm_id="props.detailsOsmId"
-            :feature="props.detailsFeature"
+            :selection="props.detailsSelection"
             @update:badge="detailsBadge = $event"
           />
 
@@ -107,20 +106,19 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useMediaQuery, useResizeObserver } from '@vueuse/core'
 import { DrawerHandle } from 'vaul-vue'
-import type { GeoJSONFeature, Map as MapLibreMap } from 'maplibre-gl'
-import type { OsmId } from '@/utils/osm.ts'
+import type { Map as MapLibreMap } from 'maplibre-gl'
 import type { PoiDisplayMetadata } from '@/constants/osm-mapping.ts'
 import ContentDetails from '@/views/map-view/map-slideover/ContentDetails.vue'
 import ContentDirections from '@/views/map-view/map-slideover/ContentDirections.vue'
 import ContentSettings from '@/views/map-view/map-slideover/ContentSettings.vue'
+import type { SelectionItem } from '@/views/map-view/map-selection.ts'
 
 export type MapSlideoverTab = 'details' | 'directions' | 'settings'
 
 const props = defineProps<{
   open: boolean
   active: MapSlideoverTab | null
-  detailsOsmId?: OsmId
-  detailsFeature?: GeoJSONFeature
+  detailsSelection?: SelectionItem
   map?: MapLibreMap
   bevyInstanceId?: string
 }>()
@@ -143,7 +141,9 @@ const isMobileDrawer = useMediaQuery(
 
 const drawerDirection = computed(() => (isMobileDrawer.value ? 'bottom' : 'left'))
 
-watch(drawerDirection, (value) => emit('update:drawer-direction', value), { immediate: true })
+watch(drawerDirection, (value) => emit('update:drawer-direction', value), {
+  immediate: true,
+})
 
 const drawerSnapPoints = computed(() =>
   isMobileDrawer.value ? MOBILE_DRAWER_SNAP_POINTS : undefined,
@@ -181,7 +181,7 @@ const drawerContentProps = {
 const title = computed(() => {
   switch (props.active) {
     case 'details':
-      return props.detailsFeature?.properties?.name ?? 'Location Details'
+      return getDetailsTitle()
     case 'settings':
       return 'Map Settings'
     case 'directions':
@@ -189,6 +189,17 @@ const title = computed(() => {
       return 'Directions'
   }
 })
+
+const getDetailsTitle = () => {
+  const selection = props.detailsSelection
+  const name = selection?.feature.properties?.name
+
+  if (typeof name === 'string' && name) {
+    return name
+  }
+
+  return selection?.label || 'Location Details'
+}
 
 const headerBadge = computed(() => (props.active === 'details' ? detailsBadge.value : null))
 const headerGridClass = computed(() => {

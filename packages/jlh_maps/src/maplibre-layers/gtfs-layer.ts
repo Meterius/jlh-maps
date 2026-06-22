@@ -21,7 +21,8 @@ import { DEFAULT_BOX_MARKER_ICON_OPTIONS } from '@/maplibre-layers/common/marker
 
 export const GTFS_SOURCE_ID = 'gtfs'
 
-const GTFS_SOURCE_LAYER_ID = 'stops'
+export const GTFS_SOURCE_LAYER_ID = 'stops'
+
 const GTFS_MIN_ZOOM = 10
 const GTFS_SYMBOL_ICON_PIXEL_RATIO = 2
 const GTFS_MARKER_ICON_PIXEL_RATIO = 4
@@ -57,7 +58,7 @@ enum GtfsIconName {
   Unknown = 'map-pin',
 }
 
-enum GtfsRouteType {
+export enum GtfsRouteType {
   Tram = '0',
   Subway = '1',
   Rail = '2',
@@ -73,7 +74,7 @@ enum GtfsRouteType {
   Taxi = '1500',
 }
 
-enum GtfsRouteIconName {
+export enum GtfsRouteIconName {
   Air = 'plane',
   Bus = 'bus-front',
   Cable = 'cable-car',
@@ -85,7 +86,7 @@ enum GtfsRouteIconName {
   Tram = 'tram-front',
 }
 
-const GTFS_ROUTE_TYPE_ICON_MAP: Record<GtfsRouteType, GtfsRouteIconName> = {
+export const GTFS_ROUTE_TYPE_ICON_MAP: Record<GtfsRouteType, GtfsRouteIconName> = {
   [GtfsRouteType.Tram]: GtfsRouteIconName.Tram,
   [GtfsRouteType.Subway]: GtfsRouteIconName.Rail,
   [GtfsRouteType.Rail]: GtfsRouteIconName.Rail,
@@ -108,6 +109,8 @@ enum GtfsStopField {
   RouteTypes = 'route_types',
   StopCode = 'stop_code',
   StopName = 'stop_name',
+  VersionId = 'version_id',
+  StopId = 'stop_id',
 }
 
 enum GtfsLayerId {
@@ -154,13 +157,22 @@ export function useGtfsLayer(
   )
 
   return {
-    markerLayers: [
-      {
-        layerId: rootStopMarkerLayerSpecification.id,
-        getLabelFromFeature: (feature: GeoJSONFeature) =>
-          feature.properties?.[GtfsStopField.StopName],
+    stopMarkerLayer: {
+      layerId: rootStopMarkerLayerSpecification.id,
+      getInfoFromFeature: (feature: GeoJSONFeature) => {
+        const versionId = feature.properties?.[GtfsStopField.VersionId];
+        const stopId = feature.properties?.[GtfsStopField.StopId];
+        const stopName = feature.properties?.[GtfsStopField.StopName];
+
+        return {
+          label: typeof stopName === 'string' ? stopName : '',
+          stopRef: typeof versionId === 'number' && typeof stopId === 'string' ? {
+            versionId,
+            stopId,
+          } : undefined,
+        }
       },
-    ],
+    },
     layerIds: [rootStopMarkerLayerSpecification.id, GtfsLayerId.HintSymbols],
   }
 }

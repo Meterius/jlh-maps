@@ -178,8 +178,7 @@
       ref="mapSlideover"
       :open="slideoverOpen !== null"
       :active="slideoverOpen"
-      :details-osm-id="selected[0] ? selected[0].osmId : undefined"
-      :details-feature="selected[0]?.feature"
+      :details-selection="selected[0]"
       :map="mapInstance.map"
       :bevy-instance-id="bevyMount?.mountBevyRet.instanceId"
       @update:drawer-direction="slideoverDirection = $event"
@@ -260,7 +259,11 @@ import {
 import { usePanProfiles } from '@/composables/maplibre/pan-profiles'
 import { provideMapDirectionStops } from '@/views/map-view/map-direction-stops.ts'
 import { provideMapCameraController } from '@/views/map-view/map-camera-controller.ts'
-import { provideMapSelection } from '@/views/map-view/map-selection.ts'
+import {
+  provideMapSelection,
+  type SelectFeatureInput,
+  SelectionItemKind,
+} from '@/views/map-view/map-selection.ts'
 import { provideMapViewStore } from '@/views/map-view/map-view-store.ts'
 import { MapViewBaseStyleType } from '@/views/map-view/map-view-types.ts'
 import {
@@ -273,6 +276,7 @@ import MapLayersControlPopover from '@/views/map-view/map-control-popovers/MapLa
 import MapLodControlPopover from '@/views/map-view/map-control-popovers/MapLodControlPopover.vue'
 import MapSunControlPopover from '@/views/map-view/map-control-popovers/MapSunControlPopover.vue'
 import { useMapSunController } from '@/views/map-view/map-sun-controller.ts'
+import { extractOsmIdFromOmtFeatureId } from '@/utils/osm.ts'
 
 const props = defineProps<{
   scenarioName?: MapViewScenarioName
@@ -857,7 +861,7 @@ const useLayerFeatureSelection = (
   map: MapLibreMap,
   layerId: string,
   hoveredPropertyName: string,
-  getLabelFromFeature: (feature: MapGeoJSONFeature) => string | null | undefined,
+  makeSelectFeatureInputFromFeature: (feature: MapGeoJSONFeature) => SelectFeatureInput,
 ) => {
   // disable hover as mouse events cause feature queries which are very expensive while terrain
   // is active
@@ -877,7 +881,7 @@ const useLayerFeatureSelection = (
     // prevent default to avoid selection causing 'background' click to cause deselection
     originalEvent.preventDefault()
 
-    selectFeature(feature, getLabelFromFeature(feature) ?? '')
+    selectFeature(makeSelectFeatureInputFromFeature(feature))
   })
 }
 
@@ -929,12 +933,15 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
         )
         poiOverlayLayerIds.push(poiLayer.layerId)
 
-        useLayerFeatureSelection(
-          map,
-          poiLayer.layerId,
-          HOVERED_PROPERTY_NAME,
-          (feature) => feature.properties.name,
-        )
+        useLayerFeatureSelection(map, poiLayer.layerId, HOVERED_PROPERTY_NAME, (feature) => ({
+          kind: SelectionItemKind.Osm,
+          feature,
+          label: feature.properties.name,
+          osmId:
+            typeof feature.id === 'number'
+              ? (extractOsmIdFromOmtFeatureId(feature.id) ?? undefined)
+              : undefined,
+        }))
 
         map.setLayoutProperty(baseLayer.id, 'visibility', 'none')
       })
@@ -953,9 +960,21 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
       },
     )
 
-    gtfsLayer.markerLayers.forEach(({ layerId, getLabelFromFeature }) => {
-      useLayerFeatureSelection(map, layerId, HOVERED_PROPERTY_NAME, getLabelFromFeature)
-    })
+    useLayerFeatureSelection(
+      map,
+      gtfsLayer.stopMarkerLayer.layerId,
+      HOVERED_PROPERTY_NAME,
+      (feature) => {
+        const info = gtfsLayer.stopMarkerLayer.getInfoFromFeature(feature)
+
+        return {
+          kind: SelectionItemKind.GtfsStop,
+          feature,
+          label: info.label,
+          stopRef: info.stopRef,
+        } as const
+      },
+    )
 
     poiOverlayLayerIds.push(...gtfsLayer.layerIds)
 
@@ -1171,7 +1190,10 @@ const makeBasicStyle = (useRaster: boolean): MapStyleLifecycleConfig => ({
     // Selection
 
     useSelectedMarkerLayer(map, () =>
-      selected.value.map((item) => ({ feature: item.feature, label: item.label })),
+      selected.value.map((item) => ({
+        feature: item.feature,
+        label: item.label,
+      })),
     )
 
     // Background Click
