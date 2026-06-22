@@ -44,7 +44,7 @@ export enum PoiLayerVariant {
 const POI_VARIANT_PROPS = {
   [PoiLayerVariant.Normal]: {
     iconAnchorOverride: undefined,
-    markerScale: 0.75,
+    markerScale: 0.65,
     font: {
       scale: 1.25,
     },

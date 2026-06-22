@@ -316,7 +316,11 @@ const BEVY_OVERLAY_LAYER_IDS = [
 
 const OMT_GTFS_EXCLUDED_LAYER_IDS = ['Ferry', 'Bus stop', 'Bus station', 'Train']
 
-const OMT_ENVIRONMENTAL_LAYER_IDS = ['Waste', 'Outdoor']
+const OMT_ENVIRONMENTAL_LAYER_IDS = [
+  'Waste',
+  'Outdoor',
+  'Parking'
+]
 
 // Persisted View
 
