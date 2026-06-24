@@ -264,3 +264,40 @@ CREATE TABLE gtfs_tiling.stop_points
 
 CREATE INDEX gtfs_tiling_stop_points_geom_gix
     ON gtfs_tiling.stop_points USING GIST (geom);
+
+CREATE TABLE gtfs_tiling.trip_lines
+(
+    source_id     BIGINT                     NOT NULL,
+    version_id    INTEGER                    NOT NULL,
+    feature_id    BIGINT                     NOT NULL,
+    route_item_id INTEGER                    NOT NULL,
+    geom          geometry(LineString, 4326) NOT NULL,
+
+    PRIMARY KEY (source_id, version_id, feature_id),
+    FOREIGN KEY (source_id, version_id)
+        REFERENCES gtfs_tiling.source_tilings (source_id, version_id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX gtfs_tiling_trip_lines_route_idx
+    ON gtfs_tiling.trip_lines (source_id, version_id, route_item_id);
+
+CREATE TABLE gtfs_tiling.trip_line_refs
+(
+    source_id            BIGINT  NOT NULL,
+    version_id           INTEGER NOT NULL,
+    route_item_id        INTEGER NOT NULL,
+    trip_item_id         INTEGER NOT NULL,
+    trip_line_feature_id BIGINT  NOT NULL,
+
+    PRIMARY KEY (source_id, version_id, trip_item_id),
+    FOREIGN KEY (source_id, version_id)
+        REFERENCES gtfs_tiling.source_tilings (source_id, version_id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX gtfs_tiling_trip_line_refs_route_idx
+    ON gtfs_tiling.trip_line_refs (source_id, version_id, route_item_id);
+
+CREATE INDEX gtfs_tiling_trip_line_refs_line_idx
+    ON gtfs_tiling.trip_line_refs (source_id, version_id, trip_line_feature_id);

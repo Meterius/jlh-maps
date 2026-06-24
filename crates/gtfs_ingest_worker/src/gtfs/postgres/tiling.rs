@@ -78,7 +78,7 @@ pub async fn sync_tiling_for_source(
 
     info!(
         source_slug = %source.source_slug,
-        "synced GTFS stop tiling geometries"
+        "synced GTFS tiling geometries"
     );
 
     Ok(SyncTilingSourceOutcome {
@@ -455,6 +455,8 @@ async fn import_source_tiling_data(
     version_id: i32,
 ) -> Result<()> {
     import_source_tiling_stop_points(tx, source_id, version_id).await?;
+    import_source_trip_shape_lines(tx, source_id, version_id).await?;
+    import_source_trip_stop_sequence_lines(tx, source_id, version_id).await?;
     Ok(())
 }
 
@@ -491,6 +493,316 @@ async fn import_source_tiling_stop_points(
     .execute(&mut **tx)
     .await
     .context("failed to materialize GTFS stop points for tiling")?;
+
+    Ok(())
+}
+
+async fn import_source_trip_shape_lines(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: i64,
+    version_id: i32,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        WITH valid_shape_lines AS (
+            SELECT
+                shape.shape_item_id,
+                shape.geom
+            FROM gtfs.shapes_seq shape
+            WHERE shape.version_id = $2
+              AND shape.geom IS NOT NULL
+              AND ST_IsValid(shape.geom)
+              AND ST_NPoints(ST_RemoveRepeatedPoints(shape.geom)) >= 2
+        ),
+        line_features AS MATERIALIZED (
+            SELECT
+                candidate.route_item_id,
+                candidate.shape_item_id,
+                nextval('gtfs_tiling_feature_id_seq')::BIGINT AS feature_id
+            FROM (
+                SELECT DISTINCT
+                    trip.route_item_id,
+                    trip.shape_item_id
+                FROM gtfs.trips trip
+                JOIN valid_shape_lines shape_line
+                  ON shape_line.shape_item_id = trip.shape_item_id
+                WHERE trip.version_id = $2
+                  AND trip.route_item_id IS NOT NULL
+                  AND trip.shape_item_id IS NOT NULL
+            ) candidate
+        ),
+        inserted_trip_lines AS (
+            INSERT INTO gtfs_tiling.trip_lines (
+                source_id,
+                version_id,
+                feature_id,
+                route_item_id,
+                geom
+            )
+            SELECT
+                $1,
+                $2,
+                line_feature.feature_id,
+                line_feature.route_item_id,
+                shape_line.geom
+            FROM line_features line_feature
+            JOIN valid_shape_lines shape_line
+              ON shape_line.shape_item_id = line_feature.shape_item_id
+            RETURNING feature_id
+        )
+        INSERT INTO gtfs_tiling.trip_line_refs (
+            source_id,
+            version_id,
+            route_item_id,
+            trip_item_id,
+            trip_line_feature_id
+        )
+        SELECT
+            $1,
+            $2,
+            trip.route_item_id,
+            trip.item_id,
+            line_feature.feature_id
+        FROM gtfs.trips trip
+        JOIN line_features line_feature
+          ON line_feature.route_item_id = trip.route_item_id
+         AND line_feature.shape_item_id = trip.shape_item_id
+        JOIN inserted_trip_lines inserted_trip_line
+          ON inserted_trip_line.feature_id = line_feature.feature_id
+        WHERE trip.version_id = $2
+          AND trip.route_item_id IS NOT NULL
+          AND trip.shape_item_id IS NOT NULL
+        ON CONFLICT (source_id, version_id, trip_item_id) DO NOTHING
+        "#,
+    )
+    .bind(source_id)
+    .bind(version_id)
+    .execute(&mut **tx)
+    .await
+    .context("failed to materialize shaped GTFS trip lines")?;
+
+    Ok(())
+}
+
+async fn import_source_trip_stop_sequence_lines(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: i64,
+    version_id: i32,
+) -> Result<()> {
+    drop_stop_sequence_trip_line_temp_tables(tx).await?;
+    create_stop_sequence_trip_line_temp_tables(tx).await?;
+    collect_stop_sequence_trip_candidates(tx, version_id).await?;
+    collect_stop_sequence_line_features(tx).await?;
+    persist_stop_sequence_trip_lines(tx, source_id).await?;
+    persist_stop_sequence_trip_line_refs(tx, source_id).await?;
+    drop_stop_sequence_trip_line_temp_tables(tx).await?;
+
+    Ok(())
+}
+
+async fn create_stop_sequence_trip_line_temp_tables(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        CREATE TEMP TABLE gtfs_tiling_stop_sequence_trip_candidates (
+            version_id INTEGER NOT NULL,
+            route_item_id INTEGER NOT NULL,
+            trip_item_id INTEGER NOT NULL,
+            stop_item_ids INTEGER[] NOT NULL
+        ) ON COMMIT DROP
+        "#,
+    )
+    .execute(&mut **tx)
+    .await
+    .context("failed to create GTFS stop-sequence trip candidate temp table")?;
+
+    sqlx::query(
+        r#"
+        CREATE TEMP TABLE gtfs_tiling_stop_sequence_line_features (
+            version_id INTEGER NOT NULL,
+            route_item_id INTEGER NOT NULL,
+            stop_item_ids INTEGER[] NOT NULL,
+            representative_trip_item_id INTEGER NOT NULL,
+            feature_id BIGINT NOT NULL
+        ) ON COMMIT DROP
+        "#,
+    )
+    .execute(&mut **tx)
+    .await
+    .context("failed to create GTFS stop-sequence line feature temp table")?;
+
+    Ok(())
+}
+
+async fn drop_stop_sequence_trip_line_temp_tables(
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<()> {
+    sqlx::query("DROP TABLE IF EXISTS gtfs_tiling_stop_sequence_line_features")
+        .execute(&mut **tx)
+        .await
+        .context("failed to drop GTFS stop-sequence line feature temp table")?;
+
+    sqlx::query("DROP TABLE IF EXISTS gtfs_tiling_stop_sequence_trip_candidates")
+        .execute(&mut **tx)
+        .await
+        .context("failed to drop GTFS stop-sequence trip candidate temp table")?;
+
+    Ok(())
+}
+
+async fn collect_stop_sequence_trip_candidates(
+    tx: &mut Transaction<'_, Postgres>,
+    version_id: i32,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO gtfs_tiling_stop_sequence_trip_candidates (
+            version_id,
+            route_item_id,
+            trip_item_id,
+            stop_item_ids
+        )
+        SELECT
+            trip.version_id,
+            trip.route_item_id,
+            trip.item_id,
+            stop_time.stop_item_ids
+        FROM gtfs.trips trip
+        JOIN gtfs.stop_times_seq stop_time
+          ON stop_time.version_id = trip.version_id
+         AND stop_time.trip_item_id = trip.item_id
+        WHERE trip.version_id = $1
+          AND trip.route_item_id IS NOT NULL
+          AND trip.shape_item_id IS NULL
+          AND array_length(stop_time.stop_item_ids, 1) >= 2
+        "#,
+    )
+    .bind(version_id)
+    .execute(&mut **tx)
+    .await
+    .context("failed to collect stop-sequence GTFS trip line candidates")?;
+
+    Ok(())
+}
+
+async fn collect_stop_sequence_line_features(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO gtfs_tiling_stop_sequence_line_features (
+            version_id,
+            route_item_id,
+            stop_item_ids,
+            representative_trip_item_id,
+            feature_id
+        )
+        SELECT
+            trip_candidate.version_id,
+            trip_candidate.route_item_id,
+            trip_candidate.stop_item_ids,
+            MIN(trip_candidate.trip_item_id),
+            nextval('gtfs_tiling_feature_id_seq')::BIGINT
+        FROM gtfs_tiling_stop_sequence_trip_candidates trip_candidate
+        GROUP BY
+            trip_candidate.version_id,
+            trip_candidate.route_item_id,
+            trip_candidate.stop_item_ids
+        "#,
+    )
+    .execute(&mut **tx)
+    .await
+    .context("failed to collect stop-sequence GTFS trip line features")?;
+
+    Ok(())
+}
+
+async fn persist_stop_sequence_trip_lines(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: i64,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO gtfs_tiling.trip_lines (
+            source_id,
+            version_id,
+            feature_id,
+            route_item_id,
+            geom
+        )
+        SELECT
+            $1,
+            line_feature.version_id,
+            line_feature.feature_id,
+            line_feature.route_item_id,
+            ST_MakeLine(
+                ST_SetSRID(ST_MakePoint(stop.stop_lon, stop.stop_lat), 4326)
+                ORDER BY stop_ref.stop_order
+            )
+        FROM gtfs_tiling_stop_sequence_line_features line_feature
+        JOIN LATERAL unnest(line_feature.stop_item_ids) WITH ORDINALITY
+            AS stop_ref(stop_item_id, stop_order)
+          ON stop_ref.stop_item_id IS NOT NULL
+        JOIN gtfs.stops stop
+          ON stop.version_id = line_feature.version_id
+         AND stop.item_id = stop_ref.stop_item_id
+        WHERE stop.stop_lon BETWEEN -180.0 AND 180.0
+          AND stop.stop_lat BETWEEN $2 AND $3
+        GROUP BY
+            line_feature.version_id,
+            line_feature.route_item_id,
+            line_feature.feature_id
+        HAVING COUNT(*) >= 2
+           AND (
+               MIN(stop.stop_lon) <> MAX(stop.stop_lon)
+               OR MIN(stop.stop_lat) <> MAX(stop.stop_lat)
+           )
+        "#,
+    )
+    .bind(source_id)
+    .bind(-MAX_WEB_MERCATOR_LATITUDE)
+    .bind(MAX_WEB_MERCATOR_LATITUDE)
+    .execute(&mut **tx)
+    .await
+    .context("failed to persist stop-sequence GTFS trip lines")?;
+
+    Ok(())
+}
+
+async fn persist_stop_sequence_trip_line_refs(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: i64,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO gtfs_tiling.trip_line_refs (
+            source_id,
+            version_id,
+            route_item_id,
+            trip_item_id,
+            trip_line_feature_id
+        )
+        SELECT
+            $1,
+            trip_candidate.version_id,
+            trip_candidate.route_item_id,
+            trip_candidate.trip_item_id,
+            line_feature.feature_id
+        FROM gtfs_tiling_stop_sequence_trip_candidates trip_candidate
+        JOIN gtfs_tiling_stop_sequence_line_features line_feature
+          ON line_feature.version_id = trip_candidate.version_id
+         AND line_feature.route_item_id = trip_candidate.route_item_id
+         AND line_feature.stop_item_ids = trip_candidate.stop_item_ids
+        JOIN gtfs_tiling.trip_lines trip_line
+          ON trip_line.source_id = $1
+         AND trip_line.version_id = line_feature.version_id
+         AND trip_line.feature_id = line_feature.feature_id
+        ON CONFLICT (source_id, version_id, trip_item_id) DO NOTHING
+        "#,
+    )
+    .bind(source_id)
+    .execute(&mut **tx)
+    .await
+    .context("failed to persist stop-sequence GTFS trip line refs")?;
 
     Ok(())
 }
