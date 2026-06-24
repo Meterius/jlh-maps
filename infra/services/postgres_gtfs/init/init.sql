@@ -165,41 +165,32 @@ CREATE TABLE gtfs.trips
     UNIQUE (version_id, item_gtfs_id)
 );
 
-CREATE TABLE gtfs.stop_times
+CREATE TABLE gtfs.stop_times_seq
 (
-    version_id          INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    trip_item_id        INTEGER NOT NULL,
-    arrival_time        INTEGER,
-    departure_time      INTEGER,
-    stop_item_id        INTEGER,
-    stop_sequence       SMALLINT NOT NULL,
-    pickup_type         SMALLINT,
-    drop_off_type       SMALLINT,
-    shape_dist_traveled DOUBLE PRECISION,
-    timepoint           SMALLINT,
-    PRIMARY KEY (version_id, trip_item_id, stop_sequence)
+    version_id           INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    trip_item_id         INTEGER NOT NULL,
+    arrival_times        INTEGER[] NOT NULL,
+    departure_times      INTEGER[] NOT NULL,
+    stop_item_ids        INTEGER[] NOT NULL,
+    stop_sequences       SMALLINT[] NOT NULL,
+    pickup_types         SMALLINT[] NOT NULL,
+    drop_off_types       SMALLINT[] NOT NULL,
+    shape_dist_traveleds DOUBLE PRECISION[] NOT NULL,
+    timepoints           SMALLINT[] NOT NULL,
+    PRIMARY KEY (version_id, trip_item_id)
 );
 
-CREATE INDEX gtfs_stop_times_version_stop_idx ON gtfs.stop_times (version_id, stop_item_id);
-
-CREATE TABLE gtfs.shapes
+CREATE TABLE gtfs.shapes_seq
 (
-    version_id   INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    item_id      INTEGER NOT NULL,
-    item_gtfs_id TEXT    NOT NULL,
-    PRIMARY KEY (version_id, item_id),
+    version_id             INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    shape_item_id          INTEGER NOT NULL,
+    item_gtfs_id           TEXT    NOT NULL,
+    point_count            INTEGER NOT NULL,
+    geom                   geometry(LineString, 4326),
+    shape_pt_sequences     INTEGER[] NOT NULL,
+    shape_dist_traveleds   DOUBLE PRECISION[] NOT NULL,
+    PRIMARY KEY (version_id, shape_item_id),
     UNIQUE (version_id, item_gtfs_id)
-);
-
-CREATE TABLE gtfs.shape_points
-(
-    version_id          INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    shape_item_id       INTEGER NOT NULL,
-    shape_pt_lat        DOUBLE PRECISION,
-    shape_pt_lon        DOUBLE PRECISION,
-    shape_pt_sequence   INTEGER NOT NULL,
-    shape_dist_traveled DOUBLE PRECISION,
-    PRIMARY KEY (version_id, shape_item_id, shape_pt_sequence)
 );
 
 CREATE TABLE gtfs.calendar

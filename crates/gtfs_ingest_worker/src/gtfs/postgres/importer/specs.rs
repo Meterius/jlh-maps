@@ -349,7 +349,7 @@ pub const STOP_TIMES_IMPORT_SPEC: ImportSpec = ImportSpec {
     name: "stop_times",
     file_name: "stop_times.txt",
     required: true,
-    target_table: "gtfs.stop_times",
+    target_table: "pg_temp.import_stop_times",
     columns: STOP_TIMES_COLUMNS,
 };
 
@@ -420,7 +420,7 @@ pub const SHAPE_ITEMS_IMPORT_SPEC: ImportSpec = ImportSpec {
     name: "shapes",
     file_name: "shapes.txt",
     required: false,
-    target_table: "gtfs.shapes",
+    target_table: "pg_temp.import_shapes",
     columns: SHAPES_COLUMNS,
 };
 
@@ -457,7 +457,7 @@ pub const SHAPE_POINTS_IMPORT_SPEC: ImportSpec = ImportSpec {
     name: "shape_points",
     file_name: "shapes.txt",
     required: false,
-    target_table: "gtfs.shape_points",
+    target_table: "pg_temp.import_shape_points",
     columns: SHAPE_POINTS_COLUMNS,
 };
 

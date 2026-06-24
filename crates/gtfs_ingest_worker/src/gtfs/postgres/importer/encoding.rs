@@ -115,7 +115,7 @@ pub fn pickup_drop_off_code(value: PickupDropOffType) -> i16 {
         PickupDropOffType::NotAvailable => 1,
         PickupDropOffType::ArrangeByPhone => 2,
         PickupDropOffType::CoordinateWithDriver => 3,
-        PickupDropOffType::Unknown(value) => i16::from(value),
+        PickupDropOffType::Unknown(value) => value,
     }
 }
 
