@@ -64,12 +64,12 @@ pub async fn sync_tiling_for_source(
     }
 
     delete_source_tiling(&mut tx, source.source_id).await?;
-    insert_source_tiling(&mut tx, source.source_id, active_version_id).await?;
+    insert_source_tiling(&mut tx, active_version_id).await?;
 
     // Every tiling feature table populated below shares this sequence so feature_id
     // stays unique within the source tiling.
     create_tiling_feature_id_sequence(&mut tx).await?;
-    import_source_tiling_data(&mut tx, source.source_id, active_version_id).await?;
+    import_source_tiling_data(&mut tx, active_version_id).await?;
     drop_tiling_feature_id_sequence(&mut tx).await?;
 
     tx.commit()
@@ -112,20 +112,20 @@ pub fn stream_tile_ids_intersecting_geometry<'a>(
         r#"
         WITH selected_tilings AS (
             SELECT
-                tiling.source_id,
                 tiling.version_id,
                 source.slug AS source_slug
             FROM gtfs_tiling.source_tilings tiling
+            JOIN gtfs_meta.feed_versions version
+              ON version.id = tiling.version_id
             JOIN gtfs_meta.feed_sources source
-              ON source.id = tiling.source_id
+              ON source.id = version.source_id
             WHERE ($1::TEXT IS NULL OR source.slug = $1)
         ),
         feature_extent AS (
             SELECT ST_Extent(stop.geom) AS bounds
             FROM gtfs_tiling.stop_points stop
             JOIN selected_tilings tiling
-              ON tiling.source_id = stop.source_id
-             AND tiling.version_id = stop.version_id
+              ON tiling.version_id = stop.version_id
         ),
         zoom_inputs AS (
             SELECT
@@ -198,8 +198,7 @@ pub fn stream_tile_ids_intersecting_geometry<'a>(
             SELECT 1
             FROM gtfs_tiling.stop_points stop
             JOIN selected_tilings tiling
-              ON tiling.source_id = stop.source_id
-             AND tiling.version_id = stop.version_id
+              ON tiling.version_id = stop.version_id
             WHERE stop.geom && tile_bounds.bounds_4326
               AND ST_Intersects(stop.geom, tile_bounds.bounds_4326)
         )
@@ -222,12 +221,13 @@ pub fn stream_export_tiles<'a>(
         r#"
         WITH selected_tilings AS (
             SELECT
-                tiling.source_id,
                 tiling.version_id,
                 source.slug AS source_slug
             FROM gtfs_tiling.source_tilings tiling
+            JOIN gtfs_meta.feed_versions version
+              ON version.id = tiling.version_id
             JOIN gtfs_meta.feed_sources source
-              ON source.id = tiling.source_id
+              ON source.id = version.source_id
             WHERE ($1::TEXT IS NULL OR source.slug = $1)
         ),
         tile_ranges AS (
@@ -290,8 +290,7 @@ pub fn stream_export_tiles<'a>(
                       ON parent_stop.version_id = stop.version_id
                      AND parent_stop.item_id = stop.parent_station_item_id
                     JOIN selected_tilings tiling
-                      ON tiling.source_id = stop_point.source_id
-                     AND tiling.version_id = stop_point.version_id
+                      ON tiling.version_id = stop_point.version_id
                     WHERE stop_point.geom && tile_bounds.bounds_4326
                       AND ST_Intersects(stop_point.geom, tile_bounds.bounds_4326)
                 ),
@@ -375,8 +374,15 @@ async fn fetch_tiling_source_state_for_update(
         LEFT JOIN gtfs_meta.feed_versions active_version
           ON active_version.id = source.active_version_id
          AND active_version.status = 'active'
-        LEFT JOIN gtfs_tiling.source_tilings tiling
-          ON tiling.source_id = source.id
+        LEFT JOIN LATERAL (
+            SELECT source_tiling.version_id
+            FROM gtfs_tiling.source_tilings source_tiling
+            JOIN gtfs_meta.feed_versions tiled_version
+              ON tiled_version.id = source_tiling.version_id
+            WHERE tiled_version.source_id = source.id
+            ORDER BY source_tiling.generated_at DESC
+            LIMIT 1
+        ) tiling ON TRUE
         WHERE source.slug = $1
         FOR UPDATE OF source
         "#,
@@ -396,31 +402,32 @@ async fn fetch_tiling_source_state_for_update(
 //
 
 async fn delete_source_tiling(tx: &mut Transaction<'_, Postgres>, source_id: i64) -> Result<()> {
-    sqlx::query("DELETE FROM gtfs_tiling.source_tilings WHERE source_id = $1")
-        .bind(source_id)
-        .execute(&mut **tx)
-        .await
-        .context("failed to delete previous GTFS tiling rows")?;
+    sqlx::query(
+        r#"
+        DELETE FROM gtfs_tiling.source_tilings tiling
+        USING gtfs_meta.feed_versions version
+        WHERE version.id = tiling.version_id
+          AND version.source_id = $1
+        "#,
+    )
+    .bind(source_id)
+    .execute(&mut **tx)
+    .await
+    .context("failed to delete previous GTFS tiling rows")?;
 
     Ok(())
 }
 
-async fn insert_source_tiling(
-    tx: &mut Transaction<'_, Postgres>,
-    source_id: i64,
-    version_id: i32,
-) -> Result<()> {
+async fn insert_source_tiling(tx: &mut Transaction<'_, Postgres>, version_id: i32) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO gtfs_tiling.source_tilings (
-            source_id,
             version_id,
             generated_at
         )
-        VALUES ($1, $2, now())
+        VALUES ($1, now())
         "#,
     )
-    .bind(source_id)
     .bind(version_id)
     .execute(&mut **tx)
     .await
@@ -451,24 +458,21 @@ async fn drop_tiling_feature_id_sequence(tx: &mut Transaction<'_, Postgres>) -> 
 
 async fn import_source_tiling_data(
     tx: &mut Transaction<'_, Postgres>,
-    source_id: i64,
     version_id: i32,
 ) -> Result<()> {
-    import_source_tiling_stop_points(tx, source_id, version_id).await?;
-    import_source_trip_shape_lines(tx, source_id, version_id).await?;
-    import_source_trip_stop_sequence_lines(tx, source_id, version_id).await?;
+    import_source_tiling_stop_points(tx, version_id).await?;
+    import_source_trip_shape_lines(tx, version_id).await?;
+    import_source_trip_stop_sequence_lines(tx, version_id).await?;
     Ok(())
 }
 
 async fn import_source_tiling_stop_points(
     tx: &mut Transaction<'_, Postgres>,
-    source_id: i64,
     version_id: i32,
 ) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO gtfs_tiling.stop_points (
-            source_id,
             version_id,
             feature_id,
             stop_item_id,
@@ -476,17 +480,15 @@ async fn import_source_tiling_stop_points(
         )
         SELECT
             $1,
-            $2,
             nextval('gtfs_tiling_feature_id_seq')::BIGINT,
             item_id,
             ST_SetSRID(ST_MakePoint(stop_lon, stop_lat), 4326)
         FROM gtfs.stops
-        WHERE version_id = $2
+        WHERE version_id = $1
           AND stop_lon BETWEEN -180.0 AND 180.0
-          AND stop_lat BETWEEN $3 AND $4
+          AND stop_lat BETWEEN $2 AND $3
         "#,
     )
-    .bind(source_id)
     .bind(version_id)
     .bind(-MAX_WEB_MERCATOR_LATITUDE)
     .bind(MAX_WEB_MERCATOR_LATITUDE)
@@ -499,7 +501,6 @@ async fn import_source_tiling_stop_points(
 
 async fn import_source_trip_shape_lines(
     tx: &mut Transaction<'_, Postgres>,
-    source_id: i64,
     version_id: i32,
 ) -> Result<()> {
     sqlx::query(
@@ -509,7 +510,7 @@ async fn import_source_trip_shape_lines(
                 shape.shape_item_id,
                 shape.geom
             FROM gtfs.shapes_seq shape
-            WHERE shape.version_id = $2
+            WHERE shape.version_id = $1
               AND shape.geom IS NOT NULL
               AND ST_IsValid(shape.geom)
               AND ST_NPoints(ST_RemoveRepeatedPoints(shape.geom)) >= 2
@@ -526,14 +527,13 @@ async fn import_source_trip_shape_lines(
                 FROM gtfs.trips trip
                 JOIN valid_shape_lines shape_line
                   ON shape_line.shape_item_id = trip.shape_item_id
-                WHERE trip.version_id = $2
+                WHERE trip.version_id = $1
                   AND trip.route_item_id IS NOT NULL
                   AND trip.shape_item_id IS NOT NULL
             ) candidate
         ),
         inserted_trip_lines AS (
             INSERT INTO gtfs_tiling.trip_lines (
-                source_id,
                 version_id,
                 feature_id,
                 route_item_id,
@@ -541,7 +541,6 @@ async fn import_source_trip_shape_lines(
             )
             SELECT
                 $1,
-                $2,
                 line_feature.feature_id,
                 line_feature.route_item_id,
                 shape_line.geom
@@ -551,7 +550,6 @@ async fn import_source_trip_shape_lines(
             RETURNING feature_id
         )
         INSERT INTO gtfs_tiling.trip_line_refs (
-            source_id,
             version_id,
             route_item_id,
             trip_item_id,
@@ -559,7 +557,6 @@ async fn import_source_trip_shape_lines(
         )
         SELECT
             $1,
-            $2,
             trip.route_item_id,
             trip.item_id,
             line_feature.feature_id
@@ -569,13 +566,12 @@ async fn import_source_trip_shape_lines(
          AND line_feature.shape_item_id = trip.shape_item_id
         JOIN inserted_trip_lines inserted_trip_line
           ON inserted_trip_line.feature_id = line_feature.feature_id
-        WHERE trip.version_id = $2
+        WHERE trip.version_id = $1
           AND trip.route_item_id IS NOT NULL
           AND trip.shape_item_id IS NOT NULL
-        ON CONFLICT (source_id, version_id, trip_item_id) DO NOTHING
+        ON CONFLICT (version_id, trip_item_id) DO NOTHING
         "#,
     )
-    .bind(source_id)
     .bind(version_id)
     .execute(&mut **tx)
     .await
@@ -586,15 +582,14 @@ async fn import_source_trip_shape_lines(
 
 async fn import_source_trip_stop_sequence_lines(
     tx: &mut Transaction<'_, Postgres>,
-    source_id: i64,
     version_id: i32,
 ) -> Result<()> {
     drop_stop_sequence_trip_line_temp_tables(tx).await?;
     create_stop_sequence_trip_line_temp_tables(tx).await?;
     collect_stop_sequence_trip_candidates(tx, version_id).await?;
     collect_stop_sequence_line_features(tx).await?;
-    persist_stop_sequence_trip_lines(tx, source_id).await?;
-    persist_stop_sequence_trip_line_refs(tx, source_id).await?;
+    persist_stop_sequence_trip_lines(tx).await?;
+    persist_stop_sequence_trip_line_refs(tx).await?;
     drop_stop_sequence_trip_line_temp_tables(tx).await?;
 
     Ok(())
@@ -716,21 +711,16 @@ async fn collect_stop_sequence_line_features(tx: &mut Transaction<'_, Postgres>)
     Ok(())
 }
 
-async fn persist_stop_sequence_trip_lines(
-    tx: &mut Transaction<'_, Postgres>,
-    source_id: i64,
-) -> Result<()> {
+async fn persist_stop_sequence_trip_lines(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO gtfs_tiling.trip_lines (
-            source_id,
             version_id,
             feature_id,
             route_item_id,
             geom
         )
         SELECT
-            $1,
             line_feature.version_id,
             line_feature.feature_id,
             line_feature.route_item_id,
@@ -746,7 +736,7 @@ async fn persist_stop_sequence_trip_lines(
           ON stop.version_id = line_feature.version_id
          AND stop.item_id = stop_ref.stop_item_id
         WHERE stop.stop_lon BETWEEN -180.0 AND 180.0
-          AND stop.stop_lat BETWEEN $2 AND $3
+          AND stop.stop_lat BETWEEN $1 AND $2
         GROUP BY
             line_feature.version_id,
             line_feature.route_item_id,
@@ -758,7 +748,6 @@ async fn persist_stop_sequence_trip_lines(
            )
         "#,
     )
-    .bind(source_id)
     .bind(-MAX_WEB_MERCATOR_LATITUDE)
     .bind(MAX_WEB_MERCATOR_LATITUDE)
     .execute(&mut **tx)
@@ -768,21 +757,16 @@ async fn persist_stop_sequence_trip_lines(
     Ok(())
 }
 
-async fn persist_stop_sequence_trip_line_refs(
-    tx: &mut Transaction<'_, Postgres>,
-    source_id: i64,
-) -> Result<()> {
+async fn persist_stop_sequence_trip_line_refs(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO gtfs_tiling.trip_line_refs (
-            source_id,
             version_id,
             route_item_id,
             trip_item_id,
             trip_line_feature_id
         )
         SELECT
-            $1,
             trip_candidate.version_id,
             trip_candidate.route_item_id,
             trip_candidate.trip_item_id,
@@ -793,13 +777,11 @@ async fn persist_stop_sequence_trip_line_refs(
          AND line_feature.route_item_id = trip_candidate.route_item_id
          AND line_feature.stop_item_ids = trip_candidate.stop_item_ids
         JOIN gtfs_tiling.trip_lines trip_line
-          ON trip_line.source_id = $1
-         AND trip_line.version_id = line_feature.version_id
+          ON trip_line.version_id = line_feature.version_id
          AND trip_line.feature_id = line_feature.feature_id
-        ON CONFLICT (source_id, version_id, trip_item_id) DO NOTHING
+        ON CONFLICT (version_id, trip_item_id) DO NOTHING
         "#,
     )
-    .bind(source_id)
     .execute(&mut **tx)
     .await
     .context("failed to persist stop-sequence GTFS trip line refs")?;

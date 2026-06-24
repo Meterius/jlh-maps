@@ -240,25 +240,21 @@ CREATE TABLE gtfs.feed_info
 
 CREATE TABLE gtfs_tiling.source_tilings
 (
-    source_id    BIGINT PRIMARY KEY REFERENCES gtfs_meta.feed_sources (id) ON DELETE CASCADE,
-    version_id   INTEGER     NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    generated_at TIMESTAMPTZ NOT NULL,
-
-    UNIQUE (source_id, version_id)
+    version_id   INTEGER PRIMARY KEY REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    generated_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE gtfs_tiling.stop_points
 (
-    source_id  BIGINT                NOT NULL,
-    version_id INTEGER               NOT NULL,
-    feature_id BIGINT                NOT NULL,
-    stop_item_id INTEGER             NOT NULL,
-    geom       geometry(Point, 4326) NOT NULL,
+    version_id   INTEGER               NOT NULL,
+    feature_id   BIGINT                NOT NULL,
+    stop_item_id INTEGER               NOT NULL,
+    geom         geometry(Point, 4326) NOT NULL,
 
-    PRIMARY KEY (source_id, version_id, stop_item_id),
-    UNIQUE (source_id, version_id, feature_id),
-    FOREIGN KEY (source_id, version_id)
-        REFERENCES gtfs_tiling.source_tilings (source_id, version_id)
+    PRIMARY KEY (version_id, feature_id),
+    UNIQUE (version_id, stop_item_id),
+    FOREIGN KEY (version_id)
+        REFERENCES gtfs_tiling.source_tilings (version_id)
         ON DELETE CASCADE
 );
 
@@ -267,37 +263,35 @@ CREATE INDEX gtfs_tiling_stop_points_geom_gix
 
 CREATE TABLE gtfs_tiling.trip_lines
 (
-    source_id     BIGINT                     NOT NULL,
     version_id    INTEGER                    NOT NULL,
     feature_id    BIGINT                     NOT NULL,
     route_item_id INTEGER                    NOT NULL,
     geom          geometry(LineString, 4326) NOT NULL,
 
-    PRIMARY KEY (source_id, version_id, feature_id),
-    FOREIGN KEY (source_id, version_id)
-        REFERENCES gtfs_tiling.source_tilings (source_id, version_id)
+    PRIMARY KEY (version_id, feature_id),
+    FOREIGN KEY (version_id)
+        REFERENCES gtfs_tiling.source_tilings (version_id)
         ON DELETE CASCADE
 );
 
 CREATE INDEX gtfs_tiling_trip_lines_route_idx
-    ON gtfs_tiling.trip_lines (source_id, version_id, route_item_id);
+    ON gtfs_tiling.trip_lines (version_id, route_item_id);
 
 CREATE TABLE gtfs_tiling.trip_line_refs
 (
-    source_id            BIGINT  NOT NULL,
     version_id           INTEGER NOT NULL,
     route_item_id        INTEGER NOT NULL,
     trip_item_id         INTEGER NOT NULL,
     trip_line_feature_id BIGINT  NOT NULL,
 
-    PRIMARY KEY (source_id, version_id, trip_item_id),
-    FOREIGN KEY (source_id, version_id)
-        REFERENCES gtfs_tiling.source_tilings (source_id, version_id)
+    PRIMARY KEY (version_id, trip_item_id),
+    FOREIGN KEY (version_id)
+        REFERENCES gtfs_tiling.source_tilings (version_id)
         ON DELETE CASCADE
 );
 
 CREATE INDEX gtfs_tiling_trip_line_refs_route_idx
-    ON gtfs_tiling.trip_line_refs (source_id, version_id, route_item_id);
+    ON gtfs_tiling.trip_line_refs (version_id, route_item_id);
 
 CREATE INDEX gtfs_tiling_trip_line_refs_line_idx
-    ON gtfs_tiling.trip_line_refs (source_id, version_id, trip_line_feature_id);
+    ON gtfs_tiling.trip_line_refs (version_id, trip_line_feature_id);
