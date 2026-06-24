@@ -76,14 +76,14 @@ impl GtfsClient {
 
     pub async fn fetch_aggregated_stop(
         &self,
-        version_id: i64,
+        version_id: i32,
         stop_id: &str,
     ) -> Result<Option<AggregatedStop>> {
         let rows = postgres::fetch_aggregated_stop(&self.pool, version_id, stop_id).await?;
         Ok(AggregatedStop::from_postgres_rows(rows))
     }
 
-    pub async fn fetch_route(&self, version_id: i64, route_id: &str) -> Result<Option<Route>> {
+    pub async fn fetch_route(&self, version_id: i32, route_id: &str) -> Result<Option<Route>> {
         postgres::fetch_route(&self.pool, version_id, route_id)
             .await
             .map(|route| route.map(Route::from))

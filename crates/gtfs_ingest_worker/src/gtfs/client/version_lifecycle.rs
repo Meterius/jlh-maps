@@ -172,7 +172,7 @@ impl GtfsIngestClient {
     pub async fn import_feed_version(
         &self,
         source_slug: &str,
-        version_id: i64,
+        version_id: i32,
         version_info: Option<&FeedVersion>,
     ) -> Result<ImportFeedVersionOutcome> {
         let version = match version_info {
@@ -268,7 +268,7 @@ impl GtfsIngestClient {
     pub async fn try_promote_latest_feed_version(
         &self,
         source_slug: &str,
-        version_id: i64,
+        version_id: i32,
     ) -> Result<PromoteFeedVersionOutcome> {
         match postgres::promote_feed_version(&self.pool, version_id).await? {
             PromoteVersionOutcome::AlreadyActive(version) => {

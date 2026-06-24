@@ -1,8 +1,9 @@
 use super::GtfsZip;
 use super::encoding::{
     availability_code, direction_type_code, exception_code, format_color, format_gtfs_date,
-    format_gtfs_time, location_type_code, pickup_drop_off_code, route_type_code, timepoint_code,
+    location_type_code, pickup_drop_off_code, route_type_code, timepoint_code,
 };
+use super::translation::{TranslationKind, TranslationMaps};
 use crate::gtfs::parser;
 use crate::utils::postgres_binary_copy::BinaryCopyInWriter;
 use anyhow::{Context, Result};
@@ -30,7 +31,8 @@ pub enum ImportKind {
     Routes,
     Trips,
     StopTimes,
-    Shapes,
+    ShapeItems,
+    ShapePoints,
     Calendar,
     CalendarDates,
     FeedInfo,
@@ -40,11 +42,12 @@ pub const IMPORT_SPECS: &[ImportSpec] = &[
     AGENCY_IMPORT_SPEC,
     STOPS_IMPORT_SPEC,
     ROUTES_IMPORT_SPEC,
-    TRIPS_IMPORT_SPEC,
-    STOP_TIMES_IMPORT_SPEC,
-    SHAPES_IMPORT_SPEC,
     CALENDAR_IMPORT_SPEC,
     CALENDAR_DATES_IMPORT_SPEC,
+    SHAPE_ITEMS_IMPORT_SPEC,
+    SHAPE_POINTS_IMPORT_SPEC,
+    TRIPS_IMPORT_SPEC,
+    STOP_TIMES_IMPORT_SPEC,
     FEED_INFO_IMPORT_SPEC,
 ];
 
@@ -52,7 +55,8 @@ pub async fn write_records<C, R>(
     writer: &mut BinaryCopyInWriter<C>,
     spec: &ImportSpec,
     gtfs_zip: &mut GtfsZip<R>,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -62,27 +66,36 @@ where
 
     match spec.kind {
         ImportKind::Agency => {
-            write_agency_records(writer, reader, spec.file_name, version_id).await
+            write_agency_records(writer, reader, spec.file_name, translations, version_id).await
         }
-        ImportKind::Stops => write_stops_records(writer, reader, spec.file_name, version_id).await,
+        ImportKind::Stops => {
+            write_stops_records(writer, reader, spec.file_name, translations, version_id).await
+        }
         ImportKind::Routes => {
-            write_routes_records(writer, reader, spec.file_name, version_id).await
+            write_routes_records(writer, reader, spec.file_name, translations, version_id).await
         }
-        ImportKind::Trips => write_trips_records(writer, reader, spec.file_name, version_id).await,
+        ImportKind::Trips => {
+            write_trips_records(writer, reader, spec.file_name, translations, version_id).await
+        }
         ImportKind::StopTimes => {
-            write_stop_times_records(writer, reader, spec.file_name, version_id).await
+            write_stop_times_records(writer, reader, spec.file_name, translations, version_id).await
         }
-        ImportKind::Shapes => {
-            write_shapes_records(writer, reader, spec.file_name, version_id).await
+        ImportKind::ShapeItems => {
+            write_shape_item_records(writer, reader, spec.file_name, translations, version_id).await
+        }
+        ImportKind::ShapePoints => {
+            write_shape_point_records(writer, reader, spec.file_name, translations, version_id)
+                .await
         }
         ImportKind::Calendar => {
-            write_calendar_records(writer, reader, spec.file_name, version_id).await
+            write_calendar_records(writer, reader, spec.file_name, translations, version_id).await
         }
         ImportKind::CalendarDates => {
-            write_calendar_dates_records(writer, reader, spec.file_name, version_id).await
+            write_calendar_dates_records(writer, reader, spec.file_name, translations, version_id)
+                .await
         }
         ImportKind::FeedInfo => {
-            write_feed_info_records(writer, reader, spec.file_name, version_id).await
+            write_feed_info_records(writer, reader, spec.file_name, translations, version_id).await
         }
     }
 }
@@ -100,7 +113,8 @@ pub const AGENCY_IMPORT_SPEC: ImportSpec = ImportSpec {
 
 const AGENCY_COLUMNS: &[&str] = &[
     "version_id",
-    "agency_id",
+    "item_id",
+    "item_gtfs_id",
     "agency_name",
     "agency_url",
     "agency_timezone",
@@ -112,7 +126,8 @@ pub async fn write_agency_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -121,9 +136,15 @@ where
 
     for agency in parser::parse_csv::<_, Agency>(reader, file_name)? {
         let agency = agency?;
+        let item_id = agency
+            .id
+            .as_deref()
+            .map(|id| translations.get_or_insert(TranslationKind::Agency, id))
+            .unwrap_or_else(|| translations.allocate_item_id());
         writer
             .write_row((
                 version_id,
+                item_id,
                 agency.id.as_deref(),
                 &agency.name,
                 &agency.url,
@@ -148,7 +169,8 @@ pub const STOPS_IMPORT_SPEC: ImportSpec = ImportSpec {
 
 const STOPS_COLUMNS: &[&str] = &[
     "version_id",
-    "stop_id",
+    "item_id",
+    "item_gtfs_id",
     "stop_code",
     "stop_name",
     "stop_desc",
@@ -157,7 +179,7 @@ const STOPS_COLUMNS: &[&str] = &[
     "zone_id",
     "stop_url",
     "location_type",
-    "parent_station",
+    "parent_station_item_id",
     "wheelchair_boarding",
     "platform_code",
 ];
@@ -166,7 +188,8 @@ pub async fn write_stops_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -175,9 +198,13 @@ where
 
     for stop in parser::parse_csv::<_, Stop>(reader, file_name)? {
         let stop = stop?;
+        let item_id = translations.get_or_insert(TranslationKind::Stop, &stop.id);
+        let parent_station_item_id =
+            translations.optional_reference(TranslationKind::Stop, stop.parent_station.as_deref());
         writer
             .write_row((
                 version_id,
+                item_id,
                 &stop.id,
                 stop.code.as_deref(),
                 stop.name.as_deref(),
@@ -187,7 +214,7 @@ where
                 stop.zone_id.as_deref(),
                 stop.url.as_deref(),
                 location_type_code(stop.location_type),
-                stop.parent_station.as_deref(),
+                parent_station_item_id,
                 availability_code(stop.wheelchair_boarding),
                 stop.platform_code.as_deref(),
             ))
@@ -208,8 +235,9 @@ pub const ROUTES_IMPORT_SPEC: ImportSpec = ImportSpec {
 
 const ROUTES_COLUMNS: &[&str] = &[
     "version_id",
-    "route_id",
-    "agency_id",
+    "item_id",
+    "item_gtfs_id",
+    "agency_item_id",
     "route_short_name",
     "route_long_name",
     "route_desc",
@@ -223,7 +251,8 @@ pub async fn write_routes_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -232,11 +261,15 @@ where
 
     for route in parser::parse_csv::<_, Route>(reader, file_name)? {
         let route = route?;
+        let item_id = translations.get_or_insert(TranslationKind::Route, &route.id);
+        let agency_item_id =
+            translations.optional_reference(TranslationKind::Agency, route.agency_id.as_deref());
         writer
             .write_row((
                 version_id,
+                item_id,
                 &route.id,
-                route.agency_id.as_deref(),
+                agency_item_id,
                 route.short_name.as_deref(),
                 route.long_name.as_deref(),
                 route.desc.as_deref(),
@@ -262,20 +295,22 @@ pub const TRIPS_IMPORT_SPEC: ImportSpec = ImportSpec {
 
 const TRIPS_COLUMNS: &[&str] = &[
     "version_id",
-    "route_id",
-    "service_id",
-    "trip_id",
+    "item_id",
+    "item_gtfs_id",
+    "route_item_id",
+    "service_item_id",
     "trip_headsign",
     "direction_id",
     "block_id",
-    "shape_id",
+    "shape_item_id",
 ];
 
 pub async fn write_trips_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -284,16 +319,24 @@ where
 
     for trip in parser::parse_csv::<_, RawTrip>(reader, file_name)? {
         let trip = trip?;
+        let item_id = translations.get_or_insert(TranslationKind::Trip, &trip.id);
+        let route_item_id =
+            translations.optional_reference(TranslationKind::Route, Some(trip.route_id.as_str()));
+        let service_item_id = translations
+            .optional_reference(TranslationKind::Service, Some(trip.service_id.as_str()));
+        let shape_item_id =
+            translations.optional_reference(TranslationKind::Shape, trip.shape_id.as_deref());
         writer
             .write_row((
                 version_id,
-                &trip.route_id,
-                &trip.service_id,
+                item_id,
                 &trip.id,
+                route_item_id,
+                service_item_id,
                 trip.trip_headsign.as_deref(),
                 trip.direction_id.map(direction_type_code),
                 trip.block_id.as_deref(),
-                trip.shape_id.as_deref(),
+                shape_item_id,
             ))
             .await?;
     }
@@ -312,10 +355,10 @@ pub const STOP_TIMES_IMPORT_SPEC: ImportSpec = ImportSpec {
 
 const STOP_TIMES_COLUMNS: &[&str] = &[
     "version_id",
-    "trip_id",
+    "trip_item_id",
     "arrival_time",
     "departure_time",
-    "stop_id",
+    "stop_item_id",
     "stop_sequence",
     "pickup_type",
     "drop_off_type",
@@ -327,7 +370,8 @@ pub async fn write_stop_times_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -336,15 +380,30 @@ where
 
     for stop_time in parser::parse_csv::<_, RawStopTime>(reader, file_name)? {
         let stop_time = stop_time?;
+        let trip_item_id =
+            translations.get_or_insert(TranslationKind::Trip, stop_time.trip_id.as_str());
+        let stop_item_id = translations
+            .optional_reference(TranslationKind::Stop, Some(stop_time.stop_id.as_str()));
+        let arrival_time = stop_time
+            .arrival_time
+            .map(i32::try_from)
+            .transpose()
+            .context("GTFS arrival_time exceeds Postgres INTEGER range")?;
+        let departure_time = stop_time
+            .departure_time
+            .map(i32::try_from)
+            .transpose()
+            .context("GTFS departure_time exceeds Postgres INTEGER range")?;
+
         writer
             .write_row((
                 version_id,
-                &stop_time.trip_id,
-                stop_time.arrival_time.map(format_gtfs_time),
-                stop_time.departure_time.map(format_gtfs_time),
-                &stop_time.stop_id,
-                i32::try_from(stop_time.stop_sequence)
-                    .context("GTFS stop_sequence exceeds Postgres INTEGER range")?,
+                trip_item_id,
+                arrival_time,
+                departure_time,
+                stop_item_id,
+                i16::try_from(stop_time.stop_sequence)
+                    .context("GTFS stop_sequence exceeds Postgres SMALLINT range")?,
                 pickup_drop_off_code(stop_time.pickup_type),
                 pickup_drop_off_code(stop_time.drop_off_type),
                 stop_time.shape_dist_traveled.map(f64::from),
@@ -356,8 +415,8 @@ where
     Ok(writer.row_count() - start_row_count)
 }
 
-pub const SHAPES_IMPORT_SPEC: ImportSpec = ImportSpec {
-    kind: ImportKind::Shapes,
+pub const SHAPE_ITEMS_IMPORT_SPEC: ImportSpec = ImportSpec {
+    kind: ImportKind::ShapeItems,
     name: "shapes",
     file_name: "shapes.txt",
     required: false,
@@ -365,20 +424,58 @@ pub const SHAPES_IMPORT_SPEC: ImportSpec = ImportSpec {
     columns: SHAPES_COLUMNS,
 };
 
-const SHAPES_COLUMNS: &[&str] = &[
+const SHAPES_COLUMNS: &[&str] = &["version_id", "item_id", "item_gtfs_id"];
+
+pub async fn write_shape_item_records<C>(
+    writer: &mut BinaryCopyInWriter<C>,
+    reader: impl Read,
+    file_name: &str,
+    translations: &mut TranslationMaps,
+    version_id: i32,
+) -> Result<u64>
+where
+    C: DerefMut<Target = PgConnection>,
+{
+    let start_row_count = writer.row_count();
+    let mut seen_shape_ids = std::collections::HashSet::new();
+
+    for shape in parser::parse_csv::<_, Shape>(reader, file_name)? {
+        let shape = shape?;
+        if !seen_shape_ids.insert(shape.id.clone()) {
+            continue;
+        }
+
+        let item_id = translations.get_or_insert(TranslationKind::Shape, &shape.id);
+        writer.write_row((version_id, item_id, &shape.id)).await?;
+    }
+
+    Ok(writer.row_count() - start_row_count)
+}
+
+pub const SHAPE_POINTS_IMPORT_SPEC: ImportSpec = ImportSpec {
+    kind: ImportKind::ShapePoints,
+    name: "shape_points",
+    file_name: "shapes.txt",
+    required: false,
+    target_table: "gtfs.shape_points",
+    columns: SHAPE_POINTS_COLUMNS,
+};
+
+const SHAPE_POINTS_COLUMNS: &[&str] = &[
     "version_id",
-    "shape_id",
+    "shape_item_id",
     "shape_pt_lat",
     "shape_pt_lon",
     "shape_pt_sequence",
     "shape_dist_traveled",
 ];
 
-pub async fn write_shapes_records<C>(
+pub async fn write_shape_point_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -387,10 +484,11 @@ where
 
     for shape in parser::parse_csv::<_, Shape>(reader, file_name)? {
         let shape = shape?;
+        let shape_item_id = translations.get_or_insert(TranslationKind::Shape, &shape.id);
         writer
             .write_row((
                 version_id,
-                &shape.id,
+                shape_item_id,
                 shape.latitude,
                 shape.longitude,
                 i32::try_from(shape.sequence)
@@ -414,7 +512,8 @@ pub const CALENDAR_IMPORT_SPEC: ImportSpec = ImportSpec {
 
 const CALENDAR_COLUMNS: &[&str] = &[
     "version_id",
-    "service_id",
+    "item_id",
+    "item_gtfs_id",
     "monday",
     "tuesday",
     "wednesday",
@@ -430,7 +529,8 @@ pub async fn write_calendar_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -439,9 +539,11 @@ where
 
     for calendar in parser::parse_csv::<_, Calendar>(reader, file_name)? {
         let calendar = calendar?;
+        let item_id = translations.get_or_insert(TranslationKind::Service, &calendar.id);
         writer
             .write_row((
                 version_id,
+                item_id,
                 &calendar.id,
                 calendar.monday,
                 calendar.tuesday,
@@ -468,13 +570,15 @@ pub const CALENDAR_DATES_IMPORT_SPEC: ImportSpec = ImportSpec {
     columns: CALENDAR_DATES_COLUMNS,
 };
 
-const CALENDAR_DATES_COLUMNS: &[&str] = &["version_id", "service_id", "date", "exception_type"];
+const CALENDAR_DATES_COLUMNS: &[&str] =
+    &["version_id", "service_item_id", "date", "exception_type"];
 
 pub async fn write_calendar_dates_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -483,10 +587,12 @@ where
 
     for calendar_date in parser::parse_csv::<_, CalendarDate>(reader, file_name)? {
         let calendar_date = calendar_date?;
+        let service_item_id =
+            translations.get_or_insert(TranslationKind::Service, &calendar_date.service_id);
         writer
             .write_row((
                 version_id,
-                &calendar_date.service_id,
+                service_item_id,
                 format_gtfs_date(calendar_date.date),
                 exception_code(calendar_date.exception_type),
             ))
@@ -507,6 +613,7 @@ pub const FEED_INFO_IMPORT_SPEC: ImportSpec = ImportSpec {
 
 const FEED_INFO_COLUMNS: &[&str] = &[
     "version_id",
+    "item_id",
     "feed_publisher_name",
     "feed_publisher_url",
     "feed_lang",
@@ -522,7 +629,8 @@ pub async fn write_feed_info_records<C>(
     writer: &mut BinaryCopyInWriter<C>,
     reader: impl Read,
     file_name: &str,
-    version_id: i64,
+    translations: &mut TranslationMaps,
+    version_id: i32,
 ) -> Result<u64>
 where
     C: DerefMut<Target = PgConnection>,
@@ -531,9 +639,11 @@ where
 
     for feed_info in parser::parse_csv::<_, FeedInfo>(reader, file_name)? {
         let feed_info = feed_info?;
+        let item_id = translations.allocate_item_id();
         writer
             .write_row((
                 version_id,
+                item_id,
                 &feed_info.name,
                 &feed_info.url,
                 &feed_info.lang,

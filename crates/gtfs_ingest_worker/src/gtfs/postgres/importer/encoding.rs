@@ -73,13 +73,6 @@ where
 
 // Value Transforms
 
-pub fn format_gtfs_time(seconds: u32) -> String {
-    let hours = seconds / 3600;
-    let minutes = (seconds % 3600) / 60;
-    let seconds = seconds % 60;
-    format!("{hours:02}:{minutes:02}:{seconds:02}")
-}
-
 pub fn format_gtfs_date(date: chrono::NaiveDate) -> String {
     date.format("%Y%m%d").to_string()
 }
@@ -116,17 +109,17 @@ pub fn route_type_code(value: RouteType) -> i32 {
     }
 }
 
-pub fn pickup_drop_off_code(value: PickupDropOffType) -> i32 {
+pub fn pickup_drop_off_code(value: PickupDropOffType) -> i16 {
     match value {
         PickupDropOffType::Regular => 0,
         PickupDropOffType::NotAvailable => 1,
         PickupDropOffType::ArrangeByPhone => 2,
         PickupDropOffType::CoordinateWithDriver => 3,
-        PickupDropOffType::Unknown(value) => i32::from(value),
+        PickupDropOffType::Unknown(value) => i16::from(value),
     }
 }
 
-pub fn timepoint_code(value: TimepointType) -> i32 {
+pub fn timepoint_code(value: TimepointType) -> i16 {
     match value {
         TimepointType::Approximate => 0,
         TimepointType::Exact => 1,

@@ -74,7 +74,7 @@ pub async fn fetch_active_version_download_info(
 
 pub async fn fetch_version_import_info<'e, E>(
     executor: E,
-    version_id: i64,
+    version_id: i32,
 ) -> Result<FeedVersionImportInfo>
 where
     E: sqlx::Executor<'e, Database = Postgres>,
@@ -94,15 +94,16 @@ where
 
 pub async fn fetch_aggregated_stop(
     pool: &PgPool,
-    version_id: i64,
-    stop_id: &str,
+    version_id: i32,
+    stop_gtfs_id: &str,
 ) -> Result<Vec<FeedAggregatedStop>> {
     sqlx::query_as::<_, FeedAggregatedStop>(
         r#"
         WITH RECURSIVE stop_tree AS (
             SELECT
                 stop.version_id,
-                stop.stop_id,
+                stop.item_id,
+                stop.item_gtfs_id AS stop_id,
                 stop.stop_code,
                 stop.stop_name,
                 stop.stop_desc,
@@ -111,20 +112,24 @@ pub async fn fetch_aggregated_stop(
                 stop.zone_id,
                 stop.stop_url,
                 stop.location_type,
-                stop.parent_station,
+                parent_stop.item_gtfs_id AS parent_station,
                 stop.wheelchair_boarding,
                 stop.platform_code,
                 0::INTEGER AS depth,
-                ARRAY[stop.stop_id] AS path
+                ARRAY[stop.item_id] AS path
             FROM gtfs.stops stop
+            LEFT JOIN gtfs.stops parent_stop
+              ON parent_stop.version_id = stop.version_id
+             AND parent_stop.item_id = stop.parent_station_item_id
             WHERE stop.version_id = $1
-              AND stop.stop_id = $2
+              AND stop.item_gtfs_id = $2
 
             UNION ALL
 
             SELECT
                 child.version_id,
-                child.stop_id,
+                child.item_id,
+                child.item_gtfs_id AS stop_id,
                 child.stop_code,
                 child.stop_name,
                 child.stop_desc,
@@ -133,16 +138,19 @@ pub async fn fetch_aggregated_stop(
                 child.zone_id,
                 child.stop_url,
                 child.location_type,
-                child.parent_station,
+                parent_stop.item_gtfs_id AS parent_station,
                 child.wheelchair_boarding,
                 child.platform_code,
                 parent.depth + 1 AS depth,
-                parent.path || child.stop_id AS path
+                parent.path || child.item_id AS path
             FROM gtfs.stops child
             JOIN stop_tree parent
               ON parent.version_id = child.version_id
-             AND parent.stop_id = child.parent_station
-            WHERE NOT child.stop_id = ANY(parent.path)
+             AND parent.item_id = child.parent_station_item_id
+            LEFT JOIN gtfs.stops parent_stop
+              ON parent_stop.version_id = child.version_id
+             AND parent_stop.item_id = child.parent_station_item_id
+            WHERE NOT child.item_id = ANY(parent.path)
         )
         SELECT
             stop_tree.version_id,
@@ -158,61 +166,76 @@ pub async fn fetch_aggregated_stop(
             stop_tree.parent_station,
             stop_tree.wheelchair_boarding,
             stop_tree.platform_code,
-            COALESCE(route_refs.route_ids, ARRAY[]::TEXT[]) AS route_ids,
+            COALESCE(route_ids.route_ids, ARRAY[]::TEXT[]) AS route_ids,
             stop_tree.depth
         FROM stop_tree
         LEFT JOIN gtfs.stop_route_agg_refs route_refs
           ON route_refs.version_id = stop_tree.version_id
-         AND route_refs.stop_id = stop_tree.stop_id
+         AND route_refs.stop_item_id = stop_tree.item_id
+        LEFT JOIN LATERAL (
+            SELECT ARRAY_AGG(route.item_gtfs_id ORDER BY route.item_gtfs_id) AS route_ids
+            FROM unnest(route_refs.route_item_ids) route_ref(route_item_id)
+            JOIN gtfs.routes route
+              ON route.version_id = stop_tree.version_id
+             AND route.item_id = route_ref.route_item_id
+        ) route_ids ON TRUE
         ORDER BY stop_tree.depth, stop_tree.stop_id
         "#,
     )
     .bind(version_id)
-    .bind(stop_id)
+    .bind(stop_gtfs_id)
     .fetch_all(pool)
     .await
     .with_context(|| {
         format!(
             "failed to fetch aggregated GTFS stop {}/{}",
-            version_id, stop_id
+            version_id, stop_gtfs_id
         )
     })
 }
 
 pub async fn fetch_route(
     pool: &PgPool,
-    version_id: i64,
-    route_id: &str,
+    version_id: i32,
+    route_gtfs_id: &str,
 ) -> Result<Option<FeedRoute>> {
     sqlx::query_as::<_, FeedRoute>(
         r#"
         SELECT
-            version_id,
-            route_id,
-            agency_id,
-            route_short_name,
-            route_long_name,
-            route_desc,
-            route_type,
-            route_url,
-            route_color,
-            route_text_color
-        FROM gtfs.routes
-        WHERE version_id = $1
-          AND route_id = $2
+            route.version_id,
+            route.item_gtfs_id AS route_id,
+            agency.item_gtfs_id AS agency_id,
+            route.route_short_name,
+            route.route_long_name,
+            route.route_desc,
+            route.route_type,
+            route.route_url,
+            route.route_color,
+            route.route_text_color
+        FROM gtfs.routes route
+        LEFT JOIN gtfs.agency agency
+          ON agency.version_id = route.version_id
+         AND agency.item_id = route.agency_item_id
+        WHERE route.version_id = $1
+          AND route.item_gtfs_id = $2
         "#,
     )
     .bind(version_id)
-    .bind(route_id)
+    .bind(route_gtfs_id)
     .fetch_optional(pool)
     .await
-    .with_context(|| format!("failed to fetch GTFS route {}/{}", version_id, route_id))
+    .with_context(|| {
+        format!(
+            "failed to fetch GTFS route {}/{}",
+            version_id, route_gtfs_id
+        )
+    })
 }
 
 /// Like `fetch_version_import_info`, but locks via `FOR UPDATE`.
 async fn fetch_version_import_info_for_update(
     tx: &mut Transaction<'_, Postgres>,
-    version_id: i64,
+    version_id: i32,
 ) -> Result<FeedVersionImportInfo> {
     sqlx::query_as::<_, FeedVersionImportInfo>(
         r#"
@@ -348,7 +371,7 @@ pub async fn create_downloaded_version(
 
 pub async fn update_version_http_download_info(
     pool: &PgPool,
-    version_id: i64,
+    version_id: i32,
     http_etag: Option<&str>,
     http_last_modified: Option<&str>,
 ) -> Result<()> {
@@ -375,7 +398,7 @@ pub async fn update_version_http_download_info(
 /// - Errors if the version is not in `downloaded` or `import_failed` state
 pub async fn import_feed_version_from_zip<R>(
     pool: &PgPool,
-    version_id: i64,
+    version_id: i32,
     zip_archive: ZipArchive<R>,
 ) -> Result<()>
 where
@@ -433,7 +456,7 @@ where
 
 /// Marks a feed version state as `import_failed`
 /// - Performs a no-op if the version is in `active` or in the `imported` state.
-pub async fn mark_import_failed(pool: &PgPool, version_id: i64, error_message: &str) -> Result<()> {
+pub async fn mark_import_failed(pool: &PgPool, version_id: i32, error_message: &str) -> Result<()> {
     sqlx::query(
         r#"
         UPDATE gtfs_meta.feed_versions
@@ -461,7 +484,7 @@ pub enum PromoteVersionOutcome {
 
 /// Promotes a feed version to the active state, handling the de-promotion of a previous active version.
 /// - Will not promote if the active version was fetched more recently than the promotion candidate
-pub async fn promote_feed_version(pool: &PgPool, version_id: i64) -> Result<PromoteVersionOutcome> {
+pub async fn promote_feed_version(pool: &PgPool, version_id: i32) -> Result<PromoteVersionOutcome> {
     let mut tx = pool
         .begin()
         .await

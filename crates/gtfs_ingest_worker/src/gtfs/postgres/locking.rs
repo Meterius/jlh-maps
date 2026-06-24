@@ -10,7 +10,7 @@ pub async fn lock_feed_source(
 
 pub async fn lock_feed_version(
     tx: &mut Transaction<'_, Postgres>,
-    version_id: i64,
+    version_id: i32,
 ) -> anyhow::Result<()> {
     lock_name(tx, &format!("gtfs_feed_version:{version_id}")).await
 }

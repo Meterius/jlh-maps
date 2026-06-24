@@ -58,7 +58,7 @@ async fn get_osm_element(
 #[get("/gtfs/version/{version_id}/aggregated-stop/{stop_id:.*}")]
 async fn get_gtfs_aggregated_stop(
     data: web::Data<AppState>,
-    path: web::Path<(i64, String)>,
+    path: web::Path<(i32, String)>,
 ) -> Result<web::Json<AggregatedStop>, Error> {
     let (version_id, stop_id) = path.into_inner();
 
@@ -76,7 +76,7 @@ async fn get_gtfs_aggregated_stop(
 #[get("/gtfs/version/{version_id}/route/{route_id:.*}")]
 async fn get_gtfs_route(
     data: web::Data<AppState>,
-    path: web::Path<(i64, String)>,
+    path: web::Path<(i32, String)>,
 ) -> Result<web::Json<GtfsRoute>, Error> {
     let (version_id, route_id) = path.into_inner();
 

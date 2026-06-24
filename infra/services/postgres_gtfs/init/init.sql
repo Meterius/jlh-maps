@@ -19,7 +19,7 @@ CREATE TABLE gtfs_meta.feed_sources
     license_url         TEXT,
     attribution         TEXT,
 
-    active_version_id   BIGINT,
+    active_version_id   INTEGER,
 
     created_at          TIMESTAMPTZ NOT NULL,
     updated_at          TIMESTAMPTZ NOT NULL
@@ -27,7 +27,7 @@ CREATE TABLE gtfs_meta.feed_sources
 
 CREATE TABLE gtfs_meta.feed_versions
 (
-    id                 BIGSERIAL PRIMARY KEY,
+    id                 SERIAL PRIMARY KEY,
     source_id          BIGINT      NOT NULL REFERENCES gtfs_meta.feed_sources (id) ON DELETE CASCADE,
 
     download_url       TEXT        NOT NULL,
@@ -64,19 +64,23 @@ ALTER TABLE gtfs_meta.feed_sources
 
 CREATE TABLE gtfs.agency
 (
-    version_id      BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    agency_id       TEXT,
+    version_id      INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    item_id         INTEGER NOT NULL,
+    item_gtfs_id    TEXT,
     agency_name     TEXT,
     agency_url      TEXT,
     agency_timezone TEXT,
     agency_lang     TEXT,
-    agency_phone    TEXT
+    agency_phone    TEXT,
+    PRIMARY KEY (version_id, item_id),
+    UNIQUE (version_id, item_gtfs_id)
 );
 
 CREATE TABLE gtfs.stops
 (
-    version_id          BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    stop_id             TEXT   NOT NULL,
+    version_id          INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    item_id             INTEGER NOT NULL,
+    item_gtfs_id        TEXT    NOT NULL,
     stop_code           TEXT,
     stop_name           TEXT,
     stop_desc           TEXT,
@@ -85,54 +89,56 @@ CREATE TABLE gtfs.stops
     zone_id             TEXT,
     stop_url            TEXT,
     location_type       INTEGER,
-    parent_station      TEXT,
+    parent_station_item_id INTEGER,
     wheelchair_boarding INTEGER,
     platform_code       TEXT,
-    PRIMARY KEY (version_id, stop_id)
+    PRIMARY KEY (version_id, item_id),
+    UNIQUE (version_id, item_gtfs_id)
 );
 
-CREATE INDEX gtfs_stops_version_parent_station_idx ON gtfs.stops (version_id, parent_station)
-    WHERE parent_station IS NOT NULL;
+CREATE INDEX gtfs_stops_version_parent_station_item_idx ON gtfs.stops (version_id, parent_station_item_id)
+    WHERE parent_station_item_id IS NOT NULL;
 
 CREATE TABLE gtfs.stop_route_refs
 (
-    version_id BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    stop_id    TEXT   NOT NULL,
-    route_id   TEXT   NOT NULL,
-    PRIMARY KEY (version_id, stop_id, route_id)
+    version_id INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    stop_item_id  INTEGER NOT NULL,
+    route_item_id INTEGER NOT NULL,
+    PRIMARY KEY (version_id, stop_item_id, route_item_id)
 );
 
 CREATE VIEW gtfs.stop_route_agg_refs AS
 SELECT
     stop.version_id,
-    stop.stop_id,
+    stop.item_id AS stop_item_id,
     ARRAY(
-        SELECT DISTINCT route_ref.route_id
+        SELECT DISTINCT route_ref.route_item_id
         FROM (
-            SELECT own_ref.route_id
+            SELECT own_ref.route_item_id
             FROM gtfs.stop_route_refs own_ref
             WHERE own_ref.version_id = stop.version_id
-              AND own_ref.stop_id = stop.stop_id
+              AND own_ref.stop_item_id = stop.item_id
 
             UNION
 
-            SELECT child_ref.route_id
+            SELECT child_ref.route_item_id
             FROM gtfs.stops child_stop
             JOIN gtfs.stop_route_refs child_ref
               ON child_ref.version_id = child_stop.version_id
-             AND child_ref.stop_id = child_stop.stop_id
+             AND child_ref.stop_item_id = child_stop.item_id
             WHERE child_stop.version_id = stop.version_id
-              AND child_stop.parent_station = stop.stop_id
+              AND child_stop.parent_station_item_id = stop.item_id
         ) route_ref
-        ORDER BY route_ref.route_id
-    ) AS route_ids
+        ORDER BY route_ref.route_item_id
+    ) AS route_item_ids
 FROM gtfs.stops stop;
 
 CREATE TABLE gtfs.routes
 (
-    version_id       BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    route_id         TEXT   NOT NULL,
-    agency_id        TEXT,
+    version_id       INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    item_id          INTEGER NOT NULL,
+    item_gtfs_id     TEXT    NOT NULL,
+    agency_item_id   INTEGER,
     route_short_name TEXT,
     route_long_name  TEXT,
     route_desc       TEXT,
@@ -140,54 +146,67 @@ CREATE TABLE gtfs.routes
     route_url        TEXT,
     route_color      TEXT,
     route_text_color TEXT,
-    PRIMARY KEY (version_id, route_id)
+    PRIMARY KEY (version_id, item_id),
+    UNIQUE (version_id, item_gtfs_id)
 );
 
 CREATE TABLE gtfs.trips
 (
-    version_id    BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    route_id      TEXT,
-    service_id    TEXT,
-    trip_id       TEXT   NOT NULL,
+    version_id    INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    item_id       INTEGER NOT NULL,
+    item_gtfs_id  TEXT   NOT NULL,
+    route_item_id INTEGER,
+    service_item_id INTEGER,
     trip_headsign TEXT,
     direction_id  INTEGER,
     block_id      TEXT,
-    shape_id      TEXT,
-    PRIMARY KEY (version_id, trip_id)
+    shape_item_id INTEGER,
+    PRIMARY KEY (version_id, item_id),
+    UNIQUE (version_id, item_gtfs_id)
 );
 
 CREATE TABLE gtfs.stop_times
 (
-    version_id          BIGINT  NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    trip_id             TEXT    NOT NULL,
-    arrival_time        TEXT,
-    departure_time      TEXT,
-    stop_id             TEXT,
-    stop_sequence       INTEGER NOT NULL,
-    pickup_type         INTEGER,
-    drop_off_type       INTEGER,
+    version_id          INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    trip_item_id        INTEGER NOT NULL,
+    arrival_time        INTEGER,
+    departure_time      INTEGER,
+    stop_item_id        INTEGER,
+    stop_sequence       SMALLINT NOT NULL,
+    pickup_type         SMALLINT,
+    drop_off_type       SMALLINT,
     shape_dist_traveled DOUBLE PRECISION,
-    timepoint           INTEGER,
-    PRIMARY KEY (version_id, trip_id, stop_sequence)
+    timepoint           SMALLINT,
+    PRIMARY KEY (version_id, trip_item_id, stop_sequence)
 );
 
-CREATE INDEX gtfs_stop_times_version_stop_idx ON gtfs.stop_times (version_id, stop_id);
+CREATE INDEX gtfs_stop_times_version_stop_idx ON gtfs.stop_times (version_id, stop_item_id);
 
 CREATE TABLE gtfs.shapes
 (
-    version_id          BIGINT  NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    shape_id            TEXT    NOT NULL,
+    version_id   INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    item_id      INTEGER NOT NULL,
+    item_gtfs_id TEXT    NOT NULL,
+    PRIMARY KEY (version_id, item_id),
+    UNIQUE (version_id, item_gtfs_id)
+);
+
+CREATE TABLE gtfs.shape_points
+(
+    version_id          INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    shape_item_id       INTEGER NOT NULL,
     shape_pt_lat        DOUBLE PRECISION,
     shape_pt_lon        DOUBLE PRECISION,
     shape_pt_sequence   INTEGER NOT NULL,
     shape_dist_traveled DOUBLE PRECISION,
-    PRIMARY KEY (version_id, shape_id, shape_pt_sequence)
+    PRIMARY KEY (version_id, shape_item_id, shape_pt_sequence)
 );
 
 CREATE TABLE gtfs.calendar
 (
-    version_id BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    service_id TEXT   NOT NULL,
+    version_id   INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    item_id      INTEGER NOT NULL,
+    item_gtfs_id TEXT   NOT NULL,
     monday     BOOLEAN,
     tuesday    BOOLEAN,
     wednesday  BOOLEAN,
@@ -197,21 +216,23 @@ CREATE TABLE gtfs.calendar
     sunday     BOOLEAN,
     start_date TEXT,
     end_date   TEXT,
-    PRIMARY KEY (version_id, service_id)
+    PRIMARY KEY (version_id, item_id),
+    UNIQUE (version_id, item_gtfs_id)
 );
 
 CREATE TABLE gtfs.calendar_dates
 (
-    version_id     BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
-    service_id     TEXT   NOT NULL,
+    version_id     INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    service_item_id INTEGER NOT NULL,
     date           TEXT   NOT NULL,
     exception_type INTEGER,
-    PRIMARY KEY (version_id, service_id, date)
+    PRIMARY KEY (version_id, service_item_id, date)
 );
 
 CREATE TABLE gtfs.feed_info
 (
-    version_id          BIGINT NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    version_id          INTEGER NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    item_id             INTEGER NOT NULL,
     feed_publisher_name TEXT,
     feed_publisher_url  TEXT,
     feed_lang           TEXT,
@@ -220,7 +241,8 @@ CREATE TABLE gtfs.feed_info
     feed_end_date       TEXT,
     feed_version        TEXT,
     feed_contact_email  TEXT,
-    feed_contact_url    TEXT
+    feed_contact_url    TEXT,
+    PRIMARY KEY (version_id, item_id)
 );
 
 --- Tiling Tables ---
@@ -228,7 +250,7 @@ CREATE TABLE gtfs.feed_info
 CREATE TABLE gtfs_tiling.source_tilings
 (
     source_id    BIGINT PRIMARY KEY REFERENCES gtfs_meta.feed_sources (id) ON DELETE CASCADE,
-    version_id   BIGINT      NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
+    version_id   INTEGER     NOT NULL REFERENCES gtfs_meta.feed_versions (id) ON DELETE CASCADE,
     generated_at TIMESTAMPTZ NOT NULL,
 
     UNIQUE (source_id, version_id)
@@ -237,12 +259,12 @@ CREATE TABLE gtfs_tiling.source_tilings
 CREATE TABLE gtfs_tiling.stop_points
 (
     source_id  BIGINT                NOT NULL,
-    version_id BIGINT                NOT NULL,
+    version_id INTEGER               NOT NULL,
     feature_id BIGINT                NOT NULL,
-    stop_id    TEXT                  NOT NULL,
+    stop_item_id INTEGER             NOT NULL,
     geom       geometry(Point, 4326) NOT NULL,
 
-    PRIMARY KEY (source_id, version_id, stop_id),
+    PRIMARY KEY (source_id, version_id, stop_item_id),
     UNIQUE (source_id, version_id, feature_id),
     FOREIGN KEY (source_id, version_id)
         REFERENCES gtfs_tiling.source_tilings (source_id, version_id)

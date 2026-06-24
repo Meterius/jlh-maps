@@ -19,8 +19,8 @@ pub enum SyncTilingStatus {
 
 #[derive(Debug, Clone)]
 pub struct SyncTilingSourceOutcome {
-    pub previous_tiled_version_id: Option<i64>,
-    pub tiled_version_id: Option<i64>,
+    pub previous_tiled_version_id: Option<i32>,
+    pub tiled_version_id: Option<i32>,
     pub status: SyncTilingStatus,
 }
 
@@ -273,18 +273,22 @@ pub fn stream_export_tiles<'a>(
                         stop_point.feature_id,
                         stop_point.version_id,
                         tiling.source_slug,
-                        stop_point.stop_id,
+                        stop_point.stop_item_id,
+                        stop.item_gtfs_id AS stop_id,
                         stop.stop_code,
                         stop.stop_name,
                         stop.stop_desc,
-                        stop.parent_station as parent_station_id,
+                        parent_stop.item_gtfs_id AS parent_station_id,
                         stop.location_type,
                         stop.wheelchair_boarding,
                         stop.platform_code
                     FROM gtfs_tiling.stop_points stop_point
                     JOIN gtfs.stops stop
-                      ON stop.stop_id = stop_point.stop_id
+                      ON stop.item_id = stop_point.stop_item_id
                      AND stop.version_id = stop_point.version_id
+                    LEFT JOIN gtfs.stops parent_stop
+                      ON parent_stop.version_id = stop.version_id
+                     AND parent_stop.item_id = stop.parent_station_item_id
                     JOIN selected_tilings tiling
                       ON tiling.source_id = stop_point.source_id
                      AND tiling.version_id = stop_point.version_id
@@ -294,20 +298,20 @@ pub fn stream_export_tiles<'a>(
                 route_summaries AS (
                     SELECT
                         stop_route_agg_ref.version_id,
-                        stop_route_agg_ref.stop_id,
+                        stop_route_agg_ref.stop_item_id,
                         string_agg(DISTINCT route.route_type::TEXT, ',' ORDER BY route.route_type::TEXT)
                             FILTER (WHERE route.route_type IS NOT NULL) AS route_types,
-                        cardinality(stop_route_agg_ref.route_ids)::INTEGER AS route_count
+                        cardinality(stop_route_agg_ref.route_item_ids)::INTEGER AS route_count
                     FROM tile_stop_features feature
                     JOIN gtfs.stop_route_agg_refs stop_route_agg_ref
                       ON stop_route_agg_ref.version_id = feature.version_id
-                     AND stop_route_agg_ref.stop_id = feature.stop_id
-                    LEFT JOIN LATERAL unnest(stop_route_agg_ref.route_ids) route_ref(route_id)
+                     AND stop_route_agg_ref.stop_item_id = feature.stop_item_id
+                    LEFT JOIN LATERAL unnest(stop_route_agg_ref.route_item_ids) route_ref(route_item_id)
                       ON TRUE
                     LEFT JOIN gtfs.routes route
                       ON route.version_id = stop_route_agg_ref.version_id
-                     AND route.route_id = route_ref.route_id
-                    GROUP BY stop_route_agg_ref.version_id, stop_route_agg_ref.stop_id, stop_route_agg_ref.route_ids
+                     AND route.item_id = route_ref.route_item_id
+                    GROUP BY stop_route_agg_ref.version_id, stop_route_agg_ref.stop_item_id, stop_route_agg_ref.route_item_ids
                 )
                 SELECT ST_AsMVT(stop_feature, 'stops', 4096, 'geom', 'feature_id') AS tile
                 FROM (
@@ -329,7 +333,7 @@ pub fn stream_export_tiles<'a>(
                     FROM tile_stop_features feature
                     LEFT JOIN route_summaries route_summary
                       ON route_summary.version_id = feature.version_id
-                     AND route_summary.stop_id = feature.stop_id
+                     AND route_summary.stop_item_id = feature.stop_item_id
                     WHERE feature.geom IS NOT NULL
                 ) stop_feature
             ) tile_data
@@ -352,8 +356,8 @@ pub fn stream_export_tiles<'a>(
 struct TilingSourceState {
     source_id: i64,
     source_slug: String,
-    active_version_id: Option<i64>,
-    tiled_version_id: Option<i64>,
+    active_version_id: Option<i32>,
+    tiled_version_id: Option<i32>,
 }
 
 async fn fetch_tiling_source_state_for_update(
@@ -404,7 +408,7 @@ async fn delete_source_tiling(tx: &mut Transaction<'_, Postgres>, source_id: i64
 async fn insert_source_tiling(
     tx: &mut Transaction<'_, Postgres>,
     source_id: i64,
-    version_id: i64,
+    version_id: i32,
 ) -> Result<()> {
     sqlx::query(
         r#"
@@ -448,7 +452,7 @@ async fn drop_tiling_feature_id_sequence(tx: &mut Transaction<'_, Postgres>) -> 
 async fn import_source_tiling_data(
     tx: &mut Transaction<'_, Postgres>,
     source_id: i64,
-    version_id: i64,
+    version_id: i32,
 ) -> Result<()> {
     import_source_tiling_stop_points(tx, source_id, version_id).await?;
     Ok(())
@@ -457,7 +461,7 @@ async fn import_source_tiling_data(
 async fn import_source_tiling_stop_points(
     tx: &mut Transaction<'_, Postgres>,
     source_id: i64,
-    version_id: i64,
+    version_id: i32,
 ) -> Result<()> {
     sqlx::query(
         r#"
@@ -465,14 +469,14 @@ async fn import_source_tiling_stop_points(
             source_id,
             version_id,
             feature_id,
-            stop_id,
+            stop_item_id,
             geom
         )
         SELECT
             $1,
             $2,
             nextval('gtfs_tiling_feature_id_seq')::BIGINT,
-            stop_id,
+            item_id,
             ST_SetSRID(ST_MakePoint(stop_lon, stop_lat), 4326)
         FROM gtfs.stops
         WHERE version_id = $2

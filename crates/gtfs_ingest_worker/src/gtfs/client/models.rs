@@ -4,7 +4,7 @@ use serde::Serialize;
 /// Client-facing view of a GTFS feed version lifecycle row.
 #[derive(Debug, Clone, Serialize)]
 pub struct FeedVersion {
-    pub id: i64,
+    pub id: i32,
     pub source_id: i64,
     pub download_url: String,
     pub content_sha256: String,
@@ -29,7 +29,7 @@ impl From<FeedVersionImportInfo> for FeedVersion {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AggregatedStop {
-    pub version_id: i64,
+    pub version_id: i32,
     pub stop_id: String,
     pub stop_code: Option<String>,
     pub stop_name: Option<String>,
@@ -84,7 +84,7 @@ impl AggregatedStop {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Route {
-    pub version_id: i64,
+    pub version_id: i32,
     pub route_id: String,
     pub agency_id: Option<String>,
     pub route_short_name: Option<String>,

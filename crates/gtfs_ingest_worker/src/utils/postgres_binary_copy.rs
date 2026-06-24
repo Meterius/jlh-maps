@@ -233,6 +233,12 @@ impl BinaryCopyValue for i32 {
     }
 }
 
+impl BinaryCopyValue for i16 {
+    fn write_to(self, buffer: &mut BinaryCopyInBuffer) {
+        buffer.write_bytes(&self.to_be_bytes());
+    }
+}
+
 impl BinaryCopyValue for f64 {
     fn write_to(self, buffer: &mut BinaryCopyInBuffer) {
         buffer.write_bytes(&self.to_bits().to_be_bytes());

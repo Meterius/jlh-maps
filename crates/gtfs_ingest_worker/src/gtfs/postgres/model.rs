@@ -11,7 +11,7 @@ pub struct FeedSourceDownloadInfo {
 /// Feed version data used to import and promote a feed version
 #[derive(Debug, Clone, FromRow)]
 pub struct FeedVersionImportInfo {
-    pub id: i64,
+    pub id: i32,
     pub source_id: i64,
     pub download_url: String,
     pub content_sha256: String,
@@ -23,7 +23,7 @@ pub struct FeedVersionImportInfo {
 /// Active version fields needed to make conditional feed download requests.
 #[derive(Debug, Clone, FromRow)]
 pub struct FeedVersionDownloadInfo {
-    pub id: i64,
+    pub id: i32,
     pub content_sha256: String,
     pub http_etag: Option<String>,
     pub http_last_modified: Option<String>,
@@ -32,7 +32,7 @@ pub struct FeedVersionDownloadInfo {
 /// GTFS stop row with derived route ids, used by the read-only GTFS client.
 #[derive(Debug, Clone, FromRow)]
 pub struct FeedAggregatedStop {
-    pub version_id: i64,
+    pub version_id: i32,
     pub stop_id: String,
     pub stop_code: Option<String>,
     pub stop_name: Option<String>,
@@ -52,7 +52,7 @@ pub struct FeedAggregatedStop {
 /// GTFS route row used by the read-only GTFS client.
 #[derive(Debug, Clone, FromRow)]
 pub struct FeedRoute {
-    pub version_id: i64,
+    pub version_id: i32,
     pub route_id: String,
     pub agency_id: Option<String>,
     pub route_short_name: Option<String>,
