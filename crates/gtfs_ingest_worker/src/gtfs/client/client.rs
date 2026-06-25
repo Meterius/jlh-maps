@@ -1,7 +1,7 @@
 use crate::gtfs::artifact_store::{
     ArtifactStore, ArtifactStoreConfig as InternalArtifactStoreConfig, ArtifactStoreConfig,
 };
-use crate::gtfs::client::models::{AggregatedStop, Route};
+use crate::gtfs::client::models::{AggregatedStop, TilingTripLine, Route};
 use crate::gtfs::postgres;
 use anyhow::{Context, Result};
 use sqlx::PgPool;
@@ -81,6 +81,16 @@ impl GtfsClient {
     ) -> Result<Option<AggregatedStop>> {
         let rows = postgres::fetch_aggregated_stop(&self.pool, version_id, stop_id).await?;
         Ok(AggregatedStop::from_postgres_rows(rows))
+    }
+
+    pub async fn fetch_aggregated_stop_trip_lines(
+        &self,
+        version_id: i32,
+        stop_id: &str,
+    ) -> Result<Vec<TilingTripLine>> {
+        let rows =
+            postgres::fetch_aggregated_stop_trip_lines(&self.pool, version_id, stop_id).await?;
+        Ok(rows.into_iter().map(|row| row.into()).collect())
     }
 
     pub async fn fetch_route(&self, version_id: i32, route_id: &str) -> Result<Option<Route>> {

@@ -1,3 +1,5 @@
+use anyhow::{Context, bail};
+use geozero::wkb;
 use sqlx::FromRow;
 
 /// Feed source data used to download and create a new feed version
@@ -62,4 +64,49 @@ pub struct FeedRoute {
     pub route_url: Option<String>,
     pub route_color: Option<String>,
     pub route_text_color: Option<String>,
+}
+
+/// GTFS route row used by the read-only GTFS client.
+#[derive(Debug, Clone)]
+pub struct TilingTripLine {
+    pub version_id: i32,
+    pub feature_id: i64,
+    pub route_id: String,
+    pub route_color: Option<String>,
+    pub route_text_color: Option<String>,
+    pub geom: geo_types::LineString<f64>,
+}
+
+// Intermediates
+
+#[derive(FromRow)]
+pub struct TilingTripLineRaw {
+    pub version_id: i32,
+    pub feature_id: i64,
+    pub route_id: String,
+    pub route_color: Option<String>,
+    pub route_text_color: Option<String>,
+    pub geom: wkb::Decode<geo_types::Geometry<f64>>,
+}
+
+impl TryInto<TilingTripLine> for TilingTripLineRaw {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<TilingTripLine, Self::Error> {
+        Ok(TilingTripLine {
+            version_id: self.version_id,
+            feature_id: self.feature_id,
+            route_id: self.route_id,
+            route_color: self.route_color,
+            route_text_color: self.route_text_color,
+            geom: match self
+                .geom
+                .geometry
+                .with_context(|| "Could not parse 'geom'")?
+            {
+                geo_types::Geometry::LineString(line) => line,
+                _ => bail!("Expected LineString"),
+            },
+        })
+    }
 }

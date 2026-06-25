@@ -6,12 +6,12 @@ use super::{
     },
 };
 use crate::gtfs::postgres::locking::{lock_feed_source, lock_feed_version};
+use crate::gtfs::postgres::model::{TilingTripLine, TilingTripLineRaw};
 use crate::model::SeedFile;
 use anyhow::{Context, Result, bail};
 use sqlx::{PgPool, Postgres, Transaction};
 use std::io::{Read, Seek};
 use zip::ZipArchive;
-
 // Queries
 
 pub async fn list_feed_source_slugs(pool: &PgPool) -> Result<Vec<String>> {
@@ -192,6 +192,39 @@ pub async fn fetch_aggregated_stop(
             version_id, stop_gtfs_id
         )
     })
+}
+
+pub async fn fetch_aggregated_stop_trip_lines(
+    pool: &PgPool,
+    version_id: i32,
+    stop_gtfs_id: &str,
+) -> Result<Vec<TilingTripLine>> {
+    sqlx::query_as::<_, TilingTripLineRaw>(
+        r#"
+        SELECT trip_line.version_id, trip_line.feature_id, route.item_id, route.route_color, route.route_text_color, trip_line.geom
+        FROM gtfs.stops stop
+        JOIN gtfs.stop_route_agg_refs refs
+        ON refs.version_id = $1 AND refs.stop_item_id = stop.item_id
+        CROSS JOIN UNNEST(refs.route_item_ids) route_ref(route_item_id)
+        JOIN gtfs_tiling.trip_lines trip_line
+        ON trip_line.version_id = $1 AND trip_line.route_item_id = route_ref.route_item_id
+        JOIN gtfs.routes route
+        ON route.version_id = $1 AND route.item_id = route_ref.route_item_id
+        WHERE stop.version_id = $1 AND stop.item_id = $2
+        "#,
+    )
+        .bind(version_id)
+        .bind(stop_gtfs_id)
+        .fetch_all(pool)
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|rows| rows.into_iter().map(|row| row.try_into()).collect())
+        .with_context(|| {
+            format!(
+                "failed to fetch aggregated GTFS stop trip lines {}/{}",
+                version_id, stop_gtfs_id
+            )
+        })
 }
 
 pub async fn fetch_route(

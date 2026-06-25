@@ -13,6 +13,8 @@ chrono = "0.4.42"
 clap = { version = "4.6.1", features = ["derive", "env"] }
 csv = "1.3.1"
 futures-util = "0.3.31"
+geo-types = { version = "0.7.19", features = ["serde"] }
+geozero = { version = "0.15.1", features = ["with-postgis-sqlx"] }
 gtfs-structures = { version = "0.48.0", default-features = false }
 pmtiles = { version = "0.23.0", default-features = false, features = ["write"] }
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "cookies"] }

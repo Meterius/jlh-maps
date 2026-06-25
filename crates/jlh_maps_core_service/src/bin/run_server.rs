@@ -9,6 +9,7 @@ use actix_web::{
 };
 use gtfs_ingest_worker::gtfs::client::{
     AggregatedStop, GtfsClient, GtfsConfig, Route as GtfsRoute,
+    TilingTripLine
 };
 use jlh_maps_core_service::model::UnitablePartial;
 use jlh_maps_core_service::model::postgres_osm::prelude::*;
@@ -89,6 +90,24 @@ async fn get_gtfs_route(
 
     item.map(web::Json)
         .ok_or(ErrorNotFound("GTFS route not found"))
+}
+
+
+#[get("/gtfs/version/{version_id}/tiling/aggregated-stops/{stop_id:.*}/trip-lines")]
+async fn get_gtfs_aggregated_stop_trip_lines(
+    data: web::Data<AppState>,
+    path: web::Path<(i32, String)>,
+) -> Result<web::Json<Vec<TilingTripLine>>, Error> {
+    let (version_id, route_id) = path.into_inner();
+
+    let item = data
+        .gtfs_client
+        .fetch_aggregated_stop_trip_lines(version_id, &route_id)
+        .await
+        .inspect_err(|err| error!("Error fetching GTFS route: {:?}", err))
+        .map_err(ErrorInternalServerError)?;
+
+    Ok(web::Json(item))
 }
 
 #[actix_web::main]

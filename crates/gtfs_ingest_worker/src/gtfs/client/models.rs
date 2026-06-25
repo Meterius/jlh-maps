@@ -112,3 +112,26 @@ impl From<FeedRoute> for Route {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TilingTripLine {
+    pub version_id: i32,
+    pub feature_id: i64,
+    pub route_id: String,
+    pub route_color: Option<String>,
+    pub route_text_color: Option<String>,
+    pub geom: geo_types::LineString<f64>,
+}
+
+impl From<crate::gtfs::postgres::TilingTripLine> for TilingTripLine {
+    fn from(record: crate::gtfs::postgres::TilingTripLine) -> Self {
+        Self {
+            version_id: record.version_id,
+            feature_id: record.feature_id,
+            route_id: record.route_id,
+            route_color: record.route_color.map(|color| format!("#{color}")),
+            route_text_color: record.route_text_color.map(|color| format!("#{color}")),
+            geom: record.geom,
+        }
+    }
+}
