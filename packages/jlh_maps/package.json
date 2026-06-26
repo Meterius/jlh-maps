@@ -47,7 +47,7 @@
     "lodash": "^4.18.1",
     "lru-cache": "^11.5.1",
     "lucide-static": "^1.16.0",
-    "maplibre-gl": "github:Meterius/jlh-maps-maplibre-gl-js#19e07617",
+    "maplibre-gl": "https://github.com/Meterius/jlh-maps-maplibre-gl-js/archive/19e07617081025b78fdd8ae3e1ed52556c2437a3.tar.gz",
     "opening_hours": "^3.12.0",
     "pinia": "^3.0.4",
     "pmtiles": "^4.4.1",
