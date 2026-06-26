@@ -28,6 +28,7 @@ where
     delete_existing_gtfs_rows(tx, version_id).await?;
     create_temporary_import_tables(tx).await?;
     copy_gtfs_to_tables(tx, &mut gtfs_zip, &mut translations, version_id).await?;
+    create_temporary_import_table_indices(tx).await?;
     update_derived_gtfs_tables(tx, version_id).await?;
 
     Ok(())
@@ -176,6 +177,19 @@ async fn create_temporary_import_tables(tx: &mut Transaction<'_, Postgres>) -> R
     .execute(&mut **tx)
     .await
     .context("failed to create temporary GTFS shape_points staging table")?;
+
+    Ok(())
+}
+
+async fn create_temporary_import_table_indices(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
+    sqlx::query(
+        r#"
+        CREATE INDEX ON pg_temp.import_stop_times (version_id, trip_item_id, stop_item_id);
+        "#,
+    )
+        .execute(&mut **tx)
+        .await
+        .context("failed to create temporary index on GTFS stop_times staging table")?;
 
     Ok(())
 }
