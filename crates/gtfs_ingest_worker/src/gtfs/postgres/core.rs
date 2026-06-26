@@ -201,7 +201,13 @@ pub async fn fetch_aggregated_stop_trip_lines(
 ) -> Result<Vec<TilingTripLine>> {
     sqlx::query_as::<_, TilingTripLineRaw>(
         r#"
-        SELECT trip_line.version_id, trip_line.feature_id, route.item_id, route.route_color, route.route_text_color, trip_line.geom
+        SELECT
+            trip_line.version_id,
+            trip_line.feature_id,
+            route.item_gtfs_id AS route_id,
+            route.route_color,
+            route.route_text_color,
+            trip_line.geom
         FROM gtfs.stops stop
         JOIN gtfs.stop_route_agg_refs refs
         ON refs.version_id = $1 AND refs.stop_item_id = stop.item_id
@@ -210,21 +216,21 @@ pub async fn fetch_aggregated_stop_trip_lines(
         ON trip_line.version_id = $1 AND trip_line.route_item_id = route_ref.route_item_id
         JOIN gtfs.routes route
         ON route.version_id = $1 AND route.item_id = route_ref.route_item_id
-        WHERE stop.version_id = $1 AND stop.item_id = $2
+        WHERE stop.version_id = $1 AND stop.item_gtfs_id = $2
         "#,
     )
-        .bind(version_id)
-        .bind(stop_gtfs_id)
-        .fetch_all(pool)
-        .await
-        .map_err(anyhow::Error::from)
-        .and_then(|rows| rows.into_iter().map(|row| row.try_into()).collect())
-        .with_context(|| {
-            format!(
-                "failed to fetch aggregated GTFS stop trip lines {}/{}",
-                version_id, stop_gtfs_id
-            )
-        })
+    .bind(version_id)
+    .bind(stop_gtfs_id)
+    .fetch_all(pool)
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|rows| rows.into_iter().map(|row| row.try_into()).collect())
+    .with_context(|| {
+        format!(
+            "failed to fetch aggregated GTFS stop trip lines {}/{}",
+            version_id, stop_gtfs_id
+        )
+    })
 }
 
 pub async fn fetch_route(

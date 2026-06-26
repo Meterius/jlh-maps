@@ -8,8 +8,7 @@ use actix_web::{
     web::{self},
 };
 use gtfs_ingest_worker::gtfs::client::{
-    AggregatedStop, GtfsClient, GtfsConfig, Route as GtfsRoute,
-    TilingTripLine
+    AggregatedStop, GtfsClient, GtfsConfig, Route as GtfsRoute, TilingTripLine,
 };
 use jlh_maps_core_service::model::UnitablePartial;
 use jlh_maps_core_service::model::postgres_osm::prelude::*;
@@ -92,19 +91,18 @@ async fn get_gtfs_route(
         .ok_or(ErrorNotFound("GTFS route not found"))
 }
 
-
 #[get("/gtfs/version/{version_id}/tiling/aggregated-stops/{stop_id:.*}/trip-lines")]
 async fn get_gtfs_aggregated_stop_trip_lines(
     data: web::Data<AppState>,
     path: web::Path<(i32, String)>,
 ) -> Result<web::Json<Vec<TilingTripLine>>, Error> {
-    let (version_id, route_id) = path.into_inner();
+    let (version_id, stop_id) = path.into_inner();
 
     let item = data
         .gtfs_client
-        .fetch_aggregated_stop_trip_lines(version_id, &route_id)
+        .fetch_aggregated_stop_trip_lines(version_id, &stop_id)
         .await
-        .inspect_err(|err| error!("Error fetching GTFS route: {:?}", err))
+        .inspect_err(|err| error!("Error fetching GTFS stop trip lines: {:?}", err))
         .map_err(ErrorInternalServerError)?;
 
     Ok(web::Json(item))
@@ -144,6 +142,7 @@ async fn main() -> io::Result<()> {
             .service(get_osm_element)
             .service(get_gtfs_aggregated_stop)
             .service(get_gtfs_route)
+            .service(get_gtfs_aggregated_stop_trip_lines)
             .wrap(Cors::permissive())
             .wrap(middleware::Logger::default())
     })
